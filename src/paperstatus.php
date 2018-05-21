@@ -470,20 +470,12 @@ class PaperStatus extends MessageSet {
         }
     }
 
-    private function normalize_author($pj, $au, &$au_by_lemail) {
+    private function normalize_author($pj, $au) {
         $aux = Text::analyze_name($au);
-        $aux->first = simplify_whitespace($aux->firstName);
-        $aux->last = simplify_whitespace($aux->lastName);
+        $aux->firstName = simplify_whitespace($aux->firstName);
+        $aux->lastName = simplify_whitespace($aux->lastName);
         $aux->email = simplify_whitespace($aux->email);
         $aux->affiliation = simplify_whitespace($aux->affiliation);
-        // borrow from old author information
-        if ($aux->email && $aux->first === "" && $aux->last === "" && $this->prow
-            && ($old_au = $this->prow->author_by_email($aux->email))) {
-            $aux->first = get($old_au, "first", "");
-            $aux->last = get($old_au, "last", "");
-            if ($aux->affiliation === "")
-                $aux->affiliation = get($old_au, "affiliation", "");
-        }
         // set contactness and author index
         if (is_object($au) && isset($au->contact))
             $aux->contact = !!$au->contact;
@@ -491,12 +483,76 @@ class PaperStatus extends MessageSet {
             $aux->index = $au->index;
         else
             $aux->index = count($pj->authors) + count($pj->bad_authors);
-
-        if ($aux->first !== "" || $aux->last !== ""
+        // add in
+        if ($aux->firstName !== "" || $aux->lastName !== ""
             || $aux->email !== "" || $aux->affiliation !== "")
             $pj->authors[] = $aux;
         else
             $pj->bad_authors[] = $aux;
+    }
+
+    private function normalize_author_list($pj) {
+        // old authors
+        $oau_by_lemail = $oau_by_lname = [];
+        foreach ($this->prow ? $this->prow->author_list() : [] as $au) {
+            $lemail = strtolower($au->email);
+            if ($lemail !== "" && !array_key_exists($lemail, $oau_by_lemail))
+                $oau_by_lemail[$lemail] = $au;
+            else if ($lemail !== "")
+                $oau_by_lemail[$lemail] = null;
+            $lname = strtolower($au->name());
+            if ($lname !== "" && !array_key_exists($lname, $oau_by_lname))
+                $oau_by_lname[$lname] = $au;
+            else if ($lname !== "")
+                $oau_by_lname[$lname] = null;
+        }
+
+        // authors not previously recorded
+        $new_emails = [];
+        foreach ($pj->authors as $aux) {
+            $lemail = strtolower($aux->email);
+            if ($lemail !== "" && !isset($oau_by_lemail[$lemail]))
+                $new_emails[$lemail] = null;
+        }
+        if (!empty($new_emails)) {
+            $result = $this->conf->qe("select * from ContactInfo where email?a", array_keys($new_emails));
+            $n_loaded = 0;
+            while (($u = Contact::fetch($result, $this->conf))) {
+                $new_emails[strtolower($u->email)] = $u;
+                ++$n_loaded;
+            }
+            Dbl::free($result);
+
+            if ($n_loaded != count($new_emails) && ($dbl = Contact::contactdb())) {
+                $result = $this->conf->qe("select * from ContactInfo where email?a", array_keys($new_emails));
+                while (($u = Contact::fetch($result, $this->conf))) {
+
+                }
+            }
+        }
+
+
+        $old_au = $au_by_lemail = $want_contact = [];
+        foreach ($pj->authors as $aux) {
+            if ($aux->email !== "") {
+                $au = $this->prow ? $this->prow->author_by_email($aux->email) : null;
+                if ($au !== null)
+                    $old_au[$aux->]
+                $lemail = strtolower($aux->email);
+                $au_by_lemail[$lemail] = $aux;
+                if (!)
+            }
+
+        }
+        // borrow from old author information
+        if ($aux->email && $aux->firstName === "" && $aux->lastName === "" && $this->prow
+            && ($old_au = $this->prow->author_by_email($aux->email))) {
+            $aux->firstName = get($old_au, "first", "");
+            $aux->lastName = get($old_au, "last", "");
+            if ($aux->affiliation === "")
+                $aux->affiliation = get($old_au, "affiliation", "");
+        }
+
         if ($aux->email) {
             $lemail = strtolower($aux->email);
             $au_by_lemail[$lemail] = $aux;
@@ -649,10 +705,11 @@ class PaperStatus extends MessageSet {
             $pj->authors = [];
             foreach ($input_authors as $k => $au) {
                 if (is_string($au) || is_object($au))
-                    $this->normalize_author($pj, $au, $au_by_lemail);
+                    $this->normalize_author($pj, $au);
                 else
                     $this->format_error_at("authors", $au);
             }
+            $au_by_lemail = $this->normalize_author_list($pj);
         }
 
         // Status
@@ -824,11 +881,9 @@ class PaperStatus extends MessageSet {
 
     static private function author_information($pj) {
         $x = "";
-        foreach ($pj && get($pj, "authors") ? $pj->authors : [] as $au) {
-            $x .= get($au, "first", get($au, "firstName", "")) . "\t"
-                . get($au, "last", get($au, "lastName", "")) . "\t"
-                . get($au, "email", "") . "\t"
-                . get($au, "affiliation", "") . "\n";
+        foreach ($pj && isset($pj->authors) ? $pj->authors : [] as $au) {
+            $x .= $au->firstName . "\t" . $au->lastName . "\t" . $au->email . "\t"
+                . $au->affiliation . "\n";
         }
         return $x;
     }

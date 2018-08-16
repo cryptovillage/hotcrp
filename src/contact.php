@@ -400,6 +400,14 @@ class Contact {
         return $this;
     }
 
+    function active_session($name, $defval = null) {
+        return $this->_activated ? $this->conf->session($name, $defval) : $defval;
+    }
+    function save_active_session($name, $value) {
+        if ($this->_activated)
+            $this->conf->save_session($name, $value);
+    }
+
     function overrides() {
         return $this->_overrides;
     }
@@ -1752,6 +1760,16 @@ class Contact {
         if ($this->_activated && $new_ntokens != $old_ntokens)
             $this->conf->save_session("rev_tokens", $this->_review_tokens);
         return $new_ntokens != $old_ntokens;
+    }
+
+    function save_review_tokens($tokens) {
+        $tokens = empty($tokens) ? null : $tokens;
+        $diff = $tokens !== $this->_review_tokens;
+        $this->_review_tokens = empty($tokens) ? null : $tokens;
+        if ($diff) {
+            self::update_rights();
+            $this->save_active_session("rev_tokens", $this->_review_tokens);
+        }
     }
 
 

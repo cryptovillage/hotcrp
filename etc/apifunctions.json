@@ -62,6 +62,10 @@
         "callback": "PaperApi::reviewround_api"
     },
     {
+        "name": "reviewtokens", "post": true, "get": true,
+        "callback": "ReviewTokens_API::reviewtokens_api"
+    },
+    {
         "name": "revpref", "paper": true, "get": true, "post": true,
         "callback": "PaperApi::pref_api",
         "synonym": ["pref"]

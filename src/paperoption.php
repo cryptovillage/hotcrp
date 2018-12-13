@@ -302,6 +302,21 @@ class PaperOptionList {
     }
 }
 
+class PaperOptionUnparse {
+    public $in_page;
+    public $in_list;
+    public $in_csv;
+    public $options = [];
+    public $texts;
+    public $html;
+    public $format;
+
+    function reset() {
+        $this->texts = $this->html = null;
+        $this->format = 0;
+    }
+}
+
 class PaperOption implements Abbreviator {
     const MINFIXEDID = 1000000;
 
@@ -681,6 +696,15 @@ class PaperOption implements Abbreviator {
         return "";
     }
 
+    function unparse_value(PaperInfo $row, PaperOptionUnparse $up) {
+        $up->reset();
+        $x = $this->unparse_value_hook($row, $up);
+        if (is_string($x))
+            $up->texts = [$x];
+    }
+    function unparse_value_hook(PaperInfo $row, PaperOptionUnparse $up) {
+    }
+
     function format_spec() {
         return false;
     }
@@ -738,6 +762,22 @@ class CheckboxPaperOption extends PaperOption {
     }
     function unparse_page_text_data(PaperInfo $row, PaperOptionValue $ov) {
         return $ov->value ? "Yes" : "";
+    }
+
+    function unparse_value_hook(PaperInfo $prow, PaperOptionUnparse $up) {
+        if (($ov = $prow->option($this->id)) && $ov->value) {
+            if ($up->in_list)
+                return "✓";
+            else if ($up->in_page) {
+                $up->texts[] = "✓ " . $this->title;
+                $up->page_display = "name";
+            } else if ($up->in_csv)
+                return "Y";
+            else
+                return "Yes";
+        } else {
+            return $up->in_csv ? "N" : "";
+        }
     }
 }
 
@@ -894,21 +934,25 @@ class SelectorPaperOption extends PaperOption {
     function list_display($isrow) {
         return true;
     }
-    private function unparse_value(PaperOptionValue $ov = null) {
+    private function unparse_value_text(PaperOptionValue $ov = null) {
         return $ov ? get($this->selector, $ov->value - 1, "") : "";
     }
     function unparse_list_html(PaperList $pl, PaperInfo $row, $isrow) {
-        return htmlspecialchars($this->unparse_value($row->option($this->id)));
+        return htmlspecialchars($this->unparse_value_text($row->option($this->id)));
     }
     function unparse_list_text(PaperList $pl, PaperInfo $row) {
-        return $this->unparse_value($row->option($this->id));
+        return $this->unparse_value_text($row->option($this->id));
     }
 
     function unparse_page_html_data(PaperInfo $row, PaperOptionValue $ov) {
-        return htmlspecialchars($this->unparse_value($ov));
+        return htmlspecialchars($this->unparse_value_text($ov));
     }
     function unparse_page_text_data(PaperInfo $row, PaperOptionValue $ov) {
-        return $this->unparse_value($ov);
+        return $this->unparse_value_text($ov);
+    }
+
+    function unparse_value_hook(PaperInfo $prow, PaperOptionUnparse $up) {
+        return $this->unparse_value_text($prow->option($this->id));
     }
 }
 
@@ -1020,6 +1064,19 @@ class DocumentPaperOption extends PaperOption {
         } else
             return false;
     }
+    function unparse_value_hook(PaperInfo $prow, PaperOptionUnparse $up) {
+        if (($d = $this->first_document($prow->option($this->id)))) {
+            if ($up->in_page) {
+                $diflags = $this->display() === self::DISP_SUBMISSION ? 0 : DocumentInfo::L_SMALL;
+                $up->texts[] = $d->link_html('<span class="pavfn">' . htmlspecialchars($this->title) . '</span>', $diflags);
+                $up->format = 2;
+            } else if ($up->in_list) {
+                $up->texts[] = $d->link_html("", DocumentInfo::L_SMALL | DocumentInfo::L_NOSIZE);
+                $up->format = 2;
+            } else
+                return $d->filename;
+        }
+    }
 
     function format_spec() {
         $speckey = "sub_banal";
@@ -1090,20 +1147,23 @@ class NumericPaperOption extends PaperOption {
     function list_display($isrow) {
         return $isrow ? true : ["column" => true, "className" => "pl_option plrd"];
     }
-    private function unparse_value(PaperOptionValue $ov = null) {
+    private function unparse_value_text(PaperOptionValue $ov = null) {
         return $ov && $ov->value !== null ? $ov->value : "";
     }
     function unparse_list_html(PaperList $pl, PaperInfo $row, $isrow) {
-        return $this->unparse_value($row->option($this->id));
+        return $this->unparse_value_text($row->option($this->id));
     }
     function unparse_list_text(PaperList $pl, PaperInfo $row) {
-        return $this->unparse_value($row->option($this->id));
+        return $this->unparse_value_text($row->option($this->id));
     }
     function unparse_page_html_data(PaperInfo $row, PaperOptionValue $ov) {
-        return $this->unparse_value($ov);
+        return $this->unparse_value_text($ov);
     }
     function unparse_page_text_data(PaperInfo $row, PaperOptionValue $ov) {
-        return $this->unparse_value($ov);
+        return $this->unparse_value_text($ov);
+    }
+    function unparse_value_hook(PaperInfo $prow, PaperOptionUnparse $up) {
+        return $this->unparse_value_text($prow->option($this->id));
     }
 }
 
@@ -1196,6 +1256,14 @@ class TextPaperOption extends PaperOption {
     }
     function unparse_page_text_data(PaperInfo $row, PaperOptionValue $ov) {
         return (string) $ov->data();
+    }
+    function unparse_value_hook(PaperInfo $prow, PaperOptionUnparse $up) {
+        if (($ov = $prow->option($this->id))
+            && ($d = $ov->data()) !== null
+            && $d !== "") {
+            $up->texts[] = $d;
+            $up->format = $prow->format_of($d);
+        }
     }
 }
 

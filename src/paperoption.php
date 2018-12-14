@@ -303,17 +303,51 @@ class PaperOptionList {
 }
 
 class PaperOptionUnparse {
-    public $in_page;
+    public $opt = [];
     public $in_list;
-    public $in_csv;
-    public $options = [];
     public $texts;
-    public $html;
     public $format;
+    public $fopt;
 
     function reset() {
-        $this->texts = $this->html = null;
+        $this->texts = null;
         $this->format = 0;
+        $this->fopt = [];
+    }
+    function opt($k) {
+        return isset($this->opt[$k]) ? $this->opt[$k] : null;
+    }
+    function fopt($k) {
+        return isset($this->fopt[$k]) ? $this->fopt[$k] : null;
+    }
+    function html_texts() {
+        if (empty($this->texts))
+            return [];
+        else if ($this->fopt("text")) {
+            return array_map(function ($t) {
+                $klass = [];
+                if ($this->opt("list"))
+                    $klass[] = strlen($t) > 190 ? "pl_longtext" : "pl_shorttext";
+                if ($this->format === 0) {
+                    $klass[] = "format0";
+                    return '<div class="' . join(" ", $klass) . '">' . Ht::format0($t) . '</div>';
+                } else if ($this->format === 2) {
+                    return '<div' . ($klass ? " class=\"" . join(" ", $klass) . '">' : '>') . $t . '</div>';
+                } else {
+                    $klass[] = "need-format";
+                    return '<div class="' . join(" ", $klass) . '" data-format="' . $this->format . ($this->in_list ? '.plx' : '.abs') . '">' . htmlspecialchars($t) . '</div>';
+                }
+            }, $this->texts);
+        } else {
+            return array_map(function ($t) {
+                if ($this->format === 0)
+                    return htmlspecialchars($t);
+                else if ($this->format === 2)
+                    return $t;
+                else
+                    return '<div class="need-format" data-format="' . $this->format . '">' . htmlspecialchars($t) . '</div>';
+            }, $this->texts);
+        }
     }
 }
 
@@ -696,13 +730,13 @@ class PaperOption implements Abbreviator {
         return "";
     }
 
-    function unparse_value(PaperInfo $row, PaperOptionUnparse $up) {
+    function unparse_value(PaperInfo $prow, PaperOptionUnparse $up, PaperOptionValue $ov = null) {
         $up->reset();
-        $x = $this->unparse_value_hook($row, $up);
-        if (is_string($x))
+        $x = $this->unparse_value_hook($prow, $up, $ov ? : $prow->option($this->id));
+        if (is_string($x) && $x !== "")
             $up->texts = [$x];
     }
-    function unparse_value_hook(PaperInfo $row, PaperOptionUnparse $up) {
+    function unparse_value_hook(PaperInfo $row, PaperOptionUnparse $up, $ov) {
     }
 
     function format_spec() {
@@ -764,19 +798,22 @@ class CheckboxPaperOption extends PaperOption {
         return $ov->value ? "Yes" : "";
     }
 
-    function unparse_value_hook(PaperInfo $prow, PaperOptionUnparse $up) {
-        if (($ov = $prow->option($this->id)) && $ov->value) {
-            if ($up->in_list)
-                return "✓";
-            else if ($up->in_page) {
+    function unparse_value_hook(PaperInfo $prow, PaperOptionUnparse $up, $ov) {
+        if ($ov && $ov->value) {
+            if ($up->opt("page")) {
                 $up->texts[] = "✓ " . $this->title;
-                $up->page_display = "name";
-            } else if ($up->in_csv)
+                $up->fopt["name"] = 1;
+            } else if ($up->opt("list"))
+                return "✓";
+            else if ($up->opt("csv"))
                 return "Y";
             else
                 return "Yes";
         } else {
-            return $up->in_csv ? "N" : "";
+            if ($up->opt("csv"))
+                return "N";
+            else
+                return "";
         }
     }
 }
@@ -951,8 +988,8 @@ class SelectorPaperOption extends PaperOption {
         return $this->unparse_value_text($ov);
     }
 
-    function unparse_value_hook(PaperInfo $prow, PaperOptionUnparse $up) {
-        return $this->unparse_value_text($prow->option($this->id));
+    function unparse_value_hook(PaperInfo $prow, PaperOptionUnparse $up, $ov) {
+        return $this->unparse_value_text($ov);
     }
 }
 
@@ -1064,13 +1101,14 @@ class DocumentPaperOption extends PaperOption {
         } else
             return false;
     }
-    function unparse_value_hook(PaperInfo $prow, PaperOptionUnparse $up) {
-        if (($d = $this->first_document($prow->option($this->id)))) {
-            if ($up->in_page) {
+    function unparse_value_hook(PaperInfo $prow, PaperOptionUnparse $up, $ov) {
+        if (($d = $this->first_document($ov))) {
+            if ($up->opt("page")) {
                 $diflags = $this->display() === self::DISP_SUBMISSION ? 0 : DocumentInfo::L_SMALL;
                 $up->texts[] = $d->link_html('<span class="pavfn">' . htmlspecialchars($this->title) . '</span>', $diflags);
                 $up->format = 2;
-            } else if ($up->in_list) {
+                $up->fopt["full"] = true;
+            } else if ($up->opt("list")) {
                 $up->texts[] = $d->link_html("", DocumentInfo::L_SMALL | DocumentInfo::L_NOSIZE);
                 $up->format = 2;
             } else
@@ -1162,8 +1200,8 @@ class NumericPaperOption extends PaperOption {
     function unparse_page_text_data(PaperInfo $row, PaperOptionValue $ov) {
         return $this->unparse_value_text($ov);
     }
-    function unparse_value_hook(PaperInfo $prow, PaperOptionUnparse $up) {
-        return $this->unparse_value_text($prow->option($this->id));
+    function unparse_value_hook(PaperInfo $prow, PaperOptionUnparse $up, $ov) {
+        return $this->unparse_value_text($ov);
     }
 }
 
@@ -1257,12 +1295,13 @@ class TextPaperOption extends PaperOption {
     function unparse_page_text_data(PaperInfo $row, PaperOptionValue $ov) {
         return (string) $ov->data();
     }
-    function unparse_value_hook(PaperInfo $prow, PaperOptionUnparse $up) {
-        if (($ov = $prow->option($this->id))
+    function unparse_value_hook(PaperInfo $prow, PaperOptionUnparse $up, $ov) {
+        if ($ov
             && ($d = $ov->data()) !== null
             && $d !== "") {
             $up->texts[] = $d;
             $up->format = $prow->format_of($d);
+            $up->fopt["text"] = true;
         }
     }
 }
@@ -1415,6 +1454,40 @@ class AttachmentsPaperOption extends PaperOption {
             array_unshift($links, self::PAGE_HTML_DATA);
         }
         return $links;
+    }
+    function unparse_value_hook(PaperInfo $prow, PaperOptionUnparse $up, $ov) {
+        if ($ov && ($docs = $ov->documents())) {
+            if ($up->opt("page")) {
+                if ($this->display() !== self::DISP_SUBMISSION) {
+                    $diflags = DocumentInfo::L_SMALL | DocumentInfo::L_ARCHIVE;
+                    $up->fopt["full"] = true;
+                } else
+                    $diflags = DocumentInfo::L_HTML | DocumentInfo::L_ARCHIVE;
+            } else if ($up->opt("list")) {
+                $diflags = DocumentInfo::L_SMALL | DocumentInfo::L_NOSIZE;
+                if ($up->opt("row"))
+                    $diflags |= DocumentInfo::L_ARCHIVE;
+            } else
+                $diflags = 0;
+
+            foreach ($docs as $d) {
+                $s = $d->unique_filename;
+                if ($diflags !== 0) {
+                    $s = htmlspecialchars($s);
+                    if ($diflags & DocumentInfo::L_HTML)
+                        $s = '<span class="pavfn">' . htmlspecialchars($this->title) . '</span>/' . $s;
+                    $s = $d->link_html($s, $diflags);
+                    if (($diflags & DocumentInfo::L_ARCHIVE) && $d->is_archive())
+                        $s = '<span class="archive foldc"><a href="" class="ui js-expand-archive qq">' . expander(null, 0) . "</a> " . $s . "</span>";
+                }
+                $up->texts[] = $s;
+            }
+
+            if ($up->opt("list") && !$up->opt("row"))
+                $up->texts = array_map(function ($s) { return "<div>$s</div>"; }, $up->texts);
+            if ($diflags !== 0)
+                $up->format = 2;
+        }
     }
 }
 

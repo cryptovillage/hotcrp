@@ -793,6 +793,8 @@ class DocumentInfo implements JsonSerializable {
     const L_NOSIZE = 2;
     const L_FINALTITLE = 4;
     const L_REQUIREFORMAT = 8;
+    const L_HTML = 16;    // uninterpreted
+    const L_ARCHIVE = 32; // uninterpreted
     function link_html($html = "", $flags = 0, $filters = null) {
         $p = $this->url($filters);
         $suffix = $info = "";

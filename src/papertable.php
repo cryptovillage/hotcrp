@@ -38,6 +38,7 @@ class PaperTable {
     private $admin;
     private $view_authors = 0;
     private $view_options = [];
+    private $option_up;
 
     private $cf = null;
     private $quit = false;
@@ -1018,52 +1019,55 @@ class PaperTable {
     }
 
     private function unparse_option_html(PaperOptionValue $ov) {
+        if (!($up = $this->option_up)) {
+            $up = $this->option_up = new PaperOptionUnparse;
+            $up->opt["page"] = true;
+        }
         $o = $ov->option;
-        $phtml = $o->unparse_page_html($this->prow, $ov);
-        if (!$phtml || count($phtml) <= 1)
+        $o->unparse_page_html($this->prow, $up, $ov);
+        if (empty($up->texts))
             return [];
-        $phtype = array_shift($phtml);
         $aufold = $this->view_options[$o->id] == 1;
 
         $ts = [];
         if ($o->display() === PaperOption::DISP_SUBMISSION) {
             $div = $aufold ? '<div class="xd fx8">' : '<div class="xd">';
-            if ($phtype === PaperOption::PAGE_HTML_NAME) {
-                foreach ($phtml as $p)
+            if ($up->fopt("name")) {
+                foreach ($up->html_texts() as $p)
                     $ts[] = $div . '<span class="pavfn">' . $p . "</span></div>\n";
-            } else if ($phtype === PaperOption::PAGE_HTML_FULL) {
-                foreach ($phtml as $p)
+            } else if ($up->fopt("full")) {
+                foreach ($up->html_texts() as $p)
                     $ts[] = $div . $p . "</div>\n";
             } else {
                 $x = $div . '<span class="pavfn">' . htmlspecialchars($o->title) . '</span>';
-                foreach ($phtml as $p)
+                foreach ($up->html_texts() as $p)
                     $x .= '<div class="pavb">' . $p . '</div>';
                 $ts[] = $x . "</div>\n";
             }
         } else if ($o->display() !== PaperOption::DISP_TOPICS) {
             $div = $aufold ? '<div class="pgsm fx8">' : '<div class="pgsm">';
-            if ($phtype === PaperOption::PAGE_HTML_NAME) {
-                foreach ($phtml as $p)
+            if ($up->fopt("name")) {
+                foreach ($up->html_texts() as $p)
                     $ts[] = $div . '<div class="pavt"><span class="pavfn">' . $p . "</span></div></div>\n";
-            } else if ($phtype === PaperOption::PAGE_HTML_FULL) {
-                foreach ($phtml as $p)
+            } else if ($up->fopt("full")) {
+                foreach ($up->html_texts() as $p)
                     $ts[] = $div . $p . "</div>\n";
             } else {
                 $x = $div . '<div class="pavt"><span class="pavfn">' . htmlspecialchars($o->title) . '</span></div>';
-                foreach ($phtml as $p)
+                foreach ($up->html_texts() as $p)
                     $x .= '<div class="pavb">' . $p . '</div>';
                 $ts[] = $x . "</div>\n";
             }
         } else {
             $div = $aufold ? '<div class="fx8">' : '<div>';
-            if ($phtype === PaperOption::PAGE_HTML_NAME) {
-                foreach ($phtml as $p)
+            if ($up->fopt("name")) {
+                foreach ($up->html_texts() as $p)
                     $ts[] = $div . '<span class="papon">' . $p . "</span></div>\n";
-            } else if ($phtype === PaperOption::PAGE_HTML_FULL) {
-                foreach ($phtml as $p)
+            } else if ($up->fopt("full")) {
+                foreach ($up->html_texts() as $p)
                     $ts[] = $div . $p . "</div>\n";
             } else {
-                foreach ($phtml as $p) {
+                foreach ($up->html_texts() as $p) {
                     if (!empty($ts)
                         || $p === ""
                         || $p[0] !== "<"
@@ -1073,6 +1077,7 @@ class PaperTable {
                 }
             }
         }
+        $up->mark_render();
         return $ts;
     }
 

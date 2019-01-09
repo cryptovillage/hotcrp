@@ -340,7 +340,7 @@ td.g {
 }
 .clearfix:after, .pst:after, .pavt:after, .papet:after, .submission_modes:after,
 .revvt:after, .revet:after, .rvg:after, .cmteditinfo:after, .aa:after, .aab:after,
-.entryi:after, .checki:after, .popup-actions:after, .f-horizontal:after {
+.entryi:after, .checki:after, .f-horizontal:after {
 	clear: both;
 	content: "";
 	display: block;
@@ -738,7 +738,6 @@ h2.home-3 {
 	color: #555555;
 }
 #homeacct {
-	margin: 1em 0;
 	max-width: 25rem;
 }
 .homeside ul {
@@ -3595,9 +3594,10 @@ a.help {
 }
 .popup-actions {
 	margin-top: 1em;
+	display: flex;
+	flex-flow: row-reverse wrap;
 }
 .popup-actions .btn, .popup-actions button {
-	float: right;
 	margin-left: 1em;
 }
 .popup-actions > .action-sep {

@@ -6,7 +6,7 @@
     {
         "name": "basics/names", "position": 10,
         "render_callback": "Basics_SettingParser::render_names",
-        "title": "Conference information"
+        "title": "Village information"
     },
     {
         "name": "basics/site-contact", "position": 20,

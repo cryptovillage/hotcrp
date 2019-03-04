@@ -151,7 +151,7 @@ class Home_Partial {
         $gx->end_render();
         if (($t = ob_get_clean()))
             echo '<div class="homeinside"><h4>',
-                $user->conf->_c("home", "Conference information"),
+                $user->conf->_c("home", "Village information"),
                 '</h4><ul>', $t, '</ul></div>';
     }
     function render_info_deadline(Contact $user) {
@@ -165,12 +165,12 @@ class Home_Partial {
     function render_info_site(Contact $user) {
         if (($site = $user->conf->opt("conferenceSite"))
             && $site !== $user->conf->opt("paperSite"))
-            echo '<li>', Ht::link("Conference site", $site), '</li>';
+            echo '<li>', Ht::link("Village site", $site), '</li>';
     }
     function render_info_accepted(Contact $user) {
         if ($user->conf->can_all_author_view_decision()) {
             list($n, $nyes) = $user->conf->count_submitted_accepted();
-            echo '<li>', $user->conf->_("%d papers accepted out of %d submitted.", $nyes, $n), '</li>';
+            echo '<li>', $user->conf->_("%d presentations accepted out of %d submitted.", $nyes, $n), '</li>';
         }
     }
 
@@ -183,7 +183,7 @@ class Home_Partial {
         echo '<div class="homegrp">Welcome to the ', htmlspecialchars($user->conf->full_name()), " submissions site.";
         if (($site = $user->conf->opt("conferenceSite"))
             && $site !== $user->conf->opt("paperSite"))
-            echo " For general conference information, see ", Ht::link(htmlspecialchars($site), htmlspecialchars($site)), ".";
+            echo " For general village information, see ", Ht::link(htmlspecialchars($site), htmlspecialchars($site)), ".";
         echo '</div>';
     }
 
@@ -193,7 +193,7 @@ class Home_Partial {
             return;
 
         $conf = $user->conf;
-        echo '<div class="homegrp">', $conf->_("Sign in to submit or review papers."), '</div>';
+        echo '<div class="homegrp">', $conf->_("Sign in to submit or review presentations."), '</div>';
         echo '<div class="homegrp foldo" id="homeacct">',
             Ht::form($conf->hoturl("index", ["post" => post_value(true)])),
             '<div class="f-contain">';
@@ -255,7 +255,7 @@ class Home_Partial {
 
         $tOpt = PaperSearch::search_types($user);
         echo Ht::entry("q", (string) $qreq->q,
-                       array("id" => "homeq", "size" => 32, "title" => "Enter paper numbers or search terms",
+                       array("id" => "homeq", "size" => 32, "title" => "Enter presentation numbers or search terms",
                              "class" => "papersearch need-suggest", "placeholder" => "(All)",
                              "aria-labelledby" => "homesearch-label")),
             " &nbsp;in&nbsp; ",
@@ -367,9 +367,9 @@ class Home_Partial {
                 echo " <span class=\"deadline\">The review deadline is $d.</span><br />\n";
         }
         if ($user->isPC && $user->can_review_any())
-            echo '  <span class="hint">As a PC member, you may review <a href="', $conf->hoturl("search", "q=&amp;t=s"), "\">any submitted paper</a>.</span><br>\n";
+            echo '  <span class="hint">As a PC member, you may review <a href="', $conf->hoturl("search", "q=&amp;t=s"), "\">any submitted presentation</a>.</span><br>\n";
         else if ($user->privChair)
-            echo '  <span class="hint">As an administrator, you may review <a href="', $conf->hoturl("search", "q=&amp;t=s"), "\">any submitted paper</a>.</span><br>\n";
+            echo '  <span class="hint">As an administrator, you may review <a href="', $conf->hoturl("search", "q=&amp;t=s"), "\">any submitted presentation</a>.</span><br>\n";
 
         if ($this->_my_rinfo)
             echo '<div id="foldre" class="homesubgrp foldo">';
@@ -530,11 +530,11 @@ class Home_Partial {
                     $deadlines[] = 'The <a href="' . $conf->hoturl("deadlines") . '">submission deadline</a> has passed.';
             } else if (!$conf->timeUpdatePaper()) {
                 $deadlines[] = 'The <a href="' . $conf->hoturl("deadlines") . '">update deadline</a> has passed, but you can still submit.';
-                $time = $conf->printableTimeSetting("sub_sub", "span", " to submit papers");
+                $time = $conf->printableTimeSetting("sub_sub", "span", " to submit presentations");
                 if ($time != "N/A")
                     $deadlines[] = "You have until $time.";
             } else {
-                $time = $conf->printableTimeSetting("sub_update", "span", " to submit papers");
+                $time = $conf->printableTimeSetting("sub_update", "span", " to submit presentations");
                 if ($time != "N/A")
                     $deadlines[] = "You have until $time.";
             }
@@ -551,7 +551,7 @@ class Home_Partial {
             if ($conf->deadlinesAfter("final_soft") && $plist->has("need_final"))
                 $deadlines[] = "<strong class=\"overdue\">Final versions are overdue.</strong> They were requested by $time.";
             else if ($time != "N/A")
-                $deadlines[] = "Submit final versions of your accepted papers by $time.";
+                $deadlines[] = "Submit final versions of your accepted presentations by $time.";
         }
         if (!empty($deadlines)) {
             if ($plist && $plist->count > 0)

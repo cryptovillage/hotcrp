@@ -1,6 +1,6 @@
 <?php
 // search/st_conflict.php -- HotCRP helper class for searching for papers
-// Copyright (c) 2006-2019 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
 
 class Conflict_SearchTerm extends SearchTerm {
     private $csm;
@@ -49,7 +49,7 @@ class Conflict_SearchTerm extends SearchTerm {
         }
         return $this->csm->test($n);
     }
-    function compile_edit_condition(PaperInfo $row, PaperSearch $srch) {
+    function compile_condition(PaperInfo $row, PaperSearch $srch) {
         if (!$this->ispc)
             return null;
         if (!$srch->conf->setting("sub_pcconf"))

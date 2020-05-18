@@ -1,6 +1,6 @@
 <?php
 // src/help/h_revrate.php -- HotCRP help functions
-// Copyright (c) 2006-2019 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
 
 class RevRate_HelpTopic {
     static function render($hth) {
@@ -50,7 +50,7 @@ $hth->search_link("search for “rate:short”", "rate:short"), ".</p>";
             $what = "no one";
         echo $hth->subhead("Settings");
         echo "<p>Chairs set how ratings work on the ",
-            $hth->settings_link("review settings page", "reviews"), ".",
+            $hth->setting_link("review settings page", "rev_ratings"), ".",
             ($hth->user->is_reviewer() ? " Currently, $what can rate reviews." : ""), "</p>";
 
         echo $hth->subhead("Visibility");

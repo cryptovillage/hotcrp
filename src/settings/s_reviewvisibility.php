@@ -1,12 +1,12 @@
 <?php
 // src/settings/s_reviewvisibility.php -- HotCRP settings > decisions page
-// Copyright (c) 2006-2019 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
 
 class ReviewVisibility_SettingParser extends SettingParser {
     static function render(SettingValues $sv) {
         $opts = [Conf::AUSEEREV_NO => "No, unless authors can edit responses",
                  Conf::AUSEEREV_YES => "Yes"];
-        if ($sv->newv("au_seerev") == Conf::AUSEEREV_UNLESSINCOMPLETE
+        if ($sv->curv("au_seerev") == Conf::AUSEEREV_UNLESSINCOMPLETE
             && !$sv->conf->opt("allow_auseerev_unlessincomplete"))
             $sv->conf->save_setting("opt.allow_auseerev_unlessincomplete", 1);
         if ($sv->conf->opt("allow_auseerev_unlessincomplete"))
@@ -28,7 +28,7 @@ class ReviewVisibility_SettingParser extends SettingParser {
         echo Ht::hidden("has_tag_au_seerev", 1);
         Ht::stash_script('$("#tag_au_seerev").on("input", function () { $("#au_seerev_' . Conf::AUSEEREV_TAGS . '").click(); })');
 
-        echo '<div class="settings-g has-fold fold', $sv->newv("cmt_author") ? "o" : "c", '">';
+        echo '<div class="form-g has-fold fold', $sv->curv("cmt_author") ? "o" : "c", '">';
         $sv->echo_checkbox("cmt_author", "Authors can <strong>exchange comments</strong> with reviewers when reviews are visible", ["class" => "uich js-foldup", "hint_class" => "fx"], "Reviewers’ comments will be identified by “Reviewer A”, “Reviewer B”, etc.");
         echo "</div>\n";
     }
@@ -49,7 +49,7 @@ class ReviewVisibility_SettingParser extends SettingParser {
                 $ct[$ti[0]] = true;
             foreach (explode(" ", $sv->newv("tag_au_seerev")) as $t)
                 if ($t !== "" && !isset($ct[$t])) {
-                    $sv->warning_at("tag_au_seerev", "PC members can change the tag “" . htmlspecialchars($t) . "”, which affects whether authors can see reviews. Such tags should usually be <a href=\"" . hoturl("settings", "group=tags") . "\">read-only</a>.");
+                    $sv->warning_at("tag_au_seerev", "PC members can change the tag “" . htmlspecialchars($t) . "”, which affects whether authors can see reviews. Such tags should usually be " . $sv->setting_link("read-only", "tag_chair") . ".");
                     $sv->warning_at("tag_chair");
                 }
         }

@@ -1,5 +1,5 @@
 // script.js -- HotCRP JavaScript library
-// Copyright (c) 2006-2019 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
 
 var siteurl, siteurl_base_path,
     siteurl_postvalue, siteurl_suffix, siteurl_defaults,
@@ -24,8 +24,9 @@ function serialize_object(x) {
         return "";
 }
 
-if (!window.JSON || !window.JSON.parse)
+if (!window.JSON || !window.JSON.parse) {
     window.JSON = {parse: $.parseJSON};
+}
 
 var hasClass, addClass, removeClass, toggleClass, classList;
 if ("classList" in document.createElement("span")
@@ -64,6 +65,27 @@ if ("classList" in document.createElement("span")
         return k === "" ? [] : k.split(/\s+/);
     };
 }
+if (!Element.prototype.closest) {
+    Element.prototype.closest = function (s) {
+        return $(this).closest(s)[0];
+    };
+}
+
+if (!String.prototype.startsWith) {
+    String.prototype.startsWith = function (search, pos) {
+        pos = !pos || pos < 0 ? 0 : +pos;
+        return this.substring(pos, pos + search.length) === search;
+    };
+}
+if (!String.prototype.endsWith) {
+    String.prototype.endsWith = function (search, this_len) {
+        if (this_len === undefined || this_len > this.length) {
+            this_len = this.length;
+        }
+        return this.substring(this_len - search.length, this_len) === search;
+    };
+}
+
 
 function lower_bound_index(a, v) {
     var l = 0, r = a.length;
@@ -159,7 +181,7 @@ function log_jserror(errormsg, error, noconsole) {
     if (error && error.stack)
         errormsg.stack = error.stack;
     if (errormsg.lineno == null || errormsg.lineno > 1)
-        $.ajax(hoturl_post("api/jserror"), {
+        $.ajax(hoturl("api/jserror"), {
             global: false, method: "POST", cache: false, data: errormsg
         });
     if (error && !noconsole && typeof console === "object" && console.error)
@@ -192,6 +214,9 @@ function jqxhr_error_message(jqxhr, status, errormsg) {
         return "Failed.";
 }
 
+var after_outstanding = (function () {
+var outstanding = 0, after = [];
+
 $(document).ajaxError(function (event, jqxhr, settings, httperror) {
     if (jqxhr.readyState != 4)
         return;
@@ -210,8 +235,15 @@ $(document).ajaxError(function (event, jqxhr, settings, httperror) {
         if (httperror)
             msg += ", " + httperror;
         if (jqxhr.responseText)
-            msg += ", " + jqxhr.responseText.substr(0, 100);
+            msg += ", " + jqxhr.responseText.substring(0, 100);
         log_jserror(msg);
+    }
+});
+
+$(document).ajaxComplete(function (event, jqxhr, settings) {
+    if (settings.trackOutstanding && --outstanding === 0) {
+        while (after.length)
+            after.shift()();
     }
 });
 
@@ -248,28 +280,43 @@ $.ajaxPrefilter(function (options, originalOptions, jqxhr) {
         options.timeout = 10000;
     if (options.dataType == null)
         options.dataType = "json";
+    if (options.trackOutstanding)
+        ++outstanding;
 });
+
+return function (f) {
+    if (f === undefined)
+        return outstanding > 0;
+    else if (outstanding > 0)
+        after.push(f);
+    else
+        f();
+};
+})();
 
 
 // geometry
 jQuery.fn.extend({
     geometry: function (outer) {
         var g, d;
-        if (this[0] == window)
+        if (this[0] == window) {
             g = {left: this.scrollLeft(), top: this.scrollTop()};
-        else if (this.length == 1 && this[0].getBoundingClientRect) {
+        } else if (this.length == 1 && this[0].getBoundingClientRect) {
             g = jQuery.extend({}, this[0].getBoundingClientRect());
-            if ((d = window.pageXOffset))
+            if ((d = window.pageXOffset)) {
                 g.left += d, g.right += d;
-            if ((d = window.pageYOffset))
+            }
+            if ((d = window.pageYOffset)) {
                 g.top += d, g.bottom += d;
+            }
             if (!("width" in g)) {
                 g.width = g.right - g.left;
                 g.height = g.bottom - g.top;
             }
             return g;
-        } else
+        } else {
             g = this.offset();
+        }
         if (g) {
             g.width = outer ? this.outerWidth() : this.width();
             g.height = outer ? this.outerHeight() : this.height();
@@ -278,15 +325,43 @@ jQuery.fn.extend({
         }
         return g;
     },
-    scrollIntoView: function () {
-        var p = this.geometry(), x = this[0].parentNode;
-        while (x && x.tagName && $(x).css("overflow-y") === "visible")
-            x = x.parentNode;
-        var w = jQuery(x && x.tagName ? x : window).geometry();
-        if (p.top < w.top)
-            this[0].scrollIntoView();
-        else if (p.bottom > w.bottom)
-            this[0].scrollIntoView(false);
+    scrollIntoView: function (opts) {
+        opts = opts || {};
+        for (var i = 0; i !== this.length; ++i) {
+            var tg = $(this[i]).geometry(), p = this[i].parentNode;
+            while (p && p.tagName && $(p).css("overflowY") === "visible") {
+                p = p.parentNode;
+            }
+            p = p && p.tagName ? p : window;
+            var pg = $(p).geometry();
+            if (p !== window) {
+                tg.top += p.scrollTop;
+                tg.bottom += p.scrollTop;
+            }
+            var mt = opts.marginTop || 0, mb = opts.marginBottom || 0;
+            if (mt === "auto") {
+                mt = parseFloat($(this[i]).css("marginTop"));
+            }
+            if (mb === "auto") {
+                mb = parseFloat($(this[i]).css("marginBottom"));
+            }
+            if ((tg.top < pg.top + mt && !opts.atBottom)
+                || opts.atTop) {
+                var pos = Math.max(tg.top - mt, 0);
+                if (p === window) {
+                    p.scrollTo(pg.scrollX, pos);
+                } else {
+                    p.scrollTop = pos;
+                }
+            } else if (tg.bottom > pg.bottom - mb) {
+                var pos = Math.max(tg.bottom + mb - pg.height, 0);
+                if (p === window) {
+                    p.scrollTo(pg.scrollX, pos);
+                } else {
+                    p.scrollTop = pos;
+                }
+            }
+        }
         return this;
     }
 });
@@ -356,8 +431,8 @@ function plural_noun(n, what) {
     if (what == "this")
         return "these";
     if (/^.*?(?:s|sh|ch|[bcdfgjklmnpqrstvxz][oy])$/.test(what)) {
-        if (what.substr(-1) == "y")
-            return what.substr(0, what.length - 1) + "ies";
+        if (what.charAt(what.length - 1) === "y")
+            return what.substring(0, what.length - 1) + "ies";
         else
             return what + "es";
     } else
@@ -465,16 +540,23 @@ function now_sec() {
     return now_msec() / 1000;
 }
 
+if (!Date.prototype.toISOString) {
+    Date.prototype.toISOString = function () {
+        return strftime("%UY-%Um-%UdT%UH:%UM:%US.%ULZ", this);
+    };
+}
+
 var strftime = (function () {
     function pad(num, str, n) {
         str += num.toString();
-        return str.length <= n ? str : str.substr(str.length - n);
+        return str.length <= n ? str : str.substring(str.length - n);
     }
     function unparse_q(d, alt, is24) {
-        if (is24 && alt && d.getSeconds())
-            return strftime("%H:%M:%S", d);
-        else if (is24)
+        alt &= 1;
+        if (is24 && alt && !d.getSeconds())
             return strftime("%H:%M", d);
+        else if (is24)
+            return strftime("%H:%M:%S", d);
         else if (alt && d.getSeconds())
             return strftime("%#l:%M:%S%P", d);
         else if (alt && d.getMinutes())
@@ -487,48 +569,60 @@ var strftime = (function () {
     var unparsers = {
         a: function (d) { return (["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"])[d.getDay()]; },
         A: function (d) { return (["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"])[d.getDay()]; },
-        d: function (d) { return pad(d.getDate(), "0", 2); },
-        e: function (d, alt) { return pad(d.getDate(), alt ? "" : " ", 2); },
+        d: function (d, alt) { return pad(alt & 2 ? d.getUTCDate() : d.getDate(), "0", 2); },
+        e: function (d, alt) { return pad(d.getDate(), alt & 1 ? "" : " ", 2); },
         u: function (d) { return d.getDay() || 7; },
         w: function (d) { return d.getDay(); },
         b: function (d) { return (["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"])[d.getMonth()]; },
         B: function (d) { return (["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"])[d.getMonth()]; },
         h: function (d) { return unparsers.b(d); },
-        m: function (d) { return pad(d.getMonth() + 1, "0", 2); },
+        m: function (d, alt) { return pad((alt & 2 ? d.getUTCMonth() : d.getMonth()) + 1, "0", 2); },
         y: function (d) { return d.getFullYear() % 100; },
-        Y: function (d) { return d.getFullYear(); },
-        H: function (d) { return pad(d.getHours(), "0", 2); },
-        k: function (d, alt) { return pad(d.getHours(), alt ? "" : " ", 2); },
+        Y: function (d, alt) { return alt & 2 ? d.getUTCFullYear() : d.getFullYear(); },
+        H: function (d, alt) { return pad(alt & 2 ? d.getUTCHours() : d.getHours(), "0", 2); },
+        k: function (d, alt) { return pad(d.getHours(), alt & 1 ? "" : " ", 2); },
         I: function (d) { return pad(d.getHours() % 12 || 12, "0", 2); },
-        l: function (d, alt) { return pad(d.getHours() % 12 || 12, alt ? "" : " ", 2); },
-        M: function (d) { return pad(d.getMinutes(), "0", 2); },
+        l: function (d, alt) { return pad(d.getHours() % 12 || 12, alt & 1 ? "" : " ", 2); },
+        M: function (d, alt) { return pad(alt & 2 ? d.getUTCMinutes() : d.getMinutes(), "0", 2); },
         X: function (d) { return strftime("%#e %b %Y %#q", d); },
         p: function (d) { return d.getHours() < 12 ? "AM" : "PM"; },
         P: function (d) { return d.getHours() < 12 ? "am" : "pm"; },
         q: function (d, alt) { return unparse_q(d, alt, strftime.is24); },
         r: function (d, alt) { return unparse_q(d, alt, false); },
         R: function (d, alt) { return unparse_q(d, alt, true); },
-        S: function (d) { return pad(d.getSeconds(), "0", 2); },
+        S: function (d, alt) { return pad(alt & 2 ? d.getUTCSeconds() : d.getSeconds(), "0", 2); },
+        L: function (d, alt) { return pad(alt & 2 ? d.getUTCMilliseconds() : d.getMilliseconds(), "0", 3); },
         T: function (d) { return strftime("%H:%M:%S", d); },
         /* XXX z Z */
         D: function (d) { return strftime("%m/%d/%y", d); },
         F: function (d) { return strftime("%Y-%m-%d", d); },
-        s: function (d) { return Math.trunc(d.getTime() / 1000); },
+        s: function (d) { return Math.floor(d.getTime() / 1000); },
         n: function (d) { return "\n"; },
         t: function (d) { return "\t"; },
         "%": function (d) { return "%"; }
     };
     function strftime(fmt, d) {
-        var words = fmt.split(/(%#?\S)/), wordno, word, alt, f, t = "";
+        var words = fmt.split(/(%[#U]*\S)/), wordno, word, alt, pos, f, t = "";
         if (d == null)
             d = new Date;
         else if (typeof d == "number")
             d = new Date(d * 1000);
         for (wordno = 0; wordno != words.length; ++wordno) {
             word = words[wordno];
-            alt = word.charAt(1) == "#";
+            pos = 1;
+            alt = 0;
+            while (true) {
+                if (word.charAt(pos) === "#") {
+                    alt |= 1;
+                } else if (word.charAt(pos) === "U") {
+                    alt |= 2;
+                } else {
+                    break;
+                }
+                ++pos;
+            }
             if (word.charAt(0) == "%"
-                && (f = unparsers[word.charAt(1 + alt)]))
+                && (f = unparsers[word.charAt(pos)]))
                 t += f(d, alt);
             else
                 t += word;
@@ -575,18 +669,18 @@ function unparse_duration(d, include_msec) {
     var neg = d < 0, t;
     if (neg)
         d = -d;
-    var p = Math.trunc(d);
+    var p = Math.floor(d);
     if (p >= 3600)
         t = sprintf("%d:%02d:%02d", p/3600, (p/60)%60, p%60)
     else
         t = sprintf("%d:%02d", p/60, p%60);
     if (include_msec)
-        t += sprintf(".%03d", Math.trunc((d - p) * 1000));
+        t += sprintf(".%03d", Math.floor((d - p) * 1000));
     return neg ? "-" + t : t;
 }
 
 var strnatcmp = (function () {
-if (window.Intl && Intl.Collator) {
+try {
     var collator = new Intl.Collator(undefined, {sensitivity: "case", numeric: true});
     return function (a, b) {
         var cmp = collator.compare(a.replace(/"/g, ""), b.replace(/"/g, ""));
@@ -594,7 +688,7 @@ if (window.Intl && Intl.Collator) {
             cmp = a < b ? -1 : 1;
         return cmp;
     };
-} else {
+} catch (e) {
     return function (a, b) {
         return a < b ? -1 : (a === b ? 0 : 1);
     };
@@ -640,19 +734,20 @@ var key_map = {"Spacebar": " ", "Esc": "Escape"},
     };
 function event_key(evt) {
     var x;
-    if (typeof evt === "string")
+    if (typeof evt === "string") {
         return evt;
-    if ((x = evt.key) != null)
+    } else if ((x = evt.key) != null) {
         return key_map[x] || x;
-    if ((x = evt.charCode))
+    } else if ((x = evt.charCode)) {
         return charCode_map[x] || String.fromCharCode(x);
-    if ((x = evt.keyCode)) {
+    } else if ((x = evt.keyCode)) {
         if (keyCode_map[x])
             return keyCode_map[x];
         else if ((x >= 48 && x <= 57) || (x >= 65 && x <= 90))
             return String.fromCharCode(x);
+    } else {
+        return "";
     }
-    return "";
 }
 event_key.printable = function (evt) {
     return !nonprintable_map[event_key(evt)]
@@ -662,8 +757,9 @@ event_key.modifier = function (evt) {
     return nonprintable_map[event_key(evt)] > 1;
 };
 event_key.is_default_a = function (evt, a) {
-    return !evt.metaKey && !evt.ctrlKey && evt.which != 2
-        && (!a || !/(?:^|\s)(?:ui|btn)(?=\s|$)/i.test(a.className || ""));
+    return !evt.shiftKey && !evt.metaKey && !evt.ctrlKey
+        && evt.button == 0
+        && (!a || !hasClass("ui", a));
 };
 return event_key;
 })();
@@ -678,11 +774,17 @@ event_modkey.META = 8;
 
 function make_onkey(key, f) {
     return function (evt) {
-        if (!event_modkey(evt) && event_key(evt) == key) {
+        if (!event_modkey(evt) && event_key(evt) === key) {
             evt.preventDefault();
             evt.stopImmediatePropagation();
             f.call(this, evt);
         }
+    };
+}
+
+function make_link_callback(elt) {
+    return function () {
+        window.location = elt.href;
     };
 }
 
@@ -766,7 +868,7 @@ function hoturl(page, options) {
     var x = {t: page + siteurl_suffix};
     if (typeof options === "string") {
         if (options.charAt(0) === "?")
-            options = options.substr(1);
+            options = options.substring(1);
         if ((m = options.match(/^(.*?)(#.*)$/))) {
             options = m[1];
             anchor = m[2];
@@ -784,7 +886,7 @@ function hoturl(page, options) {
                 x.v.push(encodeURIComponent(i) + "=" + encodeURIComponent(v));
         }
     }
-    if (page.substr(0, 3) === "api" && !hoturl_find(x, /^base=/))
+    if (page.substring(0, 3) === "api" && !hoturl_find(x, /^base=/))
         x.v.push("base=" + encodeURIComponent(siteurl));
 
     if (page === "paper") {
@@ -794,20 +896,21 @@ function hoturl(page, options) {
             hoturl_clean(x, /^fn=(\w+)$/);
             want_forceShow = true;
         }
-    } else if (page === "review")
+    } else if (page === "review") {
         hoturl_clean(x, /^r=(\d+[A-Z]+)$/);
-    else if (page === "help")
+    } else if (page === "help") {
         hoturl_clean(x, /^t=(\w+)$/);
-    else if (page.substr(0, 3) === "api") {
+    } else if (page.substring(0, 3) === "api") {
         if (page.length > 3) {
             x.t = "api" + siteurl_suffix;
-            x.v.push("fn=" + page.substr(4));
+            x.v.push("fn=" + page.substring(4));
         }
         hoturl_clean(x, /^p=(\d+)$/, true);
         hoturl_clean(x, /^fn=(\w+)$/);
         want_forceShow = true;
-    } else if (page === "doc")
+    } else if (page === "doc") {
         hoturl_clean(x, /^file=([^&]+)$/);
+    }
 
     if (hotcrp_want_override_conflict && want_forceShow
         && !hoturl_find(x, /^forceShow=/))
@@ -867,7 +970,7 @@ function hoturl_go(page, options) {
 }
 
 function hoturl_post_go(page, options) {
-    var $form = $('<form method="POST" enctype="multipart/form-data" accept-charset="UTF-8"><div><input type="hidden" name="____empty____" value="1"></div></form>');
+    var $form = $('<form method="POST" enctype="multipart/form-data" accept-charset="UTF-8"><input type="hidden" name="____empty____" value="1"></form>');
     $form[0].action = hoturl_post(page, options);
     $form.appendTo(document.body);
     $form.submit();
@@ -895,7 +998,7 @@ var handle_ui = (function ($) {
 var callbacks = {};
 function handle_ui(event) {
     var e = event.target;
-    if ((e && hasClass(e, "ui"))
+    if ((e && (hasClass(e, "ui") || hasClass(e, "uin")))
         || (this.tagName === "A" && hasClass(this, "ui"))) {
         event.preventDefault();
     }
@@ -925,11 +1028,125 @@ handle_ui.trigger = function (className, event) {
 };
 return handle_ui;
 })($);
-$(document).on("click", ".ui, .uix", handle_ui);
+$(document).on("click", ".ui, .uic", handle_ui);
 $(document).on("change", ".uich", handle_ui);
 $(document).on("keydown", ".uikd", handle_ui);
 $(document).on("input", ".uii", handle_ui);
 $(document).on("unfold", ".ui-unfold", handle_ui);
+
+
+// differences and focusing
+function input_is_checkboxlike(elt) {
+    return elt.type === "checkbox" || elt.type === "radio";
+}
+
+function input_default_value(elt) {
+    if (input_is_checkboxlike(elt)) {
+        if (elt.hasAttribute("data-default-checked")) {
+            return elt.getAttribute("data-default-checked") !== "false";
+        } else if (elt.hasAttribute("data-default-value")) {
+            return elt.value == elt.getAttribute("data-default-value");
+        } else {
+            return elt.defaultChecked;
+        }
+    } else {
+        if (elt.hasAttribute("data-default-value")) {
+            return elt.getAttribute("data-default-value");
+        } else {
+            return elt.defaultValue;
+        }
+    }
+}
+
+function input_differs(elt) {
+    var expected = input_default_value(elt);
+    if (input_is_checkboxlike(elt))
+        return elt.checked !== expected;
+    else {
+        var current = elt.tagName === "SELECT" ? $(elt).val() : elt.value;
+        return !text_eq(current, expected);
+    }
+}
+
+function form_differs(form, want_ediff) {
+    var ediff = null, $is = $(form).find("input, select, textarea");
+    if (!$is.length)
+        $is = $(form).filter("input, select, textarea");
+    $is.each(function () {
+        if (!hasClass(this, "ignore-diff") && input_differs(this)) {
+            ediff = this;
+            return false;
+        }
+    });
+    return want_ediff ? ediff : !!ediff;
+}
+
+function form_highlight(form, elt) {
+    (form instanceof HTMLElement) || (form = $(form)[0]);
+    var alerting = (elt && form_differs(elt)) || form_differs(form);
+    toggleClass(form, "alert", alerting);
+    if (form.hasAttribute("data-alert-toggle")) {
+        $("." + form.getAttribute("data-alert-toggle")).toggleClass("hidden", !alerting);
+    }
+}
+
+function hiliter_children(form) {
+    form = $(form)[0];
+    form_highlight(form);
+    $(form).on("change input", "input, select, textarea", function () {
+        if (!hasClass(this, "ignore-diff") && !hasClass(form, "ignore-diff"))
+            form_highlight(form, this);
+    });
+}
+
+$(function () {
+    $("form.need-unload-protection").each(function () {
+        var form = this;
+        removeClass(form, "need-unload-protection");
+        $(form).on("submit", function () { addClass(this, "submitting"); });
+        $(window).on("beforeunload", function () {
+            if (hasClass(form, "alert") && !hasClass(form, "submitting"))
+                return "If you leave this page now, your edits may be lost.";
+        });
+    });
+});
+
+function focus_at(felt) {
+    felt.jquery && (felt = felt[0]);
+    felt.focus();
+    if (!felt.hotcrp_ever_focused) {
+        if (felt.select && hasClass(felt, "want-select")) {
+            felt.select();
+        } else if (felt.setSelectionRange) {
+            try {
+                felt.setSelectionRange(felt.value.length, felt.value.length);
+            } catch (e) { // ignore errors
+            }
+        }
+        felt.hotcrp_ever_focused = true;
+    }
+}
+
+function focus_within(elt, subfocus_selector) {
+    var $wf = $(elt).find(".want-focus");
+    if (subfocus_selector)
+        $wf = $wf.filter(subfocus_selector);
+    if ($wf.length == 1)
+        focus_at($wf[0]);
+    return $wf.length == 1;
+}
+
+function refocus_within(elt) {
+    var focused = document.activeElement;
+    if (focused && focused.tagName !== "A" && !$(focused).is(":visible")) {
+        while (focused && focused !== elt)
+            focused = focused.parentElement;
+        if (focused) {
+            var focusable = $(elt).find("input, select, textarea, a, button").filter(":visible").first();
+            focusable.length ? focusable.focus() : $(document.activeElement).blur();
+        }
+    }
+}
 
 
 // rangeclick
@@ -1035,9 +1252,10 @@ handle_ui.on("js-range-click", function (event) {
             }
         }
 
-        if (state === 2)
+        if (state === 2) {
             cbgs[j].indeterminate = true;
-        else {
+            cbgs[j].checked = true;
+        } else {
             cbgs[j].indeterminate = false;
             cbgs[j].checked = state;
         }
@@ -1140,7 +1358,7 @@ return function (content, bubopt) {
             return (0.75 * p1 + 0.25) + ")";
         });
         bubch[0].style[cssbc(dir^2)] = $(bubdiv).css(cssbc(dir));
-        assign_style_property(bubch[2], cssbc(dir^2), yc);
+        bubch[2].style[cssbc(dir^2)] = yc;
     }
 
     function constrainmid(nearpos, wpos, ds, ds2) {
@@ -1447,32 +1665,59 @@ function prepare_info(elt, info) {
 }
 
 function show_tooltip(info) {
-    if (window.disable_tooltip)
+    if (window.disable_tooltip) {
         return null;
+    }
 
     var $self = $(this);
     info = prepare_info($self[0], $.extend({}, info || {}));
     info.element = this;
 
-    var tt, bub = null, to = null, refcount = 0, content = info.content;
+    var tt, bub = null, to = null, near = null,
+        refcount = 0, content = info.content;
+
     function erase() {
         to = clearTimeout(to);
         bub && bub.remove();
         $self.removeData("tooltipState");
-        if (window.global_tooltip === tt)
+        if (window.global_tooltip === tt) {
             window.global_tooltip = null;
+        }
     }
+
     function show_bub() {
         if (content && !bub) {
             bub = make_bubble(content, {color: "tooltip " + info.className, dir: info.dir});
-            bub.near(info.near || info.element).hover(tt.enter, tt.exit);
-        } else if (content)
+            near = info.near || info.element;
+            bub.near(near).hover(tt.enter, tt.exit);
+        } else if (content) {
             bub.html(content);
-        else if (bub) {
+        } else if (bub) {
             bub && bub.remove();
-            bub = null;
+            bub = near = null;
         }
     }
+
+    function complete(new_content) {
+        if (new_content instanceof HPromise) {
+            new_content.then(complete);
+        } else {
+            var tx = window.global_tooltip;
+            content = new_content;
+            if (tx
+                && tx._element === info.element
+                && tx.html() === content
+                && !info.done) {
+                tt = tx;
+            } else {
+                tx && tx.erase();
+                $self.data("tooltipState", tt);
+                show_bub();
+                window.global_tooltip = tt;
+            }
+        }
+    }
+
     tt = {
         enter: function () {
             to = clearTimeout(to);
@@ -1489,37 +1734,21 @@ function show_tooltip(info) {
         erase: erase,
         _element: $self[0],
         html: function (new_content) {
-            if (new_content === undefined)
+            if (new_content === undefined) {
                 return content;
-            else {
+            } else {
                 content = new_content;
                 show_bub();
+                return tt;
             }
-            return tt;
         },
         text: function (new_text) {
             return tt.html(escape_entities(new_text));
+        },
+        near: function () {
+            return near;
         }
     };
-
-    function complete(new_content) {
-        if (new_content instanceof HPromise)
-            new_content.then(complete);
-        else {
-            var tx = window.global_tooltip;
-            content = new_content;
-            if (tx && tx._element === info.element
-                && tx.html() === content
-                && !info.done)
-                tt = tx;
-            else {
-                tx && tx.erase();
-                $self.data("tooltipState", tt);
-                show_bub();
-                window.global_tooltip = tt;
-            }
-        }
-    }
 
     complete(content);
     info.done = true;
@@ -1537,11 +1766,12 @@ function ttleave() {
 }
 
 function tooltip() {
-    var $self = $(this).removeClass("need-tooltip");
-    if ($self[0].getAttribute("data-tooltip-type") === "focus")
-        $self.on("focus", ttenter).on("blur", ttleave);
+    removeClass(this, "need-tooltip");
+    var tt = this.getAttribute("data-tooltip-type");
+    if (tt === "focus")
+        $(this).on("focus", ttenter).on("blur", ttleave);
     else
-        $self.hover(ttenter, ttleave);
+        $(this).hover(ttenter, ttleave);
 }
 tooltip.erase = function () {
     var tt = this === tooltip ? window.global_tooltip : $(this).data("tooltipState");
@@ -1556,53 +1786,224 @@ return tooltip;
 })($);
 
 
-// temporary text
-if (Object.prototype.toString.call(window.operamini) === '[object OperaMini]'
-    || !("placeholder" in document.createElement("input"))
-    || !("placeholder" in document.createElement("textarea"))) {
-    window.mktemptext = (function () {
-    function ttaction(event) {
-        var $e = $(this), p = $e.attr("placeholder"), v = $e.val();
-        if (event.type == "focus" && v === p)
-            $e.val("");
-        if (event.type == "blur" && (v === "" | v === p))
-            $e.val(p);
-        $e.toggleClass("temptext", event.type != "focus" && (v === "" || v === p));
+// HtmlCollector
+function HtmlCollector() {
+    this.clear();
+}
+HtmlCollector.prototype.push = function (open, close) {
+    if (open && close) {
+        this.open.push(this.html + open);
+        this.close.push(close);
+        this.html = "";
+        return this.open.length - 1;
+    } else
+        this.html += open;
+    return this;
+};
+HtmlCollector.prototype.pop = function (pos) {
+    var n = this.open.length;
+    if (pos == null)
+        pos = Math.max(0, n - 1);
+    while (n > pos) {
+        --n;
+        this.html = this.open[n] + this.html + this.close[n];
+        this.open.pop();
+        this.close.pop();
     }
+    return this;
+};
+HtmlCollector.prototype.pop_n = function (n) {
+    this.pop(Math.max(0, this.open.length - n));
+    return this;
+};
+HtmlCollector.prototype.push_pop = function (text) {
+    this.html += text;
+    return this.pop();
+};
+HtmlCollector.prototype.pop_push = function (open, close) {
+    this.pop();
+    return this.push(open, close);
+};
+HtmlCollector.prototype.pop_collapse = function (pos) {
+    if (pos == null)
+        pos = this.open.length ? this.open.length - 1 : 0;
+    while (this.open.length > pos) {
+        if (this.html !== "")
+            this.html = this.open[this.open.length - 1] + this.html +
+                this.close[this.open.length - 1];
+        this.open.pop();
+        this.close.pop();
+    }
+    return this;
+};
+HtmlCollector.prototype.render = function () {
+    this.pop(0);
+    return this.html;
+};
+HtmlCollector.prototype.clear = function () {
+    this.open = [];
+    this.close = [];
+    this.html = "";
+    return this;
+};
+HtmlCollector.prototype.next_htctl_id = (function () {
+var id = 1;
+return function () {
+    while (document.getElementById("htctl" + id))
+        ++id;
+    ++id;
+    return "htctl" + (id - 1);
+};
+})();
 
-    return function ($base) {
-        $base.find("input[placeholder], textarea[placeholder]").each(function () {
-            if (!hasClass(this, "has-mktemptext")) {
-                $(this).on("focus blur change input", ttaction).addClass("has-mktemptext");
-                ttaction.call(this, {type: "blur"});
+
+// popup dialogs
+function popup_skeleton(options) {
+    var hc = new HtmlCollector, $d = null;
+    options = options || {};
+    hc.push('<div class="modal" role="dialog"><div class="modal-dialog'
+        + (!options.anchor || options.anchor === window ? " modal-dialog-centered" : "")
+        + (options.style ? '" style="' + escape_entities(options.style) : '')
+        + '" role="document"><div class="modal-content"><form enctype="multipart/form-data" accept-charset="UTF-8"'
+        + (options.form_class ? ' class="' + options.form_class + '"' : '')
+        + '>', '</form></div></div></div>');
+    hc.push_actions = function (actions) {
+        hc.push('<div class="popup-actions">', '</div>');
+        if (actions)
+            hc.push(actions.join("")).pop();
+        return hc;
+    };
+    function show_errors(data) {
+        var form = $d.find("form")[0],
+            dbody = $d.find(".popup-body"),
+            m = render_xmsg(2, data.error);
+        $d.find(".msg-error").remove();
+        dbody.length ? dbody.prepend(m) : $d.find("h2").after(m);
+        for (var f in data.errf || {}) {
+            var e = form[f];
+            if (e) {
+                var x = $(e).closest(".entryi, .f-i");
+                (x.length ? x : $(e)).addClass("has-error");
+            }
+        }
+        return $d;
+    }
+    function close() {
+        tooltip.erase();
+        $d.find("textarea, input").unautogrow();
+        $d.trigger("closedialog");
+        $d.remove();
+        removeClass(document.body, "modal-open");
+    }
+    function show() {
+        $d = $(hc.render()).appendTo(document.body);
+        $d.find(".need-tooltip").each(tooltip);
+        $d.on("click", function (event) {
+            event.target === $d[0] && close();
+        });
+        $d.find("button[name=cancel]").on("click", close);
+        $d.on("keydown", function (event) {
+            if (event_modkey(event) === 0 && event_key(event) === "Escape") {
+                close();
             }
         });
+        if (options.action) {
+            var f = $d.find("form")[0];
+            if (options.action instanceof HTMLFormElement) {
+                $(f).attr({action: options.action.action, method: options.action.method});
+            } else {
+                $(f).attr({action: options.action, method: options.method || "post"});
+            }
+            if (f.getAttribute("method") === "post"
+                && !/post=/.test(f.getAttribute("action"))
+                && !/^(?:[a-z]*:|\/\/)/.test(f.getAttribute("action"))) {
+                $(f).prepend('<input type="hidden" name="post" value="' + escape_entities(siteurl_postvalue) + '">');
+            }
+        }
+        for (var k in {minWidth: 1, maxWidth: 1, width: 1}) {
+            if (options[k] != null)
+                $d.children().css(k, options[k]);
+        }
+        $d.show_errors = show_errors;
+        $d.close = close;
+    }
+    hc.show = function (visible) {
+        if (!$d) {
+            show();
+        }
+        if (visible !== false) {
+            popup_near($d, options.anchor || window);
+            $d.find(".need-autogrow").autogrow();
+            $d.find(".need-suggest").each(suggest);
+            $d.find(".need-tooltip").each(tooltip);
+        }
+        return $d;
     };
-    })();
-
-    $(function () { mktemptext($(document)); });
-} else {
-    window.mktemptext = $.noop;
+    return hc;
 }
 
-
-// style properties
-// IE8 can't handle rgba and throws exceptions. Those exceptions
-// clutter my inbox. XXX Revisit in mid-2016.
-window.assign_style_property = (function () {
-var e = document.createElement("div");
-try {
-    e.style.outline = "4px solid rgba(9,9,9,0.3)";
-    return function (elt, property, value) {
-        elt.style[property] = value;
-    };
-} catch (err) {
-    return function (elt, property, value) {
-        value = value.replace(/\brgba\((.*?),\s*[\d.]+\)/, "rgb($1)");
-        elt.style[property] = value;
-    };
+function popup_near(elt, anchor) {
+    tooltip.erase();
+    if (elt.jquery)
+        elt = elt[0];
+    while (!hasClass(elt, "modal-dialog"))
+        elt = elt.childNodes[0];
+    var bgelt = elt.parentNode;
+    addClass(bgelt, "show");
+    addClass(document.body, "modal-open");
+    if (!hasClass(elt, "modal-dialog-centered")) {
+        var anchorPos = $(anchor).geometry(),
+            wg = $(window).geometry(),
+            po = $(bgelt).offset(),
+            y = (anchorPos.top + anchorPos.bottom - elt.offsetHeight) / 2;
+        y = Math.max(wg.top + 5, Math.min(wg.bottom - 5 - elt.offsetHeight, y)) - po.top;
+        elt.style.top = y + "px";
+        var x = (anchorPos.right + anchorPos.left - elt.offsetWidth) / 2;
+        x = Math.max(wg.left + 5, Math.min(wg.right - 5 - elt.offsetWidth, x)) - po.left;
+        elt.style.left = x + "px";
+    }
+    var efocus;
+    $(elt).find("input, button, textarea, select").filter(":visible").each(function () {
+        if (hasClass(this, "want-focus")) {
+            efocus = this;
+            return false;
+        } else if (!efocus
+                   && !hasClass(this, "btn-danger")
+                   && !hasClass(this, "no-focus")) {
+            efocus = this;
+        }
+    });
+    efocus && focus_at(efocus);
 }
-})();
+
+function override_deadlines(callback) {
+    var self = this, hc = popup_skeleton({anchor: this});
+    hc.push('<p>' + (this.getAttribute("data-override-text") || "Are you sure you want to override the deadline?") + '</p>');
+    hc.push_actions([
+        '<button type="button" name="bsubmit" class="btn-primary"></button>',
+        '<button type="button" name="cancel">Cancel</button>'
+    ]);
+    var $d = hc.show(false);
+    $d.find("button[name=bsubmit]")
+        .html(this.getAttribute("aria-label")
+              || $(this).html()
+              || this.getAttribute("value")
+              || "Save changes")
+        .on("click", function (event) {
+            if (callback && $.isFunction(callback)) {
+                callback();
+            } else {
+                var form = self.closest("form");
+                $(form).append('<input type="hidden" name="' + (self.getAttribute("data-override-submit") || "") + '" value="1"><input type="hidden" name="override" value="1">');
+                addClass(form, "submitting");
+                form.submit();
+            }
+            $d.close();
+        });
+    hc.show();
+}
+handle_ui.on("js-override-deadlines", override_deadlines);
+
 
 
 // initialization
@@ -1619,7 +2020,7 @@ function checkdl(now, endtime, ingrace) {
 
 function display_main(is_initial) {
     // this logic is repeated in the back end
-    var s = "", i, x, subtype, browser_now = now_sec(),
+    var i, x, subtype, browser_now = now_sec(),
         now = +dl.now + (browser_now - +dl.load),
         elt = $$("header-deadline");
 
@@ -1654,17 +2055,23 @@ function display_main(is_initial) {
         }
 
     if (dlname) {
-        s = "<a href=\"" + hoturl_html("deadlines") + "\">" + dlname + " deadline</a> ";
+        var impending = !dltime || dltime - now < 180.5,
+            s = '<a href="' + hoturl_html("deadlines");
+        if (impending)
+            s += '" class="impending';
+        s += '">' + dlname + ' deadline</a> ';
         if (!dltime || dltime - now < 0.5)
             s += "is NOW";
         else
             s += unparse_time_relative(dltime, now, 8);
-        if (!dltime || dltime - now < 180.5)
+        if (impending)
             s = '<span class="impending">' + s + '</span>';
+        elt.innerHTML = s;
+        removeClass(elt, "hidden");
+    } else {
+        elt.innerHTML = "";
+        addClass(elt, "hidden");
     }
-
-    elt.innerHTML = s;
-    s ? removeClass(elt, "hidden") : addClass(elt, "hidden");
 
     if (!redisplay_timeout && dlname) {
         if (!dltime || dltime - now < 180.5)
@@ -1723,7 +2130,8 @@ function tracker_show_elapsed() {
         return;
     var now = now_sec(), max_delta_ms = 0;
     $(".tracker-timer").each(function () {
-        var tr = find_tracker(+this.closest(".has-tracker").getAttribute("data-trackerid")),
+        var tre = this.closest(".has-tracker"),
+            tr = find_tracker(+tre.getAttribute("data-trackerid")),
             t = "";
         if (tr && tr.position_at) {
             var delta = now - (tr.position_at + dl.load - dl.now);
@@ -1827,8 +2235,13 @@ function display_tracker() {
     if (!dl.tracker
         || (dl.tracker.ts && dl.tracker.ts.length === 0)
         || hasClass(document.body, "hide-tracker")) {
-        if (mne)
+        if (mne) {
+            if (window.global_tooltip
+                && mne.contains(global_tooltip.near())) {
+                global_tooltip.erase();
+            }
             mne.parentNode.removeChild(mne);
+        }
         if (mnspace)
             mnspace.parentNode.removeChild(mnspace);
         return;
@@ -1859,6 +2272,10 @@ function display_tracker() {
     } else
         t = tracker_html(dl.tracker);
     if (t !== last_tracker_html) {
+        if (window.global_tooltip
+            && mne.contains(global_tooltip.near())) {
+            global_tooltip.erase();
+        }
         last_tracker_html = mne.innerHTML = t;
         $(mne).find(".need-tooltip").each(tooltip);
         if (tracker_has_format)
@@ -1898,16 +2315,16 @@ handle_ui.on("js-tracker", function (event) {
             hc.push('<input type="hidden" name="tr' + trno + '-p" value="' + hotcrp_paperid + '">');
         if (tr.listinfo)
             hc.push('<input type="hidden" name="tr' + trno + '-listinfo" value="' + escape_entities(tr.listinfo) + '">');
-        hc.push('<div class="entryi"><label for="htctl-tr' + trno + '-name">Name</label><input id="htctl-tr' + trno + '-name" type="text" name="tr' + trno + '-name" size="30" class="want-focus" value="' + escape_entities(tr.name || "") + (tr.is_new ? '" placeholder="New tracker' : '" placeholder="Unnamed') + '"></div>');
+        hc.push('<div class="entryi"><label for="htctl-tr' + trno + '-name">Name</label><div class="entry"><input id="htctl-tr' + trno + '-name" type="text" name="tr' + trno + '-name" size="30" class="want-focus need-autogrow" value="' + escape_entities(tr.name || "") + (tr.is_new ? '" placeholder="New tracker' : '" placeholder="Unnamed') + '"></div></div>');
         var vis = tr.visibility || "", vistype = vis === "" ? "" : vis.charAt(0);
         hc.push('<div class="entryi has-fold fold' + (vistype === "" ? "c" : "o") + '" data-fold-values="+ -"><label for="htctl-tr' + trno + '-vistype">PC visibility</label><div class="entry">', '</div></div>');
-        hc.push('<span class="select"><select id="htctl-tr' + trno + '-vistype" name="tr' + trno + '-vistype" class="uich js-foldup">', '</select></span>');
+        hc.push('<span class="select"><select id="htctl-tr' + trno + '-vistype" name="tr' + trno + '-vistype" class="uich js-foldup" data-default-value="' + vistype + '">', '</select></span>');
         var vismap = {"": "Whole PC", "+": "PC members with tag", "-": "PC members without tag"};
         for (var i in vismap)
             hc.push('<option value="' + i + '"' + (i === vistype ? " selected" : "") + '>' + vismap[i] + '</option>');
         hc.pop();
-        hc.push_pop('  <input type="text" name="tr' + trno + '-vis" value="' + escape_entities(vis.substring(1)) + '" placeholder="(tag)" class="need-suggest pc-tags fx">');
-        if ((vis = dl.tracker.global_visibility)) {
+        hc.push_pop('  <input type="text" name="tr' + trno + '-vis" value="' + escape_entities(vis.substring(1)) + '" placeholder="(tag)" class="need-suggest need-autogrow pc-tags fx">');
+        if (dl.tracker && (vis = dl.tracker.global_visibility)) {
             hc.push('<div class="entryi"><label><a href="' + hoturl("settings", "group=tracks") + '" target="_blank">Global visibility</a></label><div class="entry">', '</div></div>');
             if (vis === "+none")
                 hc.push('Administrators only');
@@ -1927,7 +2344,7 @@ handle_ui.on("js-tracker", function (event) {
                     && tr.papers[tr.paper_offset].pid
                     && (pos = ids.indexOf(tr.papers[tr.paper_offset].pid)) > -1)
                     ids[pos] = '<b>' + ids[pos] + '</b>';
-                hc.push('<div class="entryi"><label>Submissions</label><div class="entry"><input type="hidden" name="tr' + trno + '-p" disabled>' + ids.join(" ") + '</div></div>');
+                hc.push('<div class="entryi"><label>Order</label><div class="entry"><input type="hidden" name="tr' + trno + '-p" disabled>' + ids.join(" ") + '</div></div>');
             }
         } catch (e) {
         }
@@ -1960,6 +2377,7 @@ handle_ui.on("js-tracker", function (event) {
         push_tracker(hc, tr);
         focus_within($(hc.render()).insertBefore($myg));
         $myg.remove();
+        $d.find(".need-autogrow").autogrow();
         $d.find(".need-suggest").each(suggest);
     }
     function make_submit_success(hiding, why) {
@@ -1988,6 +2406,8 @@ handle_ui.on("js-tracker", function (event) {
     }
     function submit(event) {
         var f = $d.find("form")[0], hiding = {};
+        $d.find(".tracker-changemark").remove();
+
         $d.find(".tracker-group").each(function () {
             var trno = this.getAttribute("data-index"),
                 id = this.getAttribute("data-trackerid"),
@@ -1995,6 +2415,17 @@ handle_ui.on("js-tracker", function (event) {
             if (e)
                 hiding[id] = e.checked;
         });
+
+        // mark differences
+        var trd = {};
+        $d.find("input, select, textarea").each(function () {
+            var m = this.name.match(/^tr(\d+)/);
+            if (m && input_differs(this))
+                trd[m[1]] = true;
+        });
+        for (var i in trd)
+            f.appendChild($('<input class="tracker-changemark" type="hidden" name="tr' + i + '-changed" value="1">')[0]);
+
         $.post(hoturl_post("api/trackerconfig"),
                $d.find("form").serialize(),
                make_submit_success(hiding));
@@ -2008,12 +2439,13 @@ handle_ui.on("js-tracker", function (event) {
         var hc = popup_skeleton({minWidth: "38rem"});
         hc.push('<h2>Meeting tracker</h2>');
         var trackers, trno = 1, nshown = 0;
-        if (!dl.tracker)
+        if (!dl.tracker) {
             trackers = [];
-        else if (!dl.tracker.ts)
+        } else if (!dl.tracker.ts) {
             trackers = [dl.tracker];
-        else
+        } else {
             trackers = dl.tracker.ts;
+        }
         for (var i = 0; i !== trackers.length; ++i) {
             if (trackers[i].allow_administer) {
                 push_tracker(hc, trackers[i]);
@@ -2023,13 +2455,16 @@ handle_ui.on("js-tracker", function (event) {
         if (document.body
             && hasClass(document.body, "has-hotlist")
             && (hotcrp_status.is_admin || hotcrp_status.is_track_admin)
-            && !hotcrp_status.tracker_here)
+            && !hotcrp_status.tracker_here) {
             hc.push('<div class="lg"><button type="button" name="new">Start new tracker</button></div>');
+        } else {
+            hc.push('<div class="lg"><button type="button" class="need-tooltip btn-disabled" tabindex="-1" aria-label="This browser tab is already running a tracker.">Start new tracker</button></div>');
+        }
         hc.push_actions();
         hc.push('<button type="submit" name="save" class="btn-primary">Save changes</button><button type="button" name="cancel">Cancel</button>');
         if (nshown) {
-            hc.push('<button type="button" name="stopall" class="dangerous btnl">Stop all</button>');
-            hc.push('<a class="btn btnl" target="_blank" href="' + hoturl("buzzer") + '">Tracker status page</a>');
+            hc.push('<button type="button" name="stopall" class="btn-danger float-left">Stop all</button>');
+            hc.push('<a class="btn float-left" target="_blank" href="' + hoturl("buzzer") + '">Tracker status page</a>');
         }
         $d = hc.show();
         show_elapsed();
@@ -2038,7 +2473,6 @@ handle_ui.on("js-tracker", function (event) {
             .on("click", "button[name=new]", new_tracker)
             .on("click", "button[name=stopall]", stop_all)
             .on("submit", "form", submit);
-        $d.find(".need-suggest").each(suggest);
     }
     if (event.shiftKey
         || event.ctrlKey
@@ -2314,135 +2748,55 @@ var hotcrp_load = (function ($) {
 })(jQuery);
 
 
-function input_is_checkboxlike(elt) {
-    return elt.type === "checkbox" || elt.type === "radio";
-}
-
-function input_default_value(elt) {
-    if (input_is_checkboxlike(elt)) {
-        if (elt.hasAttribute("data-default-checked"))
-            return !!elt.getAttribute("data-default-checked");
-        else
-            return elt.defaultChecked;
+function fold_storage() {
+    if (!this || this === window) {
+        $(".need-fold-storage").each(fold_storage);
     } else {
-        if (elt.hasAttribute("data-default-value"))
-            return elt.getAttribute("data-default-value");
-        else
-            return elt.defaultValue;
-    }
-}
-
-function form_differs(form, want_ediff) {
-    var ediff = null, $f = $(form).find("input, select, textarea");
-    if (!$f.length)
-        $f = $(form).filter("input, select, textarea");
-    $f.each(function () {
-        var $me = $(this);
-        if ($me.hasClass("ignore-diff"))
-            return true;
-        var expected = input_default_value(this);
-        if (input_is_checkboxlike(this)) {
-            if (this.checked !== expected)
-                ediff = this;
+        removeClass(this, "need-fold-storage");
+        var sn = this.getAttribute("data-fold-storage"), smap, k, v,
+            spfx = this.getAttribute("data-fold-storage-prefix") || "";
+        if (sn.charAt(0) === "{" || sn.charAt(0) === "[") {
+            smap = JSON.parse(sn) || {};
         } else {
-            var current = this.tagName === "SELECT" ? $me.val() : this.value;
-            if (!text_eq(current, expected))
-                ediff = this;
+            var m = this.className.match(/\bfold(\d*)[oc]\b/),
+                n = m[1] === "" ? 0 : +m[1];
+            smap = {};
+            smap[n] = sn;
         }
-        return !ediff;
-    });
-    return want_ediff ? ediff : !!ediff;
-}
-
-function form_defaults(form, values) {
-    if (values) {
-        $(form).find("input, select, textarea").each(function () {
-            if (input_is_checkboxlike(this))
-                this.setAttribute("data-default-checked", values[this.name] ? "1" : "");
-            else
-                this.setAttribute("data-default-value", values[this.name] || "");
-        });
-    } else {
-        values = {};
-        $(form).find("input, select, textarea").each(function () {
-            values[this.name] = input_default_value(this);
-        });
-        return values;
-    }
-}
-
-function form_highlight(form, elt) {
-    (form instanceof HTMLElement) || (form = $(form)[0]);
-    toggleClass(form, "alert", (elt && form_differs(elt)) || form_differs(form));
-}
-
-function hiliter_children(form, on_unload) {
-    form = $(form)[0];
-    form_highlight(form);
-    $(form).on("change input", "input, select, textarea", function () {
-        if (!hasClass(this, "ignore-diff") && !hasClass(form, "ignore-diff"))
-            form_highlight(form, this);
-    });
-    if (on_unload) {
-        $(form).on("submit", function () {
-            $(this).addClass("submitting");
-        });
-        $(window).on("beforeunload", function () {
-            if (hasClass(form, "alert") && !hasClass(form, "submitting"))
-                return "If you leave this page now, your edits may be lost.";
-        });
-    }
-}
-
-function focus_at(felt) {
-    felt.jquery && (felt = felt[0]);
-    felt.focus();
-    if (!felt.hotcrp_ever_focused) {
-        if (felt.select && hasClass(felt, "want-select"))
-            felt.select();
-        else if (felt.setSelectionRange) {
-            try {
-                felt.setSelectionRange(felt.value.length, felt.value.length);
-            } catch (e) { // ignore errors
+        sn = wstorage.json(true, "fold") || wstorage.json(false, "fold") || {};
+        for (k in smap) {
+            if (sn[spfx + smap[k]]) {
+                foldup.call(this, null, {f: false, n: +k});
             }
         }
-        felt.hotcrp_ever_focused = true;
     }
 }
 
-function focus_within(elt, subfocus_selector) {
-    var $wf = $(elt).find(".want-focus");
-    if (subfocus_selector)
-        $wf = $wf.filter(subfocus_selector);
-    if ($wf.length == 1)
-        focus_at($wf[0]);
-    return $wf.length == 1;
-}
-
-function refocus_within(elt) {
-    var focused = document.activeElement;
-    if (focused && focused.tagName !== "A" && !$(focused).is(":visible")) {
-        while (focused && focused !== elt)
-            focused = focused.parentElement;
-        if (focused) {
-            var focusable = $(elt).find("input, select, textarea, a, button").filter(":visible").first();
-            focusable.length ? focusable.focus() : $(document.activeElement).blur();
-        }
+function fold_session_for(foldnum, type) {
+    var s = this.getAttribute("data-fold-" + type);
+    if (s && (s.charAt(0) === "{" || s.charAt(0) === "[")) {
+        s = (JSON.parse(s) || {})[foldnum];
     }
+    if (s && this.hasAttribute("data-fold-" + type + "-prefix")) {
+        s = this.getAttribute("data-fold-" + type + "-prefix") + s;
+    }
+    return s;
 }
 
 function fold(elt, dofold, foldnum) {
-    var i, foldname, opentxt, closetxt, isopen, foldnumid;
+    var i, foldname, opentxt, closetxt, isopen, foldnumid, s;
 
     // find element
     if (elt && ($.isArray(elt) || elt.jquery)) {
         for (i = 0; i < elt.length; i++)
             fold(elt[i], dofold, foldnum);
         return false;
-    } else if (typeof elt == "string")
+    } else if (typeof elt == "string") {
         elt = $$("fold" + elt) || $$(elt);
-    if (!elt)
+    }
+    if (!elt) {
         return false;
+    }
 
     // find element name, fold number, fold/unfold
     foldname = /^fold/.test(elt.id || "") ? elt.id.substr(4) : false;
@@ -2451,7 +2805,7 @@ function fold(elt, dofold, foldnum) {
     closetxt = "fold" + foldnumid + "c";
 
     // check current fold state
-    isopen = elt.className.indexOf(opentxt) >= 0;
+    isopen = hasClass(elt, opentxt);
     if (dofold == null || !dofold != isopen) {
         // perform fold
         if (isopen) {
@@ -2460,16 +2814,21 @@ function fold(elt, dofold, foldnum) {
             elt.className = elt.className.replace(closetxt, opentxt);
         }
         var focused = document.activeElement;
-        if (!focused || !hasClass(focused, "keep-focus"))
-            (!isopen && focus_within(elt)) || refocus_within(elt);
+        if ((!focused || !hasClass(focused, "keep-focus"))
+            && (isopen || !focus_within(elt))) {
+            refocus_within(elt);
+        }
 
         // check for session
-        var ses = elt.getAttribute("data-fold-session");
-        if (ses) {
-            if (ses.charAt(0) === "{" || ses.charAt(0) === "[")
-                ses = (JSON.parse(ses) || {})[foldnum];
-            if (ses)
-                $.post(hoturl_post("api/setsession", {v: ses + (isopen ? "=1" : "=0")}));
+        if ((s = fold_session_for.call(elt, foldnum, "storage"))) {
+            var sj = wstorage.json(true, "fold") || {};
+            isopen ? delete sj[s] : sj[s] = 1;
+            wstorage(true, "fold", $.isEmptyObject(sj) ? null : sj);
+            var sj = wstorage.json(false, "fold") || {};
+            isopen ? delete sj[s] : sj[s] = 1;
+            wstorage(false, "fold", $.isEmptyObject(sj) ? null : sj);
+        } else if ((s = fold_session_for.call(elt, foldnum, "session"))) {
+            $.post(hoturl_post("api/session", {v: s + (isopen ? "=1" : "=0")}));
         }
     }
 
@@ -2478,28 +2837,30 @@ function fold(elt, dofold, foldnum) {
 
 function foldup(event, opts) {
     var e = this, dofold = false, m, x;
-    if (typeof opts === "number")
+    if (typeof opts === "number") {
         opts = {n: opts};
-    else if (!opts)
+    } else if (!opts) {
         opts = {};
+    }
     if (this.tagName === "DIV"
         && event
-        && event.target.tagName === "A"
-        && !opts.required)
+        && event.target.closest("a")
+        && !opts.required) {
         return;
-    if (!("n" in opts) && (x = this.getAttribute("data-fold-target"))) {
-        var sp = x.indexOf("#");
-        if (sp > 0) {
-            e = $$(x.substring(0, sp));
-            x = x.substring(sp + 1);
+    }
+    if (!("n" in opts)
+        && e.hasAttribute("data-fold-target")
+        && (m = e.getAttribute("data-fold-target").match(/^(\D[^#]*$|.*(?=#)|)#?(\d*)([cou]?)$/))) {
+        if (m[1] !== "") {
+            e = document.getElementById(m[1]);
         }
-        opts.n = parseInt(x) || 0;
-        if (!("f" in opts)) {
-            var last = x.length ? x.charAt(x.length - 1) : "";
-            if (last === "c")
-                opts.f = true;
-            else if (last === "o")
-                opts.f = false;
+        opts.n = parseInt(m[2]) || 0;
+        if (!("f" in opts) && m[3] !== "") {
+            if (this.tagName === "INPUT" && this.type === "checkbox" && m[3] === "u") {
+                opts.f = this.checked;
+            } else {
+                opts.f = m[3] === "c";
+            }
         }
     }
     var foldname = "fold" + (opts.n || "");
@@ -2508,10 +2869,12 @@ function foldup(event, opts) {
            && !hasClass(e, "has-fold")
            && (opts.n == null
                || (!hasClass(e, foldname + "c")
-                   && !hasClass(e, foldname + "o"))))
+                   && !hasClass(e, foldname + "o")))) {
         e = e.parentNode;
-    if (!e)
+    }
+    if (!e) {
         return true;
+    }
     if (opts.n == null && (m = e.className.match(/\bfold(\d*)[oc]\b/))) {
         opts.n = +m[1];
         foldname = "fold" + (opts.n || "");
@@ -2519,9 +2882,9 @@ function foldup(event, opts) {
     if (!("f" in opts)
         && (this.tagName === "INPUT" || this.tagName === "SELECT")) {
         var value = null;
-        if (this.type === "checkbox")
+        if (this.type === "checkbox") {
             opts.f = !this.checked;
-        else if (this.type === "radio") {
+        } else if (this.type === "radio") {
             if (!this.checked)
                 return true;
             value = this.value;
@@ -2539,9 +2902,13 @@ function foldup(event, opts) {
         fold(e, dofold, opts.n || 0);
         $(e).trigger(opts.f ? "fold" : "unfold", opts);
     }
-    if (this.hasAttribute("aria-expanded"))
+    if (this.hasAttribute("aria-expanded")) {
         this.setAttribute("aria-expanded", dofold ? "false" : "true");
-    if (event && typeof event === "object" && event.type === "click") {
+    }
+    if (event
+        && typeof event === "object"
+        && event.type === "click"
+        && !hasClass(event.target, "uic")) {
         event.stopPropagation();
         event.preventDefault(); // needed for expanders despite handle_ui!
     }
@@ -2587,7 +2954,7 @@ handle_ui.on("js-click-child", function (event) {
 
 // history
 
-var push_history_state;
+var push_history_state, ever_push_history_state = false;
 if ("pushState" in window.history) {
     push_history_state = function (href) {
         var state;
@@ -2601,114 +2968,103 @@ if ("pushState" in window.history) {
             $(document).trigger("collectState", [state]);
             history.pushState(state, document.title, state.href);
         }
-        return false;
+        ever_push_history_state = true;
+        return true;
     };
 } else {
-    push_history_state = function () { return true; };
+    push_history_state = function () { return false; };
 }
 
 
-// focus_fold
+// line links
 
-window.focus_fold = (function ($) {
-var has_focused;
+handle_ui.on("lla", function (event) {
+    var e = this.closest(".linelink");
+    var f = e.closest(".linelinks");
+    $(f).find(".linelink").removeClass("active");
+    addClass(e, "active");
+    $(e).trigger("unfold", {f: false});
+    focus_within(e, ".lld *");
+});
 
-function focus_fold(event) {
-    var e = this, m, f;
-    if (e.hasAttribute("data-fold-target")) {
-        foldup.call(e, event);
-        return (has_focused = true);
+$(function () {
+    $(".linelink.active").trigger("unfold", {f: false, linelink: true});
+});
+
+
+// tla, focus history
+
+handle_ui.on("tla", function (event) {
+    var hash = this.href.replace(/^[^#]*#*/, "");
+    var e = document.getElementById("tla-" + (hash || "default"));
+    $(".is-tla, .tll, .papmode").removeClass("active");
+    addClass(e, "active");
+    addClass(this.closest(".tll, .papmode"), "active");
+    push_history_state(this.href);
+    focus_within(e);
+});
+
+function jump_hash(hash, focus) {
+    var e, m, p;
+    // clean up hash, including trailers like “%E3%80%82” (ideographic full stop)
+    hash = hash.replace(/^[^#]*#?/, "");
+    if (hash !== ""
+        && !document.getElementById(hash)
+        && (m = hash.match(/^[-_a-zA-Z0-9]+(?=[^-_a-zA-Z0-9])/))
+        && document.getElementById(m[0])) {
+        hash = location.hash = m[0];
     }
-    while (e) {
-        if (hasClass(e, "linelink")) {
-            f = e.parentElement;
-            while (f && !hasClass(f, "linelinks"))
-                f = f.parentElement;
-            if (!f)
-                break;
-            $(f).find(".linelink").removeClass("active");
+    // check for destination tla element
+    e = document.getElementById("tla-" + (hash || "default"));
+    if (e) {
+        if (!hasClass(e, "active")) {
+            $(".is-tla, .tll, .papmode").removeClass("active");
             addClass(e, "active");
-            $(e).trigger("unfold", {f: false});
-            if (event || has_focused === false) {
-                focus_within(e, ".lld *");
-                event && event.preventDefault();
-            }
-            return (has_focused = true);
-        } else if ((m = e.className.match(/\b(?:tll|tld)(\d+)/))) {
-            while (e && !/\b(?:tab|line)links\d/.test(e.className))
-                e = e.parentElement;
-            if (!e)
-                break;
-            e.className = e.className.replace(/links\d+/, 'links' + m[1]);
-            if (event || has_focused === false) {
-                focus_within(e, ".tld" + m[1] + " *");
-                event && event.preventDefault();
-            }
-            return (has_focused = true);
-        } else
-            e = e.parentElement;
+            $(".tla").each(function () {
+                if ((hash === "" && this.href.indexOf("#") === -1)
+                    || this.href.endsWith("#" + hash)) {
+                    addClass(this.closest(".tll, .papmode"), "active");
+                }
+            });
+        }
+        if (focus) {
+            focus_within(e);
+        }
+        return true;
+    }
+    // find destination element
+    if (hash
+        && (e = document.getElementById(hash))
+        && (p = e.closest(".papeg, .rveg, .f-i, .form-g, .entryi, .checki"))) {
+        var eg = $(e).geometry(), pg = $(p).geometry(), wh = $(window).height();
+        if ((eg.width <= 0 && eg.height <= 0)
+            || (pg.top <= eg.top && eg.top - pg.top <= wh * 0.75)) {
+            $(".tla-highlight").removeClass("tla-highlight");
+            window.scroll(0, pg.top - Math.max(wh > 300 ? 20 : 0, (wh - pg.height) * 0.25));
+            $(p).find("label").first().addClass("tla-highlight");
+            focus_at(e);
+            return true;
+        }
     }
     return false;
 }
 
-function jump(hash) {
-    var e, m, $g;
-    if (hash !== "" && hash.charAt(0) !== "#") {
-        m = hash.match(/#.*/);
-        hash = m ? m[0] : "";
-    }
-    // clean up unwanted trailers, such as “%E3%80%82” (ideographic full stop)
-    if (hash !== "") {
-        e = document.getElementById(hash.substring(1));
-        if (!e
-            && (m = hash.match(/^#([-_a-zA-Z0-9]+)(?=[^-_a-zA-Z0-9])/))
-            && (e = document.getElementById(m[1])))
-            hash = location.hash = m[0];
-    }
-    $("a.has-focus-history").each(function () {
-        if (this.getAttribute("href") === hash) {
-            focus_fold.call(this);
-            return false;
-        }
-    });
-    if (e && ($g = $(e).closest(".papeg")).length) {
-        var hashg = $(e).geometry(), gg = $g.geometry();
-        if ((hashg.width <= 0 && hashg.height <= 0)
-            || (hashg.top >= gg.top && hashg.top - gg.top <= 100))
-            $g.scrollIntoView();
-    } else if (e && hasClass(e, "response") && hasClass(e, "editable"))
-        papercomment.edit_id(hash.substring(1));
-}
-
 $(window).on("popstate", function (event) {
     var state = (event.originalEvent || event).state;
-    state && jump(state.href);
+    if (state) {
+        jump_hash(state.href);
+    }
 }).on("hashchange", function (event) {
-    jump(location.hash);
+    jump_hash(location.hash);
 });
 $(function () {
-    has_focused || jump(location.hash);
-    $(".linelink.active").trigger("unfold", {f: false, linelink: true});
+    if (!ever_push_history_state) {
+        jump_hash(location.hash, hasClass(document.body, "want-hash-focus"));
+    }
 });
 
-function handler(event) {
-    if (focus_fold.call(this, event)
-        && this instanceof HTMLAnchorElement
-        && hasClass(this, "has-focus-history"))
-        push_history_state(this.href);
-}
-handler.autofocus = function () { has_focused || (has_focused = false); };
-return handler;
-})($);
 
-handle_ui.on("tla", focus_fold);
-
-function make_link_callback(elt) {
-    return function () {
-        window.location = elt.href;
-    };
-}
-
+// autosubmit
 
 $(document).on("focus", "input.js-autosubmit", function (event) {
     var $self = $(event.target);
@@ -2716,8 +3072,9 @@ $(document).on("focus", "input.js-autosubmit", function (event) {
 });
 
 $(document).on("keypress", "input.js-autosubmit", function (event) {
-    if (event_modkey(event) || event_key(event) !== "Enter")
+    if (event_modkey(event) || event_key(event) !== "Enter") {
         return;
+    }
     var $f = $(event.target).closest("form"),
         type = $f.data("autosubmitType"),
         defaulte = $f[0] ? $f[0]["default"] : null;
@@ -2741,13 +3098,13 @@ handle_ui.on("js-submit-mark", function (event) {
 (function ($) {
 function make_radio(name, value, html, revtype) {
     var rname = "assrev" + name, id = rname + "_" + value,
-        t = '<div class="assignment-ui-choice">'
+        t = '<div class="assignment-ui-choice checki"><label><span class="checkc">'
         + '<input type="radio" name="' + rname + '" value="' + value + '" id="' + id + '" class="assignment-ui-radio';
     if (value == revtype)
         t += ' want-focus" checked';
     else
         t += '"';
-    t += '>&nbsp;<label for="' + id + '">';
+    t += '></span>';
     if (value != 0)
         t += '<span class="rto rt' + value + '"><span class="rti">' + ["C", "", "E", "P", "2", "1", "M"][value + 1] + '</span></span>&nbsp;';
     if (value == revtype)
@@ -2783,10 +3140,8 @@ function make_round_selector(name, revtype, $a) {
 }
 function revtype_change(event) {
     close_unnecessary(event);
-    if (this.checked) {
-        var $a = $(this).closest(".has-assignment-ui");
-        fold($a[0], this.value <= 0, 2);
-    }
+    if (this.checked)
+        fold(this.closest(".has-assignment-ui"), this.value <= 0, 2);
 }
 function close_unnecessary(event) {
     var $a = $(event.target).closest(".has-assignment"),
@@ -2838,31 +3193,101 @@ handle_ui.on("js-assignment-fold", function (event) {
     }
     event.stopPropagation();
 });
+handle_ui.on("js-assignment-autosave", function (event) {
+    var f = this.closest("form");
+    toggleClass(f, "ignore-diff", this.checked);
+    $(f).find(".autosave-hidden").toggleClass("hidden", this.checked);
+    form_highlight(f);
+});
 })($);
 
-handle_ui.on("js-request-review-email", function () {
-    var v = this.value.trim(), f = $(this).closest("form")[0];
-    function success(data) {
-        if (!data || !data.ok)
-            data = {};
-        var cur_email = f.email.value.trim();
-        if (cur_email === v || f.getAttribute("data-showing-email") !== v) {
-            f.firstName.setAttribute("placeholder", data.firstName || "");
-            f.lastName.setAttribute("placeholder", data.lastName || "");
-            f.affiliation.setAttribute("placeholder", data.affiliation || "");
-            f.setAttribute("data-showing-email", v);
-        }
+(function () {
+var email_info = [], email_info_at = 0;
+handle_ui.on("js-email-populate", function () {
+    var self = this,
+        v = self.value.toLowerCase().trim(),
+        f = this.closest("form"),
+        fn = null, ln = null, nn = null, af = null, placeholder = false;
+    if (this.name === "email" || this.name === "uemail") {
+        fn = f.firstName;
+        ln = f.lastName;
+        af = f.affiliation;
+        placeholder = true;
+    } else if (this.name.substring(0, 7) === "auemail") {
+        var idx = this.name.substring(7);
+        nn = f["auname" + idx];
+        af = f["auaff" + idx];
+    } else if (this.name.substring(0, 16) === "newcontact_email") {
+        nn = f["newcontact_name" + this.name.substring(16)];
     }
-    if (/^\S+\@\S+\.\S\S+$/.test(v))
-        $.ajax(hoturl_post("api/user", {email: v}), {
-            method: "GET", success: success
-        });
-    else
+    if (!fn && !ln && !nn && !af)
+        return;
+
+    function success(data) {
+        if (data) {
+            if (data.email)
+                data.lemail = data.email.toLowerCase();
+            else
+                data.lemail = v + "~";
+            if (!email_info.length)
+                email_info_at = now_sec();
+            var i = 0;
+            while (i !== email_info.length && email_info[i] !== v)
+                i += 2;
+            if (i === email_info.length)
+                email_info.push(v, data);
+        }
+        if (!data || !data.email || data.lemail !== v)
+            data = {};
+        if (self.value.trim() !== v
+            && self.getAttribute("data-populated-email") === v)
+            return;
+        if (!data.name) {
+            if (data.firstName && data.lastName)
+                data.name = data.firstName + " " + data.lastName;
+            else if (data.lastName)
+                data.name = data.lastName;
+            else
+                data.name = data.firstName;
+        }
+        function handle(e, v) {
+            if (placeholder)
+                e.setAttribute("placeholder", v);
+            else if (e.value === "" || e.value === e.defaultValue)
+                e.value = e.defaultValue = v;
+        }
+        fn && handle(fn, data.firstName || "");
+        ln && handle(ln, data.lastName || "");
+        nn && handle(nn, data.name || "");
+        af && handle(af, data.affiliation || "");
+        self.setAttribute("data-populated-email", v);
+    }
+
+    if (/^\S+\@\S+\.\S\S+$/.test(v)) {
+        if ((email_info_at && now_sec() - email_info_at >= 3600)
+            || email_info.length > 200)
+            email_info = [];
+        var i = 0;
+        while (i !== email_info.length
+               && (v < email_info[i] || v > email_info[i + 1].lemail))
+            i += 2;
+        if (i === email_info.length) {
+            $.ajax(hoturl_post("api/user", {email: v}), {
+                method: "GET", success: success
+            });
+        } else if (v === email_info[i + 1].lemail) {
+            success(email_info[i + 1]);
+        } else {
+            success(null);
+        }
+    } else {
         success(null);
+    }
 });
+})();
 
 handle_ui.on("js-request-review-preview-email", function (event) {
-    var f = $(this).closest("form")[0],
+    var f = this.closest("form"),
         a = {p: hotcrp_paperid, template: "requestreview"},
         self = this;
     function fv(field, defaultv) {
@@ -2949,7 +3374,6 @@ function row_order_change(e, delta, action) {
             || action > 0)
            && (max_rows <= 0 || trs.length < max_rows)) {
         var $newtr = $($tbody[0].getAttribute("data-row-template")).appendTo($tbody);
-        mktemptext($newtr);
         $newtr.find(".need-tooltip").each(tooltip);
         $newtr.find(".need-suggest").each(suggest);
         trs = $tbody.children();
@@ -3030,7 +3454,7 @@ function make_outline_flasher(elt, rgba, duration) {
                 clearInterval(h.interval);
                 h.interval = null;
             } else
-                assign_style_property(elt, "outline", "4px solid rgba(" + rgba + ", " + opacity + ")");
+                elt.style.outline = "4px solid rgba(" + rgba + ", " + opacity + ")";
         }, 13);
     }
 }
@@ -3038,27 +3462,31 @@ function make_outline_flasher(elt, rgba, duration) {
 function setajaxcheck(elt, rv) {
     if (typeof elt == "string")
         elt = $$(elt);
+    else if (elt.jquery)
+        elt = elt[0];
     if (!elt)
         return;
-    if (elt.jquery && rv && !rv.ok && rv.errf) {
-        var i, e, $f = elt.closest("form");
+    if (rv && !rv.ok && rv.errf) {
+        var i, e, f = elt.closest("form");
         for (i in rv.errf)
-            if ((e = $f.find("[name='" + i + "']")).length) {
-                elt = e[0];
+            if (f && (e = f.elements[i])) {
+                elt = e;
                 break;
             }
     }
-    if (elt.jquery)
-        elt = elt[0];
     make_outline_flasher(elt);
-    if (rv && !rv.ok && !rv.error)
+    if (!rv || (!rv.ok && !rv.error))
         rv = {error: "Error"};
-    if (!rv || rv.ok)
+    if (rv.ok && !rv.warning)
         make_outline_flasher(elt, "0, 200, 0");
+    else if (rv.ok)
+        make_outline_flasher(elt, "133, 92, 4");
     else
         elt.style.outline = "5px solid red";
-    if (rv && rv.error)
+    if (rv.error)
         make_bubble(rv.error, "errorbubble").near(elt).removeOn(elt, "input change click hide");
+    else if (rv.warning)
+        make_bubble(rv.warning, "warningbubble").near(elt).removeOn(elt, "input change click hide focus blur");
 }
 
 function link_urls(t) {
@@ -3068,73 +3496,6 @@ function link_urls(t) {
     });
 }
 
-function HtmlCollector() {
-    this.clear();
-}
-HtmlCollector.prototype.push = function (open, close) {
-    if (open && close) {
-        this.open.push(this.html + open);
-        this.close.push(close);
-        this.html = "";
-        return this.open.length - 1;
-    } else
-        this.html += open;
-    return this;
-};
-HtmlCollector.prototype.pop = function (pos) {
-    if (pos == null)
-        pos = Math.max(0, this.open.length - 1);
-    while (this.open.length > pos) {
-        this.html = this.open[this.open.length - 1] + this.html +
-            this.close[this.open.length - 1];
-        this.open.pop();
-        this.close.pop();
-    }
-    return this;
-};
-HtmlCollector.prototype.pop_n = function (n) {
-    this.pop(Math.max(0, this.open.length - n));
-    return this;
-};
-HtmlCollector.prototype.push_pop = function (text) {
-    this.html += text;
-    return this.pop();
-};
-HtmlCollector.prototype.pop_push = function (open, close) {
-    this.pop();
-    return this.push(open, close);
-};
-HtmlCollector.prototype.pop_collapse = function (pos) {
-    if (pos == null)
-        pos = this.open.length ? this.open.length - 1 : 0;
-    while (this.open.length > pos) {
-        if (this.html !== "")
-            this.html = this.open[this.open.length - 1] + this.html +
-                this.close[this.open.length - 1];
-        this.open.pop();
-        this.close.pop();
-    }
-    return this;
-};
-HtmlCollector.prototype.render = function () {
-    this.pop(0);
-    return this.html;
-};
-HtmlCollector.prototype.clear = function () {
-    this.open = [];
-    this.close = [];
-    this.html = "";
-    return this;
-};
-HtmlCollector.prototype.next_htctl_id = (function () {
-var id = 1;
-return function () {
-    while (document.getElementById("htctl" + id))
-        ++id;
-    ++id;
-    return "htctl" + (id - 1);
-};
-})();
 
 
 // text rendering
@@ -3231,6 +3592,8 @@ $.extend(render_text, {
     on: on,
     on_page: function () { $(".need-format").each(on); }
 });
+
+$(render_text.on_page);
 return render_text;
 })($);
 
@@ -3253,7 +3616,74 @@ $(function () {
     }
 });
 
+var add_pslitem = (function () {
+var pslcard, observer, linkmap;
+function observer_fn(entries) {
+    for (var i = 0; i !== entries.length; ++i) {
+        var e = entries[i], psli = linkmap.get(e.target);
+        psli && toggleClass(psli, "pslitem-intersecting", e.isIntersecting);
+    }
+}
+return function (id, name, elt) {
+    if (observer === undefined) {
+        observer = linkmap = null;
+        if (window.IntersectionObserver) {
+            observer = new IntersectionObserver(observer_fn, {rootMargin: "-32px 0px"});
+        }
+        if (window.WeakMap) {
+            linkmap = new WeakMap;
+        }
+        pslcard = $(".pslcard")[0];
+    }
+    if (name == undefined) {
+        elt = typeof id === "string" ? $$(id) : id;
+        return linkmap ? linkmap.get(elt) : null;
+    } else if (pslcard) {
+        if (name === false) {
+            observer && observer.unobserve($$(id));
+            $(pslcard).find("a[href='#" + id + "']").remove();
+        } else {
+            var $psli = $('<li class="pslitem ui js-click-child"><a href="#' + id + '" class="x hover-child">' + name + '</a></li>');
+            $psli.appendTo(pslcard);
+            elt = elt || $$(id);
+            linkmap && linkmap.set(elt, $psli[0]);
+            observer && observer.observe(elt);
+            return $psli[0];
+        }
+    }
+};
+})();
+
+
 // reviews
+handle_ui.on("js-review-tokens", function () {
+    var $d;
+    function submit(evt) {
+        $d.find(".msg").remove();
+        $.post(hoturl_post("api/reviewtoken"), $d.find("form").serialize(),
+            function (data) {
+                if (data.ok) {
+                    $d.close();
+                    if (data.message) {
+                        document.cookie = "hotcrpmessage=" + encodeURIComponent(JSON.stringify(data.message));
+                        location.assign(location.href);
+                    }
+                } else {
+                    $d.find("h2").after(render_xmsg(2, data.error || "Internal error."));
+                }
+            });
+        return false;
+    }
+    var hc = popup_skeleton();
+    hc.push('<h2>Review tokens</h2>');
+    hc.push('<p>Enter tokens to gain access to the corresponding reviews.</p>');
+    hc.push('<input type="text" size="60" name="token" value="' + escape_entities(this.getAttribute("data-review-tokens") || "") + '" placeholder="Review tokens">');
+    hc.push_actions(['<button type="submit" name="save" class="btn-primary">Save tokens</button>',
+        '<button type="button" name="cancel">Cancel</button>']);
+    $d = hc.show();
+    $d.on("submit", "form", submit);
+});
+
 window.review_form = (function ($) {
 var formj, form_order;
 var rtype_info = {
@@ -3290,7 +3720,7 @@ tooltip.add_builder("rf-description", function (info) {
                 d += "<div class=\"od\">Choices are:</div>";
                 for (si = 0, vo = fieldj.score_info.value_order();
                      si < vo.length; ++si)
-                    d += "<div class=\"od\"><span class=\"rev_num " + fieldj.score_info.className(vo[si]) + "\">" + fieldj.score_info.unparse(vo[si]) + ".</span>&nbsp;" + escape_entities(fieldj.options[vo[si] - 1]) + "</div>";
+                    d += "<div class=\"od\"><strong class=\"rev_num " + fieldj.score_info.className(vo[si]) + "\">" + fieldj.score_info.unparse(vo[si]) + ".</strong>&nbsp;" + escape_entities(fieldj.options[vo[si] - 1]) + "</div>";
             }
             info = $.extend({content: d, dir: "l"}, info);
         }
@@ -3310,44 +3740,44 @@ function render_review_body(rrow) {
         else
             return !!rrow[f.uid];
     });
-    var t = "", i, f, x, nextf, last_display = 0, display;
+    var t = "", i, f, k, x, nextf, last_display = 0, display;
     for (i = 0; i != view_order.length; ++i) {
         f = view_order[i];
         nextf = view_order[i + 1];
         if (last_display != 1 && f.options && nextf && nextf.options) {
             display = 1;
-            t += '<div class="rvg">';
         } else {
             display = last_display == 1 ? 2 : 0;
         }
 
         t += '<div class="rv rv' + "glr".charAt(display) + '" data-rf="' + f.uid +
-            '"><div class="revvt"><div class="revfn">' + f.name_html;
+            '"><div class="revvt"><h3 class="revfn">' + f.name_html;
         x = f.visibility;
         if (x == "audec" && hotcrp_status && hotcrp_status.myperm
-            && hotcrp_status.myperm.some_author_can_view_decision)
+            && hotcrp_status.myperm.some_author_can_view_decision) {
             x = "au";
+        }
         if (x != "au") {
             t += '<div class="revvis">(' +
                 (({secret: "secret", admin: "shown only to chairs",
                    pc: "hidden from authors", audec: "hidden from authors until decision"})[x] || x) +
                 ')</div>';
         }
-        t += '</div></div><div class="revv revv' + "glr".charAt(display);
+        t += '</h3></div>';
 
         if (!f.options) {
             x = render_text(rrow.format, rrow[f.uid], f.uid);
-            t += ' revtext format' + (x.format || 0) + '">' + x.content;
+            t += '<div class="revv revtext format' + (x.format || 0) + '">'
+                + x.content + '</div>';
         } else if (rrow[f.uid] && (x = f.score_info.parse(rrow[f.uid]))) {
-            t += '"><table><tr><td class="nw">' + f.score_info.unparse_revnum(x) +
-                "&nbsp;</td><td>" + escape_entities(f.options[x - 1]) + "</td></tr></table>";
+            t += '<p class="revv revscore"><span class="revscorenum">' +
+                f.score_info.unparse_revnum(x) + ' </span><span class="revscoredesc">' +
+                escape_entities(f.options[x - 1]) + '</span></p>';
         } else {
-            t += ' rev_unknown">' + (f.allow_empty ? "No entry" : "Unknown");
+            t += '<p class="revv revnoscore">' + (f.allow_empty ? "No entry" : "Unknown") + '</p>';
         }
 
-        t += '</div></div>';
-        if (display == 2)
-            t += '</div>';
+        t += '</div>';
         last_display = display;
     }
     return t;
@@ -3493,43 +3923,67 @@ function add_review(rrow) {
         has_user_rating = false, i, ratekey, selected;
 
     i = rrow.ordinal ? '" data-review-ordinal="' + rrow.ordinal : '';
-    hc.push('<div class="revcard" id="r' + rid + '" data-pid="' + rrow.pid + '" data-rid="' + rrow.rid + i + '">', '</div>');
+    hc.push('<article id="r' + rid + '" class="pcard revcard has-fold '
+            + (rrow.folded ? "fold20c" : "fold20o")
+            + '" data-pid="' + rrow.pid
+            + '" data-rid="' + rrow.rid + i + '">', '</article>');
 
     // HEADER
-    hc.push('<div class="revcard_head">', '</div>');
+    hc.push('<header class="revcard-head">', '</header>');
+
+    // review description
+    var rdesc = rrow.subreview ? "Subreview" : "Review";
+    if (rrow.draft) {
+        rdesc = "Draft " + rdesc;
+    }
+    if (rrow.ordinal) {
+        rdesc += " #" + rid;
+    }
 
     // edit/text links
-    if (rrow.editable)
-        hc.push('<div class="float-right"><a class="xx" href="' + hoturl_html("review", rlink) + '">'
-                + '<img class="b" src="' + assetsurl + 'images/edit48.png" alt="[Edit]" width="16" height="16">'
-                + '&nbsp;<u>Edit</u></a></div>');
-
-    hc.push('<h3><a class="u" href="' + hoturl_html("review", rlink) + '">'
-            + 'Review' + (rrow.ordinal ? '&nbsp;#' + rid : '') + '</a></h3>');
+    if (rrow.folded) {
+        hc.push('<h2><a class="ui js-foldup nn" href="" data-fold-target="20"><span class="expander"><span class="in0 fx20"><svg class="licon" width="0.75em" height="0.75em" viewBox="0 0 16 16" preserveAspectRatio="none"><path d="M1 1L8 15L15 1z" /></svg></span><span class="in1 fn20"><svg class="licon" width="0.75em" height="0.75em" viewBox="0 0 16 16" preserveAspectRatio="none"><path d="M1 1L15 8L1 15z" /></svg></span></span>', '</a></h2>');
+    } else {
+        hc.push('<h2><a class="nn" href="' + hoturl_html("review", rlink) + '">', '</a></h2>');
+    }
+    hc.push('<span class="revcard-header-name">' + rdesc + '</span>');
+    if (rrow.editable && rrow.folded) {
+        hc.push('</a> <a class="nn" href="' + hoturl_html("review", rlink) + '"><span class="t-editor">✎</span>');
+    } else if (rrow.editable) {
+        hc.push(' <span class="t-editor">✎</span>');
+    }
+    hc.pop();
 
     // author info
-    var revinfo = [], rtype_text = "";
+    var revname = "", revtime;
+    if (rrow.review_token) {
+        revname = 'Review token ' + rrow.review_token;
+    } else if (rrow.reviewer) {
+        revname = rrow.reviewer;
+        if (rrow.blind)
+            revname = '[' + revname + ']';
+        if (rrow.reviewer_email)
+            revname = '<span title="' + rrow.reviewer_email + '">' + revname + '</span>';
+    }
     if (rrow.rtype) {
-        rtype_text = ' &nbsp;<span class="rto rt' + rrow.rtype +
-            (rrow.submitted ? "" : "n") + '" title="' + rtype_info[rrow.rtype][1] +
+        revname += (revname ? " " : "") + '<span class="rto rt' + rrow.rtype +
+            (rrow.submitted || rrow.approved ? "" : " rtinc") +
+            (rrow.subreview ? " rtsubrev" : "") +
+            '" title="' + rtype_info[rrow.rtype][1] +
             '"><span class="rti">' + rtype_info[rrow.rtype][0] + '</span></span>';
         if (rrow.round)
-            rtype_text += '&nbsp;<span class="revround">' + escape_entities(rrow.round) + '</span>';
-    }
-    if (rrow.review_token) {
-        revinfo.push('Review token ' + rrow.review_token + rtype_text);
-    } else if (rrow.reviewer && rrow.blind) {
-        revinfo.push('[' + rrow.reviewer + ']' + rtype_text);
-    } else if (rrow.reviewer) {
-        revinfo.push(rrow.reviewer + rtype_text);
-    } else if (rtype_text) {
-        revinfo.push(rtype_text.substr(7));
+            revname += ' <span class="revround" title="Review round">' + escape_entities(rrow.round) + '</span>';
     }
     if (rrow.modified_at) {
-        revinfo.push('Updated ' + rrow.modified_at_text);
+        revtime = '<time class="revtime" datetime="' + (new Date(rrow.modified_at * 1000)).toISOString() + '">' + rrow.modified_at_text + '</time>';
     }
-    if (revinfo.length) {
-        hc.push(' <span class="revinfo">' + revinfo.join(' <span class="barsep">·</span> ') + '</span>');
+    if (revname || revtime) {
+        hc.push('<div class="revthead">');
+        if (revname)
+            hc.push('<address class="revname" itemprop="author">' + revname + '</address>');
+        if (revtime)
+            hc.push(revtime);
+        hc.push('</div>');
     }
 
     if (rrow.message_html)
@@ -3537,21 +3991,23 @@ function add_review(rrow) {
     hc.push_pop('<hr class="c">');
 
     // body
-    hc.push('<div class="revcard_body">', '</div>');
+    hc.push('<div class="revcard-render fx20">', '</div>');
     hc.push_pop(render_review_body(rrow));
 
     // ratings
     has_user_rating = "user_rating" in rrow;
     if ((rrow.ratings && rrow.ratings.length) || has_user_rating) {
-        hc.push('<div class="revcard_rating">', '</div>');
+        hc.push('<div class="revcard-rating fx20">', '</div>');
         hc.push(unparse_ratings(rrow.ratings || [], rrow.user_rating || 0, has_user_rating));
     }
 
     // complete render
-    var $j = $(hc.render()).appendTo($("#body"));
-    if (has_user_rating)
+    var $j = $(hc.render()).appendTo($(".pcontainer"));
+    if (has_user_rating) {
         $j.find(".revrating.editable").on("keydown", "button.js-revrating", revrating_key);
+    }
     score_header_tooltips($j);
+    add_pslitem("r" + rid, rdesc);
 }
 
 return {
@@ -3578,12 +4034,21 @@ window.papercomment = (function ($) {
 var vismap = {rev: "hidden from authors",
               pc: "hidden from authors and external reviewers",
               admin: "shown only to administrators"};
-var cmts = {}, newcmt, has_unload = false;
-var resp_rounds = {}, detwiddle;
-if (hotcrp_user && hotcrp_user.cid)
-    detwiddle = new RegExp("^" + hotcrp_user.cid + "~");
-else
-    detwiddle = /^~/;
+var cmts = {}, newcmt, has_unload = false, resp_rounds = {},
+    twiddle_start = hotcrp_user && hotcrp_user.cid ? hotcrp_user.cid + "~" : "###";
+
+function unparse_tag(tag, strip_value) {
+    var pos;
+    if (tag.startsWith(twiddle_start)) {
+        tag = tag.substring(twiddle_start.length - 1);
+    }
+    if (tag.endsWith("#0")) {
+        tag = tag.substring(0, tag.length - 2);
+    } else if (strip_value && (pos = tag.indexOf("#")) > 0) {
+        tag = tag.substring(0, pos);
+    }
+    return tag;
+}
 
 function $cmt(e) {
     var $c = $(e).closest(".cmtg");
@@ -3603,36 +4068,56 @@ function cj_cid(cj) {
 }
 
 function comment_identity_time(cj) {
-    var t = [], res = [], x, i, tag;
-    if (cj.ordinal)
-        t.push('<div class="cmtnumhead"><a class="qq" href="#' + cj_cid(cj)
+    var t = [], res = [], x, i;
+    if (cj.response || cj.is_new) {
+    } else if (cj.editable) {
+        t.push('<div class="cmtnumid"><a href="#' + cj_cid(cj) +
+               '" class="nn ui hover-child cmteditor">');
+        if (cj.ordinal) {
+            t.push('<div class="cmtnum"><span class="cmtnumat">@</span><span class="cmtnumnum">' +
+               cj.ordinal + '</span></div> ');
+        } else {
+            t.push('Edit ');
+        }
+        t.push('<span class="t-editor">✎</span></a></div>');
+    } else if (cj.ordinal) {
+        t.push('<div class="cmtnumid cmtnum"><a class="qq" href="#' + cj_cid(cj)
                + '"><span class="cmtnumat">@</span><span class="cmtnumnum">'
                + cj.ordinal + '</span></a></div>');
-    if (cj.author && cj.author_hidden)
-        t.push('<div id="foldcid' + cj.cid + '" class="cmtname fold4c">'
-               + '<a class="ui q js-foldup" href="#" data-fold-target="4" title="Toggle author"><span class="fn4">+&nbsp;<i>Hidden for blind review</i></span><span class="fx4">[blind]</span></a><span class="fx4">&nbsp;'
-               + cj.author + '</span></div>');
-    else if (cj.author) {
+    }
+    if (cj.author && cj.author_hidden) {
+        t.push('<address class="cmtname fold9c" itemprop="author"><span class="fx9' +
+               (cj.author_email ? '" title="' + cj.author_email : '') +
+               '">' + cj.author + ' </span><a class="ui qq js-foldup" href="" data-fold-target="9" title="Toggle author"><span class="fn9"><span class="expander"><svg class="licon" width="0.75em" height="0.75em" viewBox="0 0 16 16" preserveAspectRatio="none"><path d="M1 1L15 8L1 15z" /></svg></span>' +
+               (cj.author_pseudonym || "<i>Hidden</i>") + '</span><span class="fx9">(deblinded)</span></a></address>');
+    } else if (cj.author) {
         x = cj.author;
-        if (cj.blind && cj.visibility === "au")
+        if (cj.blind && cj.visibility === "au") {
             x = "[" + x + "]";
-        if (cj.author_pseudonym)
-            x = cj.author_pseudonym + '  ' + x;
-        t.push('<div class="cmtname">' + x + '</div>');
-    } else if (cj.author_pseudonym)
-        t.push('<div class="cmtname">' + cj.author_pseudonym + '</div>');
-    if (cj.modified_at)
-        t.push('<div class="cmttime">' + cj.modified_at_text + '</div>');
+        }
+        if (cj.author_pseudonym) {
+            x = cj.author_pseudonym + ' ' + x;
+        }
+        t.push('<address class="cmtname' +
+               (cj.author_email ? '" title="' + cj.author_email : "") +
+               '" itemprop="author">' + x + '</address>');
+    } else if (cj.author_pseudonym
+               && (!cj.response || cj.author_pseudonym !== "Author")) {
+        t.push('<address class="cmtname" itemprop="author">' + cj.author_pseudonym + '</address>');
+    }
+    if (cj.modified_at) {
+        t.push('<time class="cmttime" datetime="' + (new Date(cj.modified_at * 1000)).toISOString() + '">' + cj.modified_at_text + '</time>');
+    }
     if (!cj.response && cj.tags) {
         x = [];
         for (i in cj.tags) {
-            tag = cj.tags[i].replace(detwiddle, "~");
-            x.push('<a class="qq" href="' + hoturl_html("search", {q: "cmt:#" + tag}) + '">#' + tag + '</a>');
+            x.push('<a class="qq" href="' + hoturl_html("search", {q: "cmt:#" + unparse_tag(cj.tags[i], true)}) + '">#' + unparse_tag(cj.tags[i]) + '</a>');
         }
         t.push('<div class="cmttags">' + x.join(" ") + '</div>');
     }
-    if (!cj.response && (i = vismap[cj.visibility]))
+    if (!cj.response && (i = vismap[cj.visibility])) {
         t.push('<div class="cmtvis">(' + i + ')</div>');
+    }
     return t.join("");
 }
 
@@ -3651,19 +4136,20 @@ function render_editing(hc, cj) {
 
     var msgx = [], msg;
     if (cj.response
-        && resp_rounds[cj.response].instrux)
+        && resp_rounds[cj.response].instrux) {
         msgx.push(resp_rounds[cj.response].instrux);
+    }
     if (cj.response
-        && !hotcrp_status.myperm.act_author)
+        && !hotcrp_status.myperm.act_author) {
         msgx.push('You aren’t a contact for this paper, but as an administrator you can edit the authors’ response.');
-    else if (cj.review_token
-             && hotcrp_status.myperm.review_tokens
-             && hotcrp_status.myperm.review_tokens.indexOf(cj.review_token) >= 0)
+    } else if (cj.review_token
+               && hotcrp_status.myperm.review_tokens
+               && hotcrp_status.myperm.review_tokens.indexOf(cj.review_token) >= 0) {
         msgx.push('You have a review token for this paper, so your comment will be anonymous.');
-    else if (!cj.response
-             && cj.author_email
-             && hotcrp_user.email
-             && cj.author_email.toLowerCase() != hotcrp_user.email.toLowerCase()) {
+    } else if (!cj.response
+               && cj.author_email
+               && hotcrp_user.email
+               && cj.author_email.toLowerCase() != hotcrp_user.email.toLowerCase()) {
         if (hotcrp_status.myperm.act_author)
             msg = "You didn’t write this comment, but as a fellow author you can edit it.";
         else
@@ -3678,15 +4164,17 @@ function render_editing(hc, cj) {
         }
     }
     if (msgx.length)
-        hc.push('<div class="cmthint"><p>' + msgx.join('</p><p>') + '</p></div>');
+        hc.push('<div class="field-d"><p>' + msgx.join('</p><p>') + '</p></div>');
 
     hc.push('<form><div style="font-weight:normal;font-style:normal">', '</div></form>');
-    if (cj.review_token)
+    if (cj.review_token) {
         hc.push('<input type="hidden" name="review_token" value="' + escape_entities(cj.review_token) + '">');
+    }
     hc.push('<div class="f-i">', '</div>');
     var fmt = render_text.format(cj.format), fmtnote = fmt.description || "";
-    if (fmt.has_preview)
+    if (fmt.has_preview) {
         fmtnote += (fmtnote ? ' <span class="barsep">·</span> ' : "") + '<a href="" class="ui js-togglepreview" data-format="' + (fmt.format || 0) + '">Preview</a>';
+    }
     fmtnote && hc.push('<div class="formatdescription">' + fmtnote + '</div>');
     hc.push_pop('<textarea name="text" class="reviewtext cmttext suggest-emoji need-suggest c" rows="5" cols="60" placeholder="Leave a comment"></textarea>');
 
@@ -3706,8 +4194,9 @@ function render_editing(hc, cj) {
             au_option = 'Eventually visible to authors';
             au_description = 'Authors cannot view comments at the moment.';
         }
-        if (hotcrp_status.rev.blind === true)
+        if (hotcrp_status.rev.blind === true) {
             au_option += ' (anonymous to authors)';
+        }
 
         // visibility
         hc.push('<div class="entryi"><label for="' + cid + '-visibility">Visibility</label><div class="entry">', '</div></div>');
@@ -3723,6 +4212,12 @@ function render_editing(hc, cj) {
         hc.push('<p class="f-h">', '</p>');
         hc.push_pop(au_description);
         hc.pop_n(2);
+    } else if (!cj.response && cj.by_author_visibility) {
+        hc.push('<div class="entryi"><label for="' + cid + '-visibility">Visibility</label><div class="entry">', '</div></div>');
+        hc.push('<span class="select"><select id="' + cid + '-visibility" name="visibility">', '</select></span>');
+        hc.push('<option value="au">Visible to reviewers</option>');
+        hc.push_pop('<option value="admin">Administrators only</option>');
+        hc.pop();
     }
 
     // tags
@@ -3735,10 +4230,11 @@ function render_editing(hc, cj) {
     // delete
     if (!cj.is_new) {
         x = cj.response ? "response" : "comment";
-        if (edit_allowed(cj))
+        if (edit_allowed(cj)) {
             bnote = "Are you sure you want to delete this " + x + "?";
-        else
+        } else {
             bnote = "Are you sure you want to override the deadline and delete this " + x + "?";
+        }
         btnbox.push('<button type="button" name="delete" class="btn-licon need-tooltip" aria-label="Delete ' + x + '" data-override-text="' + bnote + '">' + $("#licon-trash").html() + '</button>');
     }
 
@@ -3804,15 +4300,21 @@ function activate_editing($c, cj) {
         filter_length: 1, decorate: true
     });*/
 
-    var vis = cj.visibility || hotcrp_status.myperm.default_comment_visibility || "rev";
+    var vis = cj.visibility || hotcrp_status.myperm.default_comment_visibility;
+    if (!vis)
+        vis = cj.by_author ? "au" : "rev";
     $c.find("select[name=visibility]")
-        .val(vis).attr("data-default-value", vis)
-        .on("change", visibility_change).change();
+        .val(vis)
+        .attr("data-default-value", vis)
+        .on("change", visibility_change)
+        .change();
 
-    for (i in cj.tags || [])
-        tags.push(cj.tags[i].replace(detwiddle, "~"));
-    if (tags.length)
+    for (i in cj.tags || []) {
+        tags.push(unparse_tag(cj.tags[i]));
+    }
+    if (tags.length) {
         fold($c.find(".cmteditinfo")[0], false, 3);
+    }
     $c.find("input[name=tags]").val(tags.join(" ")).autogrow();
 
     if (cj.docs && cj.docs.length) {
@@ -3821,14 +4323,19 @@ function activate_editing($c, cj) {
             $c.find(".has-editable-attachments .entry").append(render_edit_attachment(i, cj.docs[i]));
     }
 
-    if (!cj.visiblity || cj.blind)
+    if (!cj.visiblity || cj.blind) {
         $c.find("input[name=blind]").prop("checked", true);
+    }
 
     if (cj.response) {
         if (resp_rounds[cj.response].words > 0)
             make_update_words($c, resp_rounds[cj.response].words);
         var $ready = $c.find("input[name=ready]").on("click", ready_change);
         ready_change.call($ready[0]);
+    }
+
+    if (cj.is_new) {
+        $c.find("select[name=visibility], input[name=blind]").addClass("ignore-diff");
     }
 
     var $f = $c.find("form");
@@ -3850,17 +4357,18 @@ function render_edit_attachment(i, doc) {
 
 function render_attachment_link(hc, doc) {
     hc.push('<a href="' + text_to_html(siteurl + doc.siteurl) + '" class="q">', '</a>');
-    if (doc.mimetype === "application/pdf")
+    if (doc.mimetype === "application/pdf") {
         hc.push('<img src="' + assetsurl + 'images/pdf.png" alt="[PDF]" class="sdlimg">');
-    else
+    } else {
         hc.push('<img src="' + assetsurl + 'images/generic.png" alt="[Attachment]" class="sdlimg">');
-    hc.push(' ' + text_to_html(doc.filename || "Attachment"));
+    }
+    hc.push(' ' + text_to_html(doc.unique_filename || doc.filename || "Attachment"));
     if (doc.size != null) {
         hc.push(' <span class="dlsize">(', 'kB)</span>');
         if (doc.size > 921)
             hc.push(Math.round(doc.size / 1024));
         else if (doc.size > 0)
-            hc.push(Math.round(doc.size / 102.4) / 10);
+            hc.push(Math.max(Math.round(doc.size / 102.4), 1) / 10);
         else
             hc.push("0");
         hc.pop();
@@ -3875,6 +4383,21 @@ function beforeunload() {
         text = $($cs[i]).val().replace(/\s+$/, "");
         if (!text_eq(text, ($c.c && $c.c.text) || ""))
             return "If you leave this page now, your edits will be lost.";
+    }
+}
+
+function save_change_id($c, ocid, ncid) {
+    if (ocid !== ncid) {
+        var cp = $c[0].closest(".cmtid");
+        cp.id = ncid;
+        cp = cp.closest(".cmtcard");
+        if (cp.id === "cc" + ocid) {
+            add_pslitem("cc" + ocid, false);
+            cp.id = "cc" + ncid;
+            add_pslitem("cc" + ncid, "Comment");
+        }
+        delete cmts[ocid];
+        newcmt && papercomment.add(newcmt);
     }
 }
 
@@ -3895,27 +4418,25 @@ function make_save_callback($c) {
             if (!/^<div/.test(error))
                 error = render_xmsg(2, error);
             $c.find(".cmtmsg").html(error);
-            $c.find("button").prop("disabled", false);
+            $c.find("button, input[type=file]").prop("disabled", false);
             return;
         }
         var cid = cj_cid($c.c),
             editing_response = $c.c.response
                 && edit_allowed($c.c, true)
                 && (!data.cmt || data.cmt.draft);
-        if (!data.cmt && !$c.c.is_new)
+        if (!data.cmt && !$c.c.is_new) {
             delete cmts[cid];
-        if (!data.cmt && editing_response)
+        }
+        if (!data.cmt && editing_response) {
             data.cmt = {is_new: true, response: $c.c.response, editable: true};
+        }
         if (data.cmt) {
-            var data_cid = cj_cid(data.cmt);
-            if (cid !== data_cid) {
-                $c.closest(".cmtid")[0].id = data_cid;
-                delete cmts[cid];
-                newcmt && papercomment.add(newcmt);
-            }
+            save_change_id($c, cid, cj_cid(data.cmt));
             render_cmt($c, data.cmt, editing_response, data.msg);
-        } else
+        } else {
             $c.closest(".cmtg").html(data.msg);
+        }
     };
 }
 
@@ -3941,27 +4462,38 @@ function save_editor(elt, action, really) {
     }
     $f.find("input[name=draft]").remove();
     var $ready = $f.find("input[name=ready]");
-    if ($ready.length && !$ready[0].checked)
+    if ($ready.length && !$ready[0].checked) {
         $f.children("div").append('<input type="hidden" name="draft" value="1">');
+    }
     $c.find("button").prop("disabled", true);
+    // work around a Safari bug with FormData
+    $f.find("input[type=file]").each(function () {
+        if (this.files.length === 0)
+            this.disabled = true;
+    });
     var arg = {p: hotcrp_paperid};
-    if ($c.c.cid)
+    if ($c.c.cid) {
         arg.c = $c.c.cid;
-    if (really)
+    }
+    if (really) {
         arg.override = 1;
-    if (hotcrp_want_override_conflict)
+    }
+    if (hotcrp_want_override_conflict) {
         arg.forceShow = 1;
-    if (action === "delete")
+    }
+    if (action === "delete") {
         arg.delete = 1;
+    }
     var url = hoturl_post("api/comment", arg),
         callback = make_save_callback($c);
-    if (window.FormData)
+    if (window.FormData) {
         $.ajax(url, {
             method: "POST", data: new FormData($f[0]), success: callback,
-            processData: false, contentType: false
+            processData: false, contentType: false, timeout: 120000
         });
-    else
+    } else {
         $.post(url, $f.serialize(), callback);
+    }
 }
 
 function keydown_editor(evt) {
@@ -3976,13 +4508,13 @@ function buttonclick_editor(evt) {
     if (this.name === "bsubmit") {
         evt.preventDefault();
         save_editor(this, "submit");
-    } else if (this.name === "cancel")
+    } else if (this.name === "cancel") {
         render_cmt($c, $c.c, false);
-    else if (this.name === "delete")
+    } else if (this.name === "delete") {
         override_deadlines.call(this, function () {
             save_editor(self, self.name, true);
         });
-    else if (this.name === "showtags") {
+    } else if (this.name === "showtags") {
         fold($c.find(".cmteditinfo")[0], false, 3);
         $c.find("input[name=tags]").focus();
     }
@@ -3996,60 +4528,80 @@ function submit_editor(evt) {
 function render_cmt($c, cj, editing, msg) {
     var hc = new HtmlCollector, hcid = new HtmlCollector, t, chead, i;
     cmts[cj_cid(cj)] = cj;
+    if (cj.is_new && !editing) {
+        var ide = $c[0].closest(".cmtid");
+        if (!hasClass(ide, "cmtcard")
+            && !ide.previousSibling
+            && !ide.nextSibling) {
+            ide = ide.closest(".cmtcard");
+        }
+        if (hasClass(ide, "cmtcard")) {
+            add_pslitem(ide.id, false);
+        }
+        $("#ccactions a[href='#" + ide.id + "']").closest(".aabut").removeClass("hidden");
+        $(ide).remove();
+        return;
+    }
     if (cj.response) {
-        chead = $c.closest(".cmtcard").find(".cmtcard_head");
+        chead = $c.closest(".cmtcard").find(".cmtcard-head");
         chead.find(".cmtinfo").remove();
     }
 
     // opener
     t = [];
-    if (cj.visibility && !cj.response)
+    if (cj.visibility && !cj.response) {
         t.push("cmt" + cj.visibility + "vis");
+    }
     if (cj.color_classes) {
         make_pattern_fill(cj.color_classes);
         t.push("cmtcolor " + cj.color_classes);
     }
-    if (t.length)
+    if (t.length) {
         hc.push('<div class="' + t.join(" ") + '">', '</div>');
+    }
 
     // header
-    hc.push('<div class="cmtt">', '</div>');
-    if (cj.is_new && !editing) {
-        hc.push('<h3><a class="q ui fn cmteditor" href="">+&nbsp;', '</a></h3>');
-        if (cj.response)
-            hc.push_pop(cj.response == "1" ? "Add Response" : "Add " + cj.response + " Response");
-        else
-            hc.push_pop("Add Comment");
-    } else if (cj.is_new && !cj.response)
-        hc.push('<h3>Add Comment</h3>');
-    else if (cj.editable && !editing) {
-        t = '<div class="cmtinfo float-right"><a class="xx ui editor cmteditor" href=""><u>Edit</u></a></div>';
-        cj.response ? $(t).prependTo(chead) : hc.push(t);
+    t = cj.is_new ? '>' : ' id="cid' + cj.cid + '">';
+    if (cj.editable) {
+        hc.push('<header class="cmtt ui js-click-child"' + t, '</header>');
+    } else {
+        hc.push('<header class="cmtt"' + t, '</header>');
+    }
+    if (cj.is_new && !cj.response) {
+        hc.push('<div class="cmtnumid"><div class="cmtnum">New Comment</div></div>');
+    } else if (cj.editable && !editing && cj.response) {
+        var $h2 = $(chead).find("h2");
+        if (!$h2.find("a").length) {
+            $h2.html('<a href="" class="nn ui cmteditor">' + $h2.html() + ' <span class="t-editor">✎</span></a>');
+        }
     }
     t = comment_identity_time(cj);
     if (cj.response) {
         chead.find(".cmtthead").remove();
         chead.append('<div class="cmtthead">' + t + '</div>');
-    } else
+    } else {
         hc.push(t);
+    }
     hc.pop_collapse();
 
     // text
     hc.push('<div class="cmtv">', '</div>');
     hc.push('<div class="cmtmsg">', '</div>');
-    if (msg)
+    if (msg) {
         hc.push(msg);
+    }
     if (cj.response && cj.draft && cj.text) {
         hc.push('<div class="msg msg-warning"><strong>This response is a draft.</strong>', '</div>');
-        if (cj.submittable)
+        if (cj.submittable) {
             hc.push_pop(' It will not be shown to reviewers unless you <a href="" class="ui js-submit-comment">submit it unchanged</a>.');
-        else
+        } else {
             hc.push_pop(' It will not be shown to reviewers.');
+        }
     }
     hc.pop();
-    if (editing)
+    if (editing) {
         render_editing(hc, cj);
-    else {
+    } else {
         hc.push('<div class="cmttext"></div>');
         if (cj.docs && cj.docs.length) {
             hc.push('<div class="cmtattachments">', '</div>');
@@ -4094,11 +4646,13 @@ function render_cmt_text(format, value, response, textj, chead) {
         && resp_rounds[response]
         && (wlimit = resp_rounds[response].words) > 0) {
         wc = count_words(value);
-        chead && chead.append('<div class="cmtthead words">' + plural(wc, "word") + '</div>');
+        if (wc > 0 && chead) {
+            chead.append('<div class="cmtthead words">' + plural(wc, "word") + '</div>');
+        }
         if (wc > wlimit) {
             chead && chead.find(".words").addClass("wordsover");
             wc = count_words_split(value, wlimit);
-            textj.addClass("has-overlong").removeClass(fmt).prepend('<div class="overlong-mark"><div class="overlong-allowed ' + fmt + '"></div></div><div class="overlong-content ' + fmt + '"></div>');
+            textj.addClass("has-overlong").removeClass(fmt).prepend('<div class="overlong-underlay"><div class="overlong-allowed ' + fmt + '"></div><div class="overlong-mark"></div></div><div class="overlong-content ' + fmt + '"></div>');
             textj.find(".overlong-allowed").html(render_text(format, wc[0]).content);
             textj = textj.find(".overlong-content");
         }
@@ -4121,39 +4675,72 @@ function render_preview(evt, format, value, dest) {
 }
 
 function add(cj, editing) {
-    var cid = cj_cid(cj), j = $("#" + cid), $pc = null;
+    var cid = cj_cid(cj), j = $("#" + cid), $pc = null, cdesc = null, t;
     if (!j.length) {
-        var $c = $("#body").children().last(),
-            iddiv = '<div id="' + cid + '" class="cmtid' + (cj.editable ? " editable" : "");
-        if (!$c.hasClass("cmtcard") && ($pc = $("#body > .cmtcard").last()).length) {
-            if (!cj.is_new)
-                $pc.append('<div class="cmtcard_link"><a class="qq" href="#' + cid + '">Later comments &#x25BC;</a></div>');
+        var $c = $(".pcontainer").children().last();
+        if (cj.is_new && !editing) {
+            if (!$c.hasClass("cmtcard") || $c[0].id !== "ccactions") {
+                $c = $('<div id="ccactions" class="pcard cmtcard"><div class="cmtcard-body"><div class="aab aabig"></div></div></div>').appendTo(".pcontainer");
+            }
+            if (!$c.find("a[href='#" + cid + "']").length) {
+                t = '<div class="aabut"><a href="#' + cid + '" class="btn ui js-edit-comment">Add ';
+                if (cj.response) {
+                    t += (cj.response == "1" ? "" : cj.response + " ") + "response";
+                } else {
+                    t += "comment";
+                }
+                $c.find(".aabig").append(t + '</a></div>');
+            }
+            cmts[cid] = cj;
+            return;
+        } else if ($c[0].id === "ccactions") {
+            $c = $c.prev();
         }
-        if (!$c.hasClass("cmtcard") || cj.response || $c.hasClass("response")) {
-            var t;
+
+        var idattr = ' id="' + cid + '" class="cmtid' + (cj.editable ? " editable" : "");
+        if (!$c.hasClass("cmtcard")
+            || cj.response
+            || $c.hasClass("response")) {
+            var t, tx;
             if (cj.response) {
-                t = iddiv + ' response cmtcard">';
-                if (cj.text !== false)
-                    t += '<div class="cmtcard_head"><h3>' +
-                        (cj.response == "1" ? "Response" : cj.response + " Response") +
-                        '</h3></div>';
-            } else
-                t = '<div class="cmtcard">';
-            $c = $(t + '<div class="cmtcard_body"></div></div>').appendTo("#body");
-            if (!cj.response && $pc && $pc.length)
-                $c.prepend('<div class="cmtcard_link"><a class="qq" href="#' + ($pc.find("[id]").last().attr("id")) + '">Earlier comments &#x25B2;</a></div>');
+                t = '<article' + idattr + ' response pcard cmtcard">';
+                if (cj.text !== false) {
+                    cdesc = (cj.response == "1" ? "" : cj.response + " ") + "Response";
+                    t += '<header class="cmtcard-head"><h2><span class="cmtcard-header-name">' +
+                        cdesc + '</span></h2></header>';
+                }
+                tx = '</article>';
+            } else {
+                t = '<div id="cc' + cid + '" class="pcard cmtcard">';
+                cdesc = "Comment";
+                tx = '</div>';
+            }
+            $c = $(t + '<div class="cmtcard-body"></div>' + tx).insertAfter($c);
+            if (cdesc) {
+                add_pslitem(cj.response ? cid : "cc" + cid, cdesc);
+            }
+        } else {
+            var $psl = $(".pslcard").children().last();
+            if ($psl.length === 1 && $psl.find("a").text() === "Comment")
+                $psl.find("a").text("Comments");
         }
-        if (cj.response)
+        if (cj.response) {
             j = $('<div class="cmtg"></div>');
-        else
-            j = $(iddiv + ' cmtg"></div>');
-        j.appendTo($c.find(".cmtcard_body"));
+        } else {
+            j = $('<article' + idattr + ' cmtg"></article>');
+        }
+        j.appendTo($c.find(".cmtcard-body"));
     }
-    if (editing == null && cj.response && cj.draft && cj.editable)
+    if (editing == null && cj.response && cj.draft && cj.editable) {
         editing = true;
-    if (!newcmt && cid === "cnew")
+    }
+    if (!newcmt && cid === "cnew") {
         newcmt = cj;
+    }
     render_cmt(j, cj, editing);
+    if (cj.response && cj.is_new) {
+        $("#ccactions a[href='#" + cid + "']").closest(".aabut").addClass("hidden");
+    }
     return $$(cid);
 }
 
@@ -4163,13 +4750,16 @@ function edit_this() {
 
 function edit(cj) {
     var cid = cj_cid(cj), elt = $$(cid);
-    if (!elt && cj.response)
+    if (!elt && (cj.is_new || cj.response)) {
         elt = add(cj, true);
-    if (!elt && /\beditcomment\b/.test(window.location.search))
+    }
+    if (!elt && /\beditcomment\b/.test(window.location.search)) {
         return false;
+    }
     var $c = $cmt(elt);
-    if (!$c.find("textarea[name=text]").length)
+    if (!$c.find("textarea[name=text]").length) {
         render_cmt($c, cj, true);
+    }
     location.hash = "#" + cid;
     $c.scrollIntoView();
     var te = $c.find("textarea[name=text]")[0];
@@ -4229,11 +4819,11 @@ handle_ui.on("js-togglepreview", switch_preview);
 // quicklink shortcuts
 function quicklink_shortcut(evt, key) {
     // find the quicklink, reject if not found
-    var a = $$("quicklink-" + (key == "j" ? "prev" : "next")), f;
+    var a = $$("quicklink-" + (key === "j" ? "prev" : "next"));
     if (a && a.focus) {
         // focus (for visual feedback), call callback
         a.focus();
-        add_revpref_ajax.then(function () { a.click(); });
+        after_outstanding(make_link_callback(a));
         return true;
     } else if ($$("quicklink-list")) {
         // at end of list
@@ -4263,7 +4853,7 @@ function nextprev_shortcut(evt, key) {
         if (walk && !walk.hasAttribute("id") && $(walk).hasClass("cmtcard"))
             walk = $(walk).find(".cmtg")[jdir]()[0];
     } else {
-        $j = $(".cmtcard[id], .revcard[id], .cmtcard > .cmtcard_body > .cmtg[id]");
+        $j = $(".cmtcard[id], .revcard[id], .cmtcard > .cmtcard-body > .cmtg[id]");
         walk = $j[jdir]()[0];
     }
     if (walk && walk.hasAttribute("id"))
@@ -4272,12 +4862,10 @@ function nextprev_shortcut(evt, key) {
 }
 
 function blur_keyup_shortcut(evt) {
-    var code;
     // IE compatibility
     evt = evt || window.event;
-    code = evt.charCode || evt.keyCode;
     // reject modified keys, interesting targets
-    if (code != 27 || evt.altKey || evt.ctrlKey || evt.metaKey)
+    if (evt.altKey || evt.ctrlKey || evt.metaKey || event_key(evt) !== "Escape")
         return true;
     document.activeElement && document.activeElement.blur();
     if (evt.preventDefault)
@@ -4308,7 +4896,7 @@ function make_selector_shortcut(type) {
         if (e) {
             e.className += " psfocus";
             foldup.call(e, null, {f: false});
-            jQuery(e).scrollIntoView();
+            $(e).scrollIntoView();
             if ((e = find(e))) {
                 focus_at(e);
                 e.addEventListener("blur", end, false);
@@ -4468,8 +5056,7 @@ demand_load.tags = demand_load.make(function (resolve, reject) {
 demand_load.mentions = demand_load.make(function (resolve, reject) {
     if (hotcrp_user.is_pclike)
         $.get(hoturl("api/mentioncompletion", {p: hotcrp_paperid}), null, function (v) {
-            var tlist = (v && v.mentioncompletion) || [];
-            tlist = tlist.map(completion_item);
+            var tlist = ((v && v.mentioncompletion) || []).map(completion_item);
             tlist.sort(function (a, b) { return strnatcmp(a.s, b.s); });
             resolve(tlist);
         });
@@ -4771,8 +5358,8 @@ function suggest() {
         if (!hintdiv) {
             hintdiv = make_bubble({dir: "nw", color: "suggest"});
             hintdiv.self().on("mousedown", function (evt) { evt.preventDefault(); })
-                .on("click", "div.suggestion", click)
-                .on("mousemove", "div.suggestion", hover);
+                .on("click", ".suggestion", click)
+                .on("mousemove", ".suggestion", hover);
         }
 
         var i, clist = cinfo.list, same_list = false;
@@ -5049,7 +5636,7 @@ function setfollow() {
 }
 
 var add_revpref_ajax = (function () {
-    var outstanding = 0, then = null, blurred_at = 0;
+    var blurred_at = 0;
 
     function rp(selector, on_unload) {
         var $e = $(selector);
@@ -5064,14 +5651,9 @@ var add_revpref_ajax = (function () {
             .on("change.revpref_ajax", "input.revpref", rp_change)
             .on("keydown.revpref_ajax", "input.revpref", make_onkey("Enter", rp_change));
         if (on_unload) {
-            $(document).on("click", "a", rp_a_click);
             $(window).on("beforeunload", rp_unload);
         }
     }
-
-    rp.then = function (f) {
-        outstanding ? then = f : f();
-    };
 
     function rp_blur() {
         blurred_at = now_msec();
@@ -5083,27 +5665,14 @@ var add_revpref_ajax = (function () {
             cid = pid.substr(pos + 1);
             pid = pid.substr(0, pos);
         }
-        ++outstanding;
         $.ajax(hoturl_post("api/revpref", {p: pid}), {
             method: "POST", data: {pref: self.value, u: cid},
             success: function (rv) {
                 setajaxcheck(self, rv);
                 if (rv && rv.ok && rv.value != null)
                     self.value = rv.value === "0" ? "" : rv.value;
-            },
-            complete: function (xhr, status) {
-                --outstanding;
-                then && then();
-            }
+            }, trackOutstanding: true
         });
-    }
-
-    function rp_a_click(e) {
-        if (outstanding && event_key.is_default_a(e, this)) {
-            then = make_link_callback(this);
-            return false;
-        } else
-            return true;
     }
 
     function rp_unload() {
@@ -5163,10 +5732,11 @@ function row_tagvalue(row, tag) {
 
 function tagannorow_fill(row, anno) {
     if (!anno.empty) {
-        if (anno.tag && anno.annoid)
+        if (anno.tag && anno.annoid) {
             row.setAttribute("data-tags", anno.tag + "#" + anno.tagval);
-        else
+        } else {
             row.removeAttribute("data-tags");
+        }
         var heading = anno.heading === null ? "" : anno.heading;
         var $g = $(row).find(".plheading-group").attr({"data-format": anno.format || 0, "data-title": heading});
         $g.text(heading === "" ? heading : heading + " ");
@@ -5329,7 +5899,14 @@ function sorter_toggle_reverse(sorter, toggle) {
 }
 
 function search_sort_success(tbl, data_href, data) {
-    reorder(tbl, data.ids, data.groups, true);
+    var ids = data.ids;
+    if (!ids && data.hotlist) {
+        var hotlist = JSON.parse(data.hotlist);
+        ids = decode_session_list_ids(hotlist.ids);
+    }
+    if (!ids)
+        return;
+    reorder(tbl, ids, data.groups, true);
     if (data.groups)
         tbl.setAttribute("data-groups", JSON.stringify(data.groups));
     else
@@ -5353,15 +5930,16 @@ function search_sort_success(tbl, data_href, data) {
             }
             this.setAttribute("href", href_sorter(href, sorter));
         });
-    var $form = $(tbl).closest("form");
-    if ($form.length) {
+    var form = tbl.closest("form");
+    if (form) {
         var action;
-        if ($form[0].hasAttribute("data-original-action")) {
-            action = $form[0].getAttribute("data-original-action", action);
-            $form[0].removeAttribute("data-original-action");
-        } else
-            action = $form[0].action;
-        $form[0].action = href_sorter(action, want_sorter);
+        if (form.hasAttribute("data-original-action")) {
+            action = form.getAttribute("data-original-action", action);
+            form.removeAttribute("data-original-action");
+        } else {
+            action = form.action;
+        }
+        form.action = href_sorter(action, want_sorter);
     }
 }
 
@@ -5369,13 +5947,10 @@ $(document).on("collectState", function (event, state) {
     var tbl = document.getElementById("foldpl");
     if (!tbl || !tbl.hasAttribute("data-sort-url-template"))
         return;
+    var data = state.sortpl = {hotlist: tbl.getAttribute("data-hotlist")};
     var groups = tbl.getAttribute("data-groups");
-    if (groups)
-        groups = JSON.parse(groups);
-    var data = state.sortpl = {
-        ids: table_ids(tbl), groups: groups,
-        hotlist: tbl.getAttribute("data-hotlist")
-    };
+    if (groups && (groups = JSON.parse(groups)) && groups.length)
+        data.groups = groups;
     if (!href_sorter(state.href)) {
         var active_href = $(tbl).children("thead").find("a.pl_sorting_fwd").attr("href");
         if (active_href && (active_href = href_sorter(active_href)))
@@ -5384,11 +5959,14 @@ $(document).on("collectState", function (event, state) {
 });
 
 function search_sort_url(self, href) {
-    var hrefm = /^([^?#]*search(?:\.php)?)(\?[^#]*)/.exec(href),
-        api = hrefm[2];
-    if (!/&forceShow/.test(hrefm)
-        && document.getElementById("showforce"))
-        api += "&forceShow=0";
+    var hrefm = /^([^?#]*(?:search|reviewprefs|manualassign)(?:\.php)?)(\?[^#]*)/.exec(href),
+        api = hrefm[2], e;
+    if ((e = document.getElementById("showforce"))) {
+        api = api.replace(/&forceShow=[^&#;]*/, "") + "&forceShow=" + (e.checked ? 1 : 0);
+    }
+    if (!/[&?]q=/.test(api)) {
+        api += "&q=";
+    }
     $.ajax(hoturl("api/search", api), {
         method: "GET", cache: false,
         success: function (data) {
@@ -5408,17 +5986,16 @@ function search_sort_click(evt) {
     var href;
     if (event_key.is_default_a(evt)
         && (href = this.getAttribute("href"))
-        && /search(?:\.php)?\?/.test(href)) {
+        && /(?:search|reviewprefs|manualassign)(?:\.php)?\?/.test(href)) {
         search_sort_url(this, href);
         return false;
-    } else
-        return true;
+    }
 }
 
 function search_scoresort_change(evt) {
     var scoresort = $(this).val(),
         re = / (?:counts|average|median|variance|maxmin|my)\b/;
-    $.post(hoturl_post("api/setsession"), {v: "scoresort=" + scoresort});
+    $.post(hoturl_post("api/session"), {v: "scoresort=" + scoresort});
     plinfo.set_scoresort(scoresort);
     $("#foldpl > thead").find("a.pl_sort").each(function () {
         var href = this.getAttribute("href"), sorter = href_sorter(href);
@@ -5577,8 +6154,7 @@ handle_ui.on("js-annotate-order", function () {
             add_anno(hc, {});
             var $row = $(hc.render());
             $row.appendTo($d.find(".tagannos"));
-            $d.find(".popup-bottom").scrollIntoView();
-            popup_near($d, window);
+            $d.find(".modal-dialog").scrollIntoView({atBottom: true, marginBottom: "auto"});
             $row.find("input[name='heading_n" + last_newannoid + "']").focus();
         } else {
             var anno = [];
@@ -5601,7 +6177,7 @@ handle_ui.on("js-annotate-order", function () {
         return false;
     }
     function ondeleteclick() {
-        var $div = $(this).closest(".settings-g"), annoid = $div.attr("data-anno-id");
+        var $div = $(this).closest(".form-g"), annoid = $div.attr("data-anno-id");
         $div.find("input[name='tagval_" + annoid + "']").after("[deleted]").remove();
         $div.append('<input type="hidden" name="deleted_' + annoid + '" value="1">');
         $div.find("input[name='heading_" + annoid + "']").prop("disabled", true);
@@ -5622,8 +6198,8 @@ handle_ui.on("js-annotate-order", function () {
         var annoid = anno.annoid;
         if (annoid == null)
             annoid = "n" + (last_newannoid += 1);
-        hc.push('<div class="settings-g" data-anno-id="' + annoid + '">', '</div>');
-        hc.push('<div class="entryi"><label for="htctl-taganno-' + annoid + '-d">Heading</label><input id="htctl-taganno-' + annoid + '-d" name="heading_' + annoid + '" type="text" placeholder="none" size="32"></div>');
+        hc.push('<div class="form-g" data-anno-id="' + annoid + '">', '</div>');
+        hc.push('<div class="entryi"><label for="htctl-taganno-' + annoid + '-d">Heading</label><input id="htctl-taganno-' + annoid + '-d" name="heading_' + annoid + '" type="text" placeholder="none" size="32" class="need-autogrow"></div>');
         hc.push('<div class="entryi"><label for="htctl-taganno-' + annoid + '-tagval">Tag value</label><div class="entry"><input id="htctl-taganno-' + annoid + '-tagval" name="tagval_' + annoid + '" type="text" size="5">', '</div></div>');
         if (anno.annoid)
             hc.push(' <a class="ui closebtn delete-link need-tooltip" href="" aria-label="Delete heading">x</a>');
@@ -5687,7 +6263,7 @@ function make_tag_save_callback(elt) {
 function set_tags_callback(evt, data) {
     var si = analyze_rows(data.pid);
     if (highlight_entries && rowanal[si].entry)
-        setajaxcheck(rowanal[si].entry);
+        setajaxcheck(rowanal[si].entry, {ok: true});
     row_move(si);
 }
 
@@ -6099,144 +6675,12 @@ handle_ui.on("js-expand-archive", function (evt) {
 });
 
 
-// popup dialogs
-function popup_skeleton(options) {
-    var hc = new HtmlCollector, $d = null;
-    options = options || {};
-    hc.push('<div class="popupbg'
-        + (!options.anchor || options.anchor === window ? " popup-center" : "")
-        + '"><div class="popup"'
-        + (options.style ? ' style="' + escape_entities(options.style) + '"' : '')
-        + '><form enctype="multipart/form-data" accept-charset="UTF-8">', '</form><div class="popup-bottom"></div></div></div>');
-    hc.push_actions = function (actions) {
-        hc.push('<div class="popup-actions">', '</div>');
-        if (actions)
-            hc.push(actions.join("")).pop();
-        return hc;
-    };
-    function show_errors(data) {
-        var form = $d.find("form")[0],
-            dbody = $d.find(".popup-body"),
-            m = render_xmsg(2, data.error);
-        $d.find(".msg-error").remove();
-        dbody.length ? dbody.prepend(m) : $d.find("h2").after(m);
-        for (var f in data.errf || {}) {
-            var e = form[f];
-            if (e) {
-                var x = $(e).closest(".entryi, .f-i");
-                (x.length ? x : $(e)).addClass("has-error");
-            }
-        }
-        return $d;
-    }
-    function close() {
-        tooltip.erase();
-        $d.find("textarea, input").unautogrow();
-        $d.trigger("closedialog");
-        $d.remove();
-    }
-    hc.show = function (visible) {
-        if (!$d) {
-            $d = $(hc.render()).appendTo(document.body);
-            $d.find(".need-tooltip").each(tooltip);
-            $d.on("click", function (event) {
-                event.target === $d[0] && close();
-            });
-            $d.find("button[name=cancel]").on("click", close);
-            if (options.action) {
-                $d.find("form").attr({action: options.action, method: options.method || "post"});
-            }
-            for (var k in {minWidth: 1, maxWidth: 1, width: 1}) {
-                if (options[k] != null)
-                    $d.children().css(k, options[k]);
-            }
-            $d.show_errors = show_errors;
-            $d.close = close;
-        }
-        if (visible !== false) {
-            popup_near($d, options.anchor || window);
-            $d.find("textarea, input[type=text]").autogrow();
-        }
-        return $d;
-    };
-    return hc;
-}
-
-function popup_near(elt, anchor) {
-    tooltip.erase();
-    if (elt.jquery)
-        elt = elt[0];
-    while (!hasClass(elt, "popup"))
-        elt = elt.childNodes[0];
-    var bgelt = elt.parentNode;
-    if (hasClass(bgelt, "popup-center")) {
-        bgelt.style.display = "flex";
-    } else {
-        bgelt.style.display = "block";
-        var anchorPos = $(anchor).geometry(),
-            wg = $(window).geometry(),
-            po = $(bgelt).offset(),
-            y = (anchorPos.top + anchorPos.bottom - elt.offsetHeight) / 2;
-        y = Math.max(wg.top + 5, Math.min(wg.bottom - 5 - elt.offsetHeight, y)) - po.top;
-        elt.style.top = y + "px";
-        var x = (anchorPos.right + anchorPos.left - elt.offsetWidth) / 2;
-        x = Math.max(wg.left + 5, Math.min(wg.right - 5 - elt.offsetWidth, x)) - po.left;
-        elt.style.left = x + "px";
-    }
-    var efocus;
-    $(elt).find("input, button, textarea, select").filter(":visible").each(function () {
-        if (hasClass(this, "want-focus")) {
-            efocus = this;
-            return false;
-        } else if (!efocus
-                   && !hasClass(this, "dangerous")
-                   && !hasClass(this, "no-focus")) {
-            efocus = this;
-        }
-    });
-    efocus && focus_at(efocus);
-}
-
-function override_deadlines(callback) {
-    var ejq = $(this);
-    var djq = $('<div class="popupbg"><div class="popup"><p>'
-                + (ejq.attr("data-override-text") || "Are you sure you want to override the deadline?")
-                + '</p><form><div class="popup-actions">'
-                + '<button type="button" name="bsubmit" class="btn-primary"></button>'
-                + '<button type="button" name="cancel">Cancel</button>'
-                + '</div></form></div></div>');
-    djq.find("button[name=cancel]").on("click", function () {
-        djq.remove();
-    });
-    djq.find("button[name=bsubmit]")
-        .html(ejq.attr("aria-label")
-              || ejq.html()
-              || ejq.attr("value")
-              || "Save changes")
-        .on("click", function () {
-        if (callback && $.isFunction(callback))
-            callback();
-        else {
-            var fjq = ejq.closest("form");
-            fjq.children("div").first().append('<input type="hidden" name="' + ejq.attr("data-override-submit") + '" value="1"><input type="hidden" name="override" value="1">');
-            fjq.addClass("submitting");
-            fjq[0].submit();
-        }
-        djq.remove();
-    });
-    djq.appendTo(document.body);
-    popup_near(djq, this);
-}
-handle_ui.on("js-override-deadlines", override_deadlines);
-
-
-
 // ajax checking for paper updates
 function check_version(url, versionstr) {
     var x;
     function updateverifycb(json) {
         var e;
-        if (json && json.messages && (e = $$("msg-initial")))
+        if (json && json.messages && (e = $$("msgs-initial")))
             e.innerHTML = json.messages + e.innerHTML;
     }
     function updatecb(json) {
@@ -6279,8 +6723,9 @@ function render_user(u) {
 var plinfo = (function () {
 
 function prownear(e) {
-    while (e && e.nodeName !== "TR")
+    while (e && e.nodeName !== "TR") {
         e = e.parentNode;
+    }
     while (e && hasClass(e, "plx")) {
         do {
             e = e.previousSibling;
@@ -6304,7 +6749,8 @@ function render_allpref() {
             var pref = parseInt(m[3]);
             var x = render_user(pc) +
                 ' <span class="asspref' + (pref < 0 ? "-1" : "1") +
-                '">' + m[2] + (pref < 0 ? m[3].replace(/-/, "−") /* minus */ : m[3]) +
+                '">' + m[2] +
+                (pref < 0 ? "−" /* minus */ + m[3].substring(1) : "+" + m[3]) +
                 '</span>';
             t.push([m[2] === "P" ? pref : 0, pref, t.length, x]);
         }
@@ -6325,6 +6771,32 @@ function render_allpref() {
     }, function () {
         $(self).closest("div").empty();
     });
+}
+
+function render_assignment_selector() {
+    var prow = prownear(this),
+        conflict = hasClass(this, "conflict"),
+        sel = document.createElement("select"),
+        rts = [0, "None", 4, "Primary", 3, "Secondary", 2, "Optional", 5, "Metareview", -1, "Conflict"],
+        asstext = this.getAttribute("data-assignment"),
+        revtype, i = asstext.indexOf(" ");
+    sel.name = "assrev" + prow.getAttribute("data-pid") + "u" + asstext.substring(0, i);
+    revtype = +asstext.substring(i + 1);
+    sel.setAttribute("data-default-value", revtype);
+    sel.className = "uich js-assign-review";
+    sel.tabIndex = 2;
+    for (var i = 0; i < rts.length; i += 2) {
+        if (!conflict || rts[i] < 1) {
+            var opt = document.createElement("option");
+            opt.value = rts[i];
+            opt.text = rts[i + 1];
+            opt.defaultSelected = opt.selected = revtype === rts[i];
+            sel.add(opt, null);
+        }
+    }
+    this.className = "select";
+    this.removeAttribute("data-assignment");
+    this.appendChild(sel);
 }
 
 function set(f, $j, text) {
@@ -6386,8 +6858,26 @@ handle_ui.on("js-plinfo-edittags", function () {
 });
 
 
-var self = false, fields, field_order, aufull = {},
-    tagmap = false, _bypid = {}, _bypidx = {};
+var self = false, fields = {}, field_order = [], aufull = {},
+    tagmap = false, taghighlighter = false, _bypid = {}, _bypidx = {};
+
+function add_field(f) {
+    var j = field_order.length;
+    while (j > 0 && f.position < field_order[j-1].position)
+        --j;
+    field_order.splice(j, 0, f);
+    fields[f.name] = f;
+    if (f.name === "authors")
+        fields.au = fields.anonau = fields.aufull = f;
+    if (/^(?:#|tag:|tagval:)\S+$/.test(f.name))
+        $(window).on("hotcrptags", make_tag_column_callback(f));
+    if (f.foldnum === true) {
+        f.foldnum = 9;
+        while (hasClass(self, "fold" + f.foldnum + "c")
+               || hasClass(self, "fold" + f.foldnum + "o"))
+            ++f.foldnum;
+    }
+}
 
 function foldmap(type) {
     var fn = ({anonau:2, aufull:4, force:5, rownum:6, statistics:7})[type];
@@ -6421,37 +6911,49 @@ function populate_bypid(table, selector) {
 function pidrow(pid) {
     if (!(pid in _bypid))
         populate_bypid(_bypid, "tr.pl");
-    return $(_bypid[pid]);
+    return _bypid[pid];
 }
 
 function pidxrow(pid) {
     if (!(pid in _bypidx))
         populate_bypid(_bypidx, "tr.plx > td.plx");
-    return $(_bypidx[pid]);
+    return _bypidx[pid];
 }
 
 function pidfield(pid, f, index) {
     var row = f.column ? pidrow(pid) : pidxrow(pid);
     if (row && index == null)
         index = field_index(f);
-    return $(row.length ? row[0].childNodes[index] : null);
+    return $(row ? row.childNodes[index] : null);
 }
 
 
 function make_tagmap() {
     if (tagmap === false) {
-        var i, x, t;
-        tagmap = {};
-        x = fields.tags.highlight_tags || [];
-        for (i = 0; i != x.length; ++i) {
-            t = x[i].toLowerCase();
+        var i, tl, x, t, p;
+        tl = fields.tags.highlight_tags || [];
+        x = [];
+        for (i = 0; i !== tl.length; ++i) {
+            t = tl[i].toLowerCase();
             if (t.charAt(0) === "~" && t.charAt(1) !== "~")
                 t = hotcrp_user.cid + t;
-            tagmap[t] = (tagmap[t] || 0) | 1;
+            p = t.indexOf("*");
+            t = t.replace(/([^-A-Za-z_0-9])/g, "\\$1");
+            if (p === 0)
+                x.push('(?!.*~)' + t.replace('\\*', '.*'));
+            else if (p > 0)
+                x.push(t.replace('\\*', '.*'));
+            else if (t === "any")
+                x.push('(?:' + (hotcrp_user.cid || 0) + '~.*|~~.*|(?!\\d+~).*)');
+            else
+                x.push(t);
         }
-        x = fields.tags.votish_tags || [];
-        for (i = 0; i != x.length; ++i) {
-            t = x[i].toLowerCase();
+        taghighlighter = x.length ? new RegExp('^(' + x.join("|") + ')$', 'i') : null;
+
+        tagmap = {};
+        tl = fields.tags.votish_tags || [];
+        for (i = 0; i !== tl.length; ++i) {
+            t = tl[i].toLowerCase();
             tagmap[t] = (tagmap[t] || 0) | 2;
             t = hotcrp_user.cid + "~" + t;
             tagmap[t] = (tagmap[t] || 0) | 2;
@@ -6463,13 +6965,14 @@ function make_tagmap() {
 }
 
 function compute_row_tagset(tagstr, editable) {
-    var tmap = make_tagmap(), t = [], tags = (tagstr || "").split(/ /);
-    for (var i = 0; i != tags.length; ++i) {
+    make_tagmap();
+    var t = [], tags = (tagstr || "").split(/ /);
+    for (var i = 0; i !== tags.length; ++i) {
         var text = tags[i], twiddle = text.indexOf("~"), hash = text.indexOf("#");
         if (text !== "" && (twiddle <= 0 || text.substr(0, twiddle) == hotcrp_user.cid)) {
             twiddle = Math.max(twiddle, 0);
             var tbase = text.substring(0, hash), tindex = text.substr(hash + 1),
-                tagx = tmap ? tmap[tbase.toLowerCase()] || 0 : 0, h, q;
+                tagx = tagmap ? tagmap[tbase.toLowerCase()] || 0 : 0, h, q;
             tbase = tbase.substring(twiddle, hash);
             if (tagx & 2)
                 q = "#" + tbase + " showsort:-#" + tbase;
@@ -6481,16 +6984,13 @@ function compute_row_tagset(tagstr, editable) {
                 h = '<a class="nn nw" href="' + hoturl("search", {q: q}) + '"><u class="x">#' + tbase + '</u>#' + tindex + '</a>';
             else
                 h = '<a class="qq nw" href="' + hoturl("search", {q: q}) + '">#' + tbase + '</a>';
-            if (tagx & 1)
+            if (taghighlighter && taghighlighter.test(tbase))
                 h = '<strong>' + h + '</strong>';
             t.push([h, text.substring(twiddle, hash), text.substring(hash + 1), tagx]);
         }
     }
     t.sort(function (a, b) {
-        if ((a[3] ^ b[3]) & 1)
-            return a[3] & 1 ? -1 : 1;
-        else
-            return strnatcmp(a[1], b[1]);
+        return strnatcmp(a[1], b[1]);
     });
     if (!t.length && editable)
         t.push(["none"]);
@@ -6541,6 +7041,7 @@ function render_needed() {
     self || initialize();
     scorechart();
     $(".need-allpref").each(render_allpref);
+    $(".need-assignment-selector").each(render_assignment_selector);
     $(".need-tags").each(function () {
         render_row_tags(this.parentNode);
     });
@@ -6623,7 +7124,8 @@ function make_callback(dofold, type) {
         for (; tr; tr = tr.nextSibling)
             if (tr.nodeName === "TR" && tr.hasAttribute("data-statistic")) {
                 var stat = tr.getAttribute("data-statistic"),
-                    j = 0, td = tr.childNodes[index];
+                    j = 0,
+                    td = tr.childNodes[index];
                 if (td && stat in statvalues)
                     td.innerHTML = statvalues[stat];
             }
@@ -6632,13 +7134,27 @@ function make_callback(dofold, type) {
         ensure_field(f);
         tr = $(self).find("tr.pl").first()[0];
         render_some();
-        if (values.stat && f.name in values.stat)
+        if (values.stat && f.name in values.stat) {
             render_statistics(values.stat[f.name]);
+        }
+        if (type !== "aufull") {
+            fold(self, dofold, f.foldnum);
+        }
+        check_statistics();
     }
     return function (rv) {
-        if (type === "aufull")
+        if (!f && rv.ok && rv.fields && rv.fields[type]) {
+            f = rv.fields[type];
+            f.foldnum = f.missing = true;
+            add_field(f);
+            addClass(self, "fold" + f.foldnum + "c");
+        }
+        if (f) {
+            f.loadable = false;
+        }
+        if (type === "aufull") {
             aufull[!!dofold] = rv;
-        f.loadable = false;
+        }
         if (rv.ok) {
             values = rv;
             $(render_start);
@@ -6658,37 +7174,42 @@ function show_loading(f) {
     return function () { $(go); };
 }
 
+function check_statistics() {
+    var statistics = false;
+    for (var t in fields) {
+        if (fields[t].has_statistics
+            && hasClass(self, "fold" + fields[t].foldnum + "o")) {
+            statistics = true;
+            break;
+        }
+    }
+    fold(self, !statistics, 8);
+}
+
 function plinfo(type, dofold) {
     self || initialize();
     var elt, f = fields[type];
-    if (!f)
-        log_jserror("plinfo missing type " + type);
 
-    // fold
-    if ((type === "aufull" || type === "anonau") && !dofold
-        && (elt = $$("showau"))
-        && !elt.checked)
+    if ((type === "aufull" || type === "anonau")
+        && !dofold
+        && (elt = document.getElementById("showau"))
+        && !elt.checked) {
         elt.click();
+    }
     if ((type === "au" || type === "anonau")
-        && (elt = $$("showau_hidden"))
-        && elt.checked != $$("showau").checked)
+        && (elt = document.getElementById("showau_hidden"))
+        && elt.checked != document.getElementById("showau").checked) {
         elt.click();
-    if (type !== "aufull")
-        fold(self, dofold, foldmap(type));
+    }
 
-    // may need to load information by ajax
     var ses = self.getAttribute("data-fold-session-prefix");
-    if (type === "aufull" && aufull[!!dofold]) {
-        make_callback(dofold, type)(aufull[!!dofold]);
-    } else if ((!dofold && f.loadable && type !== "anonau") || type === "aufull") {
-        // set up "loading" display
-        setTimeout(show_loading(f), 750);
-
+    if ((type === "aufull" && !aufull[!!dofold])
+        || !f
+        || (!dofold && f.loadable && type !== "anonau")) {
         // initiate load
         var loadargs = $.extend({fn: "fieldhtml", f: type}, hotlist_search_params(self, true));
         if (ses) {
             loadargs.session = ses + type + (dofold ? "=1" : "=0");
-            ses = false;
         }
         if (type === "au" || type === "aufull") {
             loadargs.f = "authors";
@@ -6698,21 +7219,20 @@ function plinfo(type, dofold) {
                 loadargs.aufull = elt.checked ? 1 : 0;
         }
         $.get(hoturl_post("api", loadargs), make_callback(dofold, type));
-    }
-
-    // inform back end about folds
-    if (ses)
-        $.post(hoturl_post("api/setsession", {v: ses + type + (dofold ? "=1" : "=0")}));
-
-    // show or hide statistics rows
-    var statistics = false;
-    for (var t in fields)
-        if (fields[t].has_statistics
-            && hasClass(self, "fold" + fields[t].foldnum + "o")) {
-            statistics = true;
-            break;
+    } else {
+        // display
+        if (type === "aufull") {
+            make_callback(dofold, type)(aufull[!!dofold]);
+        } else {
+            fold(self, dofold, foldmap(type));
         }
-    fold(self, !statistics, 8);
+        // update session
+        if (ses) {
+            $.post(hoturl_post("api/session", {v: ses + type + (dofold ? "=1" : "=0")}));
+        }
+        // update statistics
+        check_statistics();
+    }
 
     return false;
 }
@@ -6721,20 +7241,9 @@ function initialize() {
     self = $("table.pltable")[0];
     if (!self)
         return false;
-    field_order = JSON.parse(self.getAttribute("data-columns"));
-    fields = {};
-    var fold_prefix = self.getAttribute("data-fold-session-prefix");
-    if (fold_prefix) {
-        var fs = {"2": fold_prefix + "anonau", "5": fold_prefix + "force", "6": fold_prefix + "rownum", "7": fold_prefix + "statistics"};
-        self.setAttribute("data-fold-session", JSON.stringify(fs));
-    }
-    for (var i = 0; i < field_order.length; ++i) {
-        fields[field_order[i].name] = field_order[i];
-        if (/^(?:#|tag:|tagval:)\S+$/.test(field_order[i].name))
-            $(window).on("hotcrptags", make_tag_column_callback(field_order[i]));
-    }
-    if (fields.authors)
-        fields.au = fields.anonau = fields.aufull = fields.authors;
+    var fs = JSON.parse(self.getAttribute("data-columns"));
+    for (var i = 0; i !== fs.length; ++i)
+        add_field(fs[i]);
 };
 
 plinfo.set_scoresort = function (ss) {
@@ -6752,32 +7261,36 @@ plinfo.render_needed = render_needed;
 $(window).on("hotcrptags", function (evt, rv) {
     if (!self && (self === false || initialize() === false))
         return;
-    var $pr = pidrow(rv.pid);
-    if (!$pr.length)
+    var pr = pidrow(rv.pid);
+    if (!pr)
         return;
     var $ptr = $("tr.pl, tr.plx").filter("[data-pid='" + rv.pid + "']");
 
     // set attributes
-    $pr.removeAttr("data-tags data-tags-conflicted data-color-classes data-color-classes-conflicted")
+    $(pr).removeAttr("data-tags data-tags-conflicted data-color-classes data-color-classes-conflicted")
         .attr("data-tags", $.isArray(rv.tags) ? rv.tags.join(" ") : rv.tags);
-    if ("tags_conflicted" in rv)
-        $pr.attr("data-tags-conflicted", rv.tags_conflicted);
-    if (rv.color_classes)
+    if ("tags_conflicted" in rv) {
+        pr.setAttribute("data-tags-conflicted", rv.tags_conflicted);
+    }
+    if (rv.color_classes) {
         make_pattern_fill(rv.color_classes);
+    }
     if ("color_classes_conflicted" in rv) {
-        $pr.attr("data-color-classes", rv.color_classes)
-            .attr("data-color-classes-conflicted", rv.color_classes_conflicted);
+        pr.setAttribute("data-color-classes", rv.color_classes);
+        pr.setAttribute("data-color-classes-conflicted", rv.color_classes_conflicted);
         $ptr.addClass("colorconflict");
         make_pattern_fill(rv.color_classes_conflicted);
-    } else
+    } else {
         $ptr.removeClass("colorconflict");
+    }
 
     // set color classes
     var cc = rv.color_classes;
     if (/ tagbg$/.test(rv.color_classes || ""))
-        $ptr.removeClass("k0 k1").closest("tbody").addClass("pltable_colored");
-    if ($pr.closest("table").hasClass("fold5c")
-        && "color_classes_conflicted" in rv)
+        $ptr.removeClass("k0 k1").closest("tbody").addClass("pltable-colored");
+    if (hasClass(pr.closest("table"), "fold5c")
+        && "color_classes_conflicted" in rv
+        && !hasClass(pr, "fold5o"))
         cc = rv.color_classes_conflicted;
     $ptr.removeClass(function (i, klass) {
         return (klass.match(/(?:^| )(?:\S*tag)(?= |$)/g) || []).join(" ");
@@ -6800,18 +7313,34 @@ $(window).on("hotcrptags", function (evt, rv) {
         render_row_tags(pidfield(rv.pid, fields.tags)[0]);
 });
 
-function fold_override(checkbox) {
+function change_color_classes(isconflicted) {
+    return function () {
+        var a = pattrnear(this, isconflicted ? "data-color-classes-conflicted" : "data-color-classes");
+        this.className = this.className.replace(/(?:^|\s+)(?:\S*tag|k[01]|tagbg)(?= |$)/g, "").trim() + (a ? " " + a : "");
+    };
+}
+
+function fold_override(dofold) {
     $(function () {
-        var on = checkbox.checked;
-        fold(self, !on, 5);
-        $("#forceShow").val(on ? 1 : 0);
+        $(self).find(".fold5c, .fold5o").removeClass("fold5c fold5o");
+        fold(self, dofold, 5);
+        $("#forceShow").val(dofold ? 0 : 1);
         // show the color classes appropriate to this conflict state
-        $(self).find(".colorconflict").each(function () {
-            var a = pattrnear(this, on ? "data-color-classes" : "data-color-classes-conflicted");
-            this.className = this.className.replace(/(?:^|\s+)(?:\S*tag|k[01]|tagbg)(?= |$)/g, "").trim() + (a ? " " + a : "");
-        });
+        $(self).find(".colorconflict").each(change_color_classes(dofold));
     });
 };
+
+handle_ui.on("js-override-conflict", function () {
+    var pid = this.closest("tr").getAttribute("data-pid"),
+        pr = pidrow(pid), pxr = pidxrow(pid).closest("tr");
+    addClass(pr, "fold5o");
+    addClass(pxr, "fold5o");
+    if (hasClass(pr, "colorconflict")) {
+        var f = change_color_classes(false);
+        f.call(pr);
+        f.call(pxr);
+    }
+});
 
 handle_ui.on("js-plinfo", function (event) {
     var type = this.getAttribute("data-plinfo-field"), dofold = null;
@@ -6822,10 +7351,11 @@ handle_ui.on("js-plinfo", function (event) {
         dofold = !this.checked;
     }
     if (type) {
+        self || initialize();
         type = type.split(/\s+/);
         for (var i = 0; i != type.length; ++i) {
             if (type[i] === "force")
-                fold_override(this);
+                fold_override(dofold);
             else if (type[i] === "rownum")
                 fold(self, dofold, 6);
             else
@@ -6902,10 +7432,9 @@ return function (classes, class_prefix) {
         style || (style = $("<style></style>").appendTo("head")[0].sheet);
         t = '<svg xmlns="http://www.w3.org/2000/svg" width="' + size +
             '" height="' + size + '">' + t + '</svg>';
-        t = 'background-image: url(data:image/svg+xml;base64,' + btoa(t) + ');'
+        t = 'background-image: url(data:image/svg+xml;base64,' + btoa(t) + ');';
         x = "." + tags.join(".") + (class_prefix ? $.trim("." + class_prefix) : "");
         style.insertRule(x + " { " + t + " }", 0);
-        style.insertRule(x + ".psc { " + t + " }", 0);
     }
     fmap[index] = fmap[canonical_index] = "url(#" + id + ")";
     return fmap[index];
@@ -6933,27 +7462,27 @@ function transfer_form_values($dst, $src, names) {
 
 
 // login UI
-handle_ui.on("js-forgot-password", function (event) {
-    var hc = popup_skeleton({action: hoturl_post("index", {signin: 1, action: "forgot"}), maxWidth: "25rem"});
-    hc.push('<p>Enter your email and we’ll send you instructions for signing in.</p>');
-    hc.push('<div class="f-i"><label for="forgotpassword_email">Email</label>', '</div>');
-    hc.push_pop('<input type="text" name="email" size="36" class="fullw" autocomplete="username" id="forgotpassword_email">');
-    hc.push_actions(['<button type="submit" class="btn-primary">Reset password</button>',
-        '<button type="button" name="cancel">Cancel</button>']);
-    var $d = hc.show();
-    transfer_form_values($d.find("form"), $(this).closest("form"), ["email"]);
+handle_ui.on("js-signin", function (event) {
+    var form = this;
+    $.get(hoturl("api/session"), function (data) {
+        if (data && data.postvalue) {
+            siteurl_postvalue = data.postvalue;
+            form.post && (form.post.value = siteurl_postvalue);
+        }
+        form.submit();
+    });
 });
 
-handle_ui.on("js-create-account", function (event) {
-    var hc = popup_skeleton({action: hoturl_post("index", {signin: 1, action: "new"}), maxWidth: "25rem"});
-    hc.push('<h2>Create account</h2>');
-    hc.push('<p>Enter your email and we’ll create an account and send you an initial password.</p>')
-    hc.push('<div class="f-i"><label for="createaccount_email">Email</label>', '</div>');
-    hc.push_pop('<input type="email" name="email" size="36" class="fullw" autocomplete="email" id="createaccount_email">');
-    hc.push_actions(['<button type="submit" class="btn-primary">Create account</button>',
-        '<button type="button" name="cancel">Cancel</button>']);
-    var $d = hc.show();
-    transfer_form_values($d.find("form"), $(this).closest("form"), ["email"]);
+handle_ui.on("js-no-signin", function (event) {
+    var e = this.closest(".js-signin");
+    e && removeClass(e, "ui-submit");
+});
+
+handle_ui.on("js-href-add-email", function (event) {
+    var e = this.closest("form");
+    if (e && e.email && e.email.value !== "") {
+        this.href = hoturl_add(this.href, "email=" + urlencode(e.email.value));
+    }
 });
 
 
@@ -6972,7 +7501,10 @@ handle_ui.on("js-check-format", function () {
         },
         success: function (data) {
             clearTimeout(running);
-            data.ok && $cf.html(data.response);
+            if (data.response && !data.result)
+                data.result = data.response; // XXX backward compat
+            if (data.ok || data.result)
+                $cf.html(data.result);
         }
     });
 });
@@ -7008,27 +7540,24 @@ $(background_format_check);
 });
 
 handle_ui.on("js-check-submittable", function (event) {
-    var $f = $(this).closest("form"),
-        readye = $f[0].submitpaper,
-        was = $f.attr("data-submitted"), is = true;
+    var f = this.closest("form"),
+        readye = f.submitpaper,
+        was = f.getAttribute("data-submitted"), is = true;
     if (this && this.tagName === "INPUT" && this.type === "file" && this.value)
-        fold($f.find(".ready-container"), false);
+        fold($(f).find(".ready-container"), false);
     if (readye && readye.type === "checkbox")
         is = readye.checked && $(readye).is(":visible");
     var t;
-    if ($f.attr("data-contacts-only"))
+    if (f.hasAttribute("data-contacts-only")) {
         t = "Save contacts";
-    else if (!is)
+    } else if (!is) {
         t = "Save draft";
-    else if (was)
+    } else if (was) {
         t = "Save and resubmit";
-    else
+    } else {
         t = "Save and submit";
-    var $b = $f.find(".btn-savepaper");
-    if ($b.length && $b[0].tagName === "INPUT")
-        $b.val(t);
-    else
-        $b.html(t);
+    }
+    $("button.btn-savepaper").html(t);
 });
 
 handle_ui.on("js-add-attachment", function () {
@@ -7046,15 +7575,12 @@ handle_ui.on("js-add-attachment", function () {
         name = $ea[0].getAttribute("data-document-prefix") + "_new_" + n;
     } while ($f[0]["has_" + name]);
     var $na = $('<div class="has-document document-new-instance hidden" data-document-name="' + name + '">'
-        + '<div class="document-upload"><input type="file" name="' + name + '" size="15" class="document-uploader"></div>'
+        + '<div class="document-upload"><input type="file" name="' + name + '" size="15" class="uich document-uploader"></div>'
         + '<div class="document-actions"><a href="" class="ui js-remove-document document-action">Delete</a></div>'
         + '</div>');
-    $na.appendTo($ei).find("input[type=file]").on("change", function () {
-        $(this).closest(".has-document").removeClass("hidden");
-        $ea.removeClass("hidden");
-        if (!$f[0]["has_" + name])
-            $f.append('<input type="hidden" name="has_' + name + '" value="1">');
-    })[0].click();
+    if (this.id === name)
+        this.id = "";
+    $na.appendTo($ei).find(".document-uploader")[0].click();
 });
 
 handle_ui.on("js-replace-document", function (event) {
@@ -7067,23 +7593,34 @@ handle_ui.on("js-replace-document", function (event) {
             t = '<div class="document-upload hidden"><input id="' + name + '" type="file" name="' + name + '"';
         if ($ei[0].hasAttribute("data-document-accept"))
             t += ' accept="' + $ei[0].getAttribute("data-document-accept") + '"';
-        t += ' class="document-uploader' + (docid > 0 ? "" : " js-check-submittable") + '"></div>';
+        t += ' class="uich document-uploader' + (docid > 0 ? "" : " js-check-submittable") + '"></div>';
+        if (this.id === name)
+            this.id = "";
         $u = $(t).appendTo($ei).find(".document-uploader");
-        $u.on("change", function () {
-            $ei.find(".document-file, .document-stamps, .document-actions, .document-format, .js-replace-document").addClass("hidden");
-            $ei.find(".document-upload").removeClass("hidden");
-            $ei.find(".js-remove-document").removeClass("undelete").html("Delete");
-            $ei.find(".js-replace-document").addClass("hidden");
-        });
     }
     $u[0].click();
+});
+
+handle_ui.on("document-uploader", function (event) {
+    var doce = this.closest(".has-document");
+    if (hasClass(doce, "document-new-instance")) {
+        removeClass(doce, "hidden");
+        removeClass(doce.parentElement, "hidden");
+        var f = doce.closest("form"), n = "has_" + doce.getAttribute("data-document-name");
+        if (!f[n])
+            $(f).append('<input type="hidden" name="' + n + '" value="1">');
+    } else {
+        $(doce).find(".document-file, .document-stamps, .document-actions, .document-format, .js-replace-document").addClass("hidden");
+        $(doce).find(".document-upload").removeClass("hidden");
+        $(doce).find(".js-remove-document").removeClass("undelete").html("Delete");
+    }
 });
 
 handle_ui.on("js-remove-document", function (event) {
     var $ei = $(this).closest(".has-document"),
         $r = $ei.find(".document-remover"),
         $en = $ei.find(".document-file"),
-        $f = $(this).closest("form") /* set before $ei is removed */;
+        f = this.closest("form") /* set before $ei is removed */;
     if (hasClass(this, "undelete")) {
         $r.val("");
         $en.find("del > *").unwrap();
@@ -7103,50 +7640,50 @@ handle_ui.on("js-remove-document", function (event) {
         $ei.find(".document-stamps, .document-shortformat").addClass("hidden");
         $(this).addClass("undelete").html("Undelete");
     }
-    form_highlight($f[0]);
+    form_highlight(f);
 });
 
 handle_ui.on("js-withdraw", function (event) {
-    var $f = $(this).closest("form"),
-        hc = popup_skeleton({anchor: this, action: $f[0].action});
+    var f = this.closest("form"),
+        hc = popup_skeleton({anchor: this, action: f});
     hc.push('<p>Are you sure you want to withdraw this submission from consideration and/or publication?');
     if (!this.hasAttribute("data-revivable"))
         hc.push(' Only administrators can undo this step.');
     hc.push('</p>');
-    hc.push('<textarea name="reason" rows="3" cols="40" style="width:99%" placeholder="Optional explanation" spellcheck="true"></textarea>');
+    hc.push('<textarea name="reason" rows="3" cols="40" class="w-99 need-autogrow" placeholder="Optional explanation" spellcheck="true"></textarea>');
     if (!this.hasAttribute("data-withdrawable")) {
         var idctr = hc.next_htctl_id();
         hc.push('<label class="checki"><span class="checkc"><input type="checkbox" name="override" value="1"> </span>Override deadlines</label>');
     }
-    hc.push_actions(['<button type="submit" name="withdraw" value="1" class="btn-primary">Withdraw</button>',
+    hc.push_actions(['<button type="submit" name="withdraw" value="1" class="btn-danger">Withdraw</button>',
         '<button type="button" name="cancel">Cancel</button>']);
     var $d = hc.show();
-    transfer_form_values($d.find("form"), $f, ["doemail", "emailNote"]);
-    $d.on("submit", "form", function () { $f.addClass("submitting"); });
+    transfer_form_values($d.find("form"), $(f), ["doemail", "emailNote"]);
+    $d.on("submit", "form", function () { addClass(f, "submitting"); });
 });
 
 handle_ui.on("js-delete-paper", function (event) {
-    var $f = $(this).closest("form"),
-        hc = popup_skeleton({anchor: this, action: $f[0].action});
+    var f = this.closest("form"),
+        hc = popup_skeleton({anchor: this, action: f});
     hc.push('<p>Be careful: This will permanently delete all information about this submission from the database and <strong>cannot be undone</strong>.</p>');
-    hc.push_actions(['<button type="submit" name="delete" value="1" class="dangerous">Delete</button>',
+    hc.push_actions(['<button type="submit" name="delete" value="1" class="btn-danger">Delete</button>',
         '<button type="button" name="cancel">Cancel</button>']);
     var $d = hc.show();
-    transfer_form_values($d.find("form"), $f, ["doemail", "emailNote"]);
-    $d.on("submit", "form", function () { $f.addClass("submitting"); });
+    transfer_form_values($d.find("form"), $(f), ["doemail", "emailNote"]);
+    $d.on("submit", "form", function () { addClass(f, "submitting"); });
 });
 
 handle_ui.on("js-clickthrough", function (event) {
     var self = this,
         $container = $(this).closest(".js-clickthrough-container");
-    $.post(hoturl_post("api/clickthrough", {accept: 1}),
+    if (!$container.length)
+        $container = $(this).closest(".pcontainer");
+    $.post(hoturl_post("api/clickthrough", {accept: 1, p: hotcrp_paperid}),
         $(this).closest("form").serialize(),
         function (data) {
             if (data && data.ok) {
-                $container.find(".js-clickthrough-body")
-                    .removeClass("hidden")
-                    .find(".need-clickthrough-enable")
-                    .prop("disabled", false).removeClass("need-clickthrough-enable");
+                $container.find(".need-clickthrough-show").removeClass("need-clickthrough-show hidden");
+                $container.find(".need-clickthrough-enable").prop("disabled", false).removeClass("need-clickthrough-enable");
                 $container.find(".js-clickthrough-terms").slideUp();
             } else {
                 make_bubble((data && data.error) || "You can’t continue to review until you accept these terms.", "errorbubble")
@@ -7166,65 +7703,79 @@ handle_ui.on("js-follow-change", function (event) {
         });
 });
 
-var edit_paper_ui = (function ($) {
+handle_ui.on("pspcard-fold", function (event) {
+    if (!event.target.closest("a")) {
+        addClass(this, "hidden");
+        $(this.parentElement).find(".pspcard-open").addClass("unhidden");
+    }
+});
 
+var edit_paper_ui = (function ($) {
 var edit_conditions = {};
 
-function check_still_ready(event) {
-    var sub = this.submitpaper;
-    if (sub && sub.type === "checkbox" && !this.submitpaper.checked) {
-        if (!window.confirm("Are you sure the paper is no longer ready for review?\n\nOnly papers that are ready for review will be considered."))
-            event.preventDefault();
-    }
-}
-
-function prepare_psedit(url) {
+function prepare_paper_select() {
     var self = this,
-        $ctl = $(self).find("select, textarea").first(),
-        val = $ctl.val();
-    function cancel() {
-        $ctl.val(val);
-        foldup.call(self, null, {f: true});
+        ctl = $(self).find("select, textarea").first()[0],
+        keyed = 0;
+    function cancel(close) {
+        $(ctl).val(input_default_value(ctl));
+        close && foldup.call(self, null, {f: true});
     }
     function done(ok, message) {
         $(self).find(".psfn .savesuccess, .psfn .savefailure").remove();
-        var s = $("<span class=\"save" + (ok ? "success" : "failure") + "\"></span>");
-        s.appendTo($(self).find(".psfn"));
+        var $s = $("<span class=\"save" + (ok ? "success" : "failure") + "\"></span>");
+        $s.appendTo($(self).find(".psfn"));
         if (ok)
-            s.delay(1000).fadeOut();
-        else
-            $ctl.val(val);
+            $s.delay(1000).fadeOut();
         if (message)
-            make_bubble(message, "errorbubble").dir("l").near(s[0]);
-        $ctl.prop("disabled", false);
+            make_bubble(message, "errorbubble").dir("l").near($s[0]);
     }
-    function change() {
-        var saveval = $ctl.val();
-        $.post(hoturl_post("api", url),
-            $(self).find("form").serialize(),
-            function (data) {
-                if (data.ok) {
-                    done(true);
-                    foldup.call(self, null, {f: true});
-                    val = saveval;
-                    var $p = $(self).find(".js-psedit-result").first();
-                    $p.html(data.result || $ctl[0].options[$ctl[0].selectedIndex].innerHTML);
-                    if (data.color_classes)
-                        make_pattern_fill(data.color_classes || "");
-                    $p.closest("div.taghh").removeClass().addClass("taghh pscopen " + (data.color_classes || ""));
-                } else
-                    done(false, data.error);
-            });
-        $ctl.prop("disabled", true);
+    function make_callback(close) {
+        return function (data) {
+            if (data.ok) {
+                done(true);
+                ctl.setAttribute("data-default-value", data.value);
+                close && foldup.call(self, null, {f: true});
+                var $p = $(self).find(".js-psedit-result").first();
+                $p.html(data.result || ctl.options[ctl.selectedIndex].innerHTML);
+                if (data.color_classes) {
+                    make_pattern_fill(data.color_classes || "");
+                    $p.html('<span class="taghh ' + data.color_classes + '">' + $p.html() + '</span>');
+                }
+            } else {
+                done(false, data.error);
+            }
+            ctl.disabled = false;
+        }
+    }
+    function change(evt) {
+        var saveval = $(ctl).val(), oldval = input_default_value(ctl);
+        if ((keyed && evt.type !== "blur" && now_msec() <= keyed + 1)
+            || ctl.disabled) {
+        } else if (saveval !== oldval) {
+            $.post(hoturl_post("api/" + ctl.name, {p: hotcrp_paperid}),
+                   $(self).find("form").serialize(),
+                   make_callback(evt.type !== "blur"));
+            ctl.disabled = true;
+        } else {
+            cancel(evt.type !== "blur");
+        }
     }
     function keyup(evt) {
-        if ((evt.charCode || evt.keyCode) == 27
-            && !evt.altKey && !evt.ctrlKey && !evt.metaKey) {
-            cancel();
+        if (event_key(evt) === "Escape" && !evt.altKey && !evt.ctrlKey && !evt.metaKey) {
+            cancel(true);
             evt.preventDefault();
         }
     }
-    $ctl.on("change", change).on("keyup", keyup);
+    function keypress(evt) {
+        if (event_key(evt) === " ")
+            /* nothing */;
+        else if (event_key.printable(evt))
+            keyed = now_msec();
+        else
+            keyed = 0;
+    }
+    $(ctl).on("change blur", change).on("keyup", keyup).on("keypress", keypress);
 }
 
 function reduce_tag_report(tagreport, min_status, tags) {
@@ -7257,6 +7808,7 @@ function prepare_pstags() {
     var self = this,
         $f = this.tagName === "FORM" ? $(self) : $(self).find("form"),
         $ta = $f.find("textarea");
+    removeClass(this, "need-tag-form");
     function handle_tag_report(data) {
         if (data.ok && data.tagreport) {
             var tx = reduce_tag_report(data.tagreport, 0);
@@ -7324,13 +7876,6 @@ function save_pstags(evt) {
                 $f.find(".js-tag-editor").prepend(render_xmsg(2, data.error));
             }
         }
-    });
-}
-
-function prepare_pstagindex() {
-    $(".need-tag-index-form").each(function () {
-        $(this).removeClass("need-tag-index-form").on("submit", save_pstagindex)
-            .find("input").on("change", save_pstagindex);
     });
 }
 
@@ -7471,10 +8016,40 @@ edit_conditions.pc_conflict = function (ec, form) {
 
 function run_edit_conditions() {
     $(".has-edit-condition").each(function () {
-        var $f = $(this).closest("form"),
-            ec = JSON.parse(this.getAttribute("data-edit-condition"));
-        toggleClass(this, "hidden", !evaluate_edit_condition(ec, $f[0]));
+        var f = this.closest("form"),
+            ec = JSON.parse(this.getAttribute("data-edit-condition")),
+            off = !evaluate_edit_condition(ec, f),
+            link = add_pslitem(this);
+        toggleClass(this, "hidden", off);
+        link && toggleClass(link, "hidden", off);
     });
+}
+
+function check_still_ready(event) {
+    var sub = this.submitpaper;
+    if (sub && sub.type === "checkbox" && !sub.checked) {
+        if (!window.confirm("Are you sure the paper is no longer ready for review?\n\nOnly papers that are ready for review will be considered."))
+            event.preventDefault();
+    }
+}
+
+function add_pslitem_header() {
+    var l = this.firstChild, id;
+    if (l.tagName === "LABEL") {
+        id = this.id || l.getAttribute("for") || $(l).find("input").attr("id");
+    }
+    if (id) {
+        var x = l.firstChild;
+        while (x && x.nodeType !== 3) {
+            x = x.nextSibling;
+        }
+        var e = x ? add_pslitem(id, escape_entities(x.data.trim()), this.parentElement) : null;
+        if (e) {
+            hasClass(this, "has-error") && addClass(e.firstChild, "is-error");
+            hasClass(this, "has-warning") && addClass(e.firstChild, "is-warning");
+            hasClass(this.parentElement, "hidden") && addClass(e, "hidden");
+        }
+    }
 }
 
 
@@ -7482,12 +8057,48 @@ function edit_paper_ui(event) {
     if (event.type === "submit")
         check_still_ready.call(this, event);
 };
-edit_paper_ui.prepare_psedit = prepare_psedit;
-edit_paper_ui.prepare_pstags = prepare_pstags;
-edit_paper_ui.prepare_pstagindex = prepare_pstagindex;
 edit_paper_ui.edit_condition = function () {
     run_edit_conditions();
-    $("#paperform").on("change click", "input, select, textarea", run_edit_conditions);
+    $("#form-paper").on("change click", "input, select, textarea", run_edit_conditions);
+};
+edit_paper_ui.load = function () {
+    hiliter_children("#form-paper");
+    $("#form-paper input[name=paperUpload]").trigger("change");
+    $(".papet").each(add_pslitem_header);
+    var h = $(".btn-savepaper").first(),
+        k = $("#form-paper").hasClass("alert") ? "" : " hidden";
+    $(".pslcard-nav").append('<div class="paper-alert mt-5' + k + '">'
+        + '<button class="ui btn btn-highlight btn-savepaper">'
+        + h.html() + '</button></div>')
+        .find(".btn-savepaper").click(function () {
+            $("#form-paper .btn-savepaper").first().click();
+        });
+};
+edit_paper_ui.prepare = function () {
+    $(".need-tag-index-form").each(function () {
+        $(this).removeClass("need-tag-index-form").on("submit", save_pstagindex)
+            .find("input").on("change", save_pstagindex);
+    });
+    $(".need-tag-form").each(prepare_pstags);
+    $(".need-paper-select-api").each(function () {
+        removeClass(this, "need-paper-select-api");
+        prepare_paper_select.call(this);
+    });
+};
+edit_paper_ui.load_review = function () {
+    hiliter_children("#form-review");
+    $(".revet").each(add_pslitem_header);
+    if ($(".revet").length) {
+        $(".pslcard > .pslitem:last-child").addClass("mb-3");
+    }
+    var h = $(".btn-savereview").first(),
+        k = $("#form-review").hasClass("alert") ? "" : " hidden";
+    $(".pslcard-nav").append('<div class="review-alert mt-5' + k + '">'
+        + '<button class="ui btn btn-highlight btn-savereview">'
+        + h.html() + '</button></div>')
+        .find(".btn-savereview").click(function () {
+            $("#form-review .btn-savereview").first().click();
+        });
 };
 return edit_paper_ui;
 })($);
@@ -7536,23 +8147,15 @@ handle_ui.on("js-cannot-delete-user", function (event) {
 });
 
 handle_ui.on("js-delete-user", function (event) {
-    var $f = $(this).closest("form"),
-        hc = popup_skeleton({anchor: this, action: $f[0].action}), x;
+    var f = this.closest("form"),
+        hc = popup_skeleton({anchor: this, action: f}), x;
     hc.push('<p>Be careful: This will permanently delete all information about this user from the database and <strong>cannot be undone</strong>.</p>');
     if ((x = this.getAttribute("data-delete-info")))
         hc.push(x);
-    hc.push_actions(['<button type="submit" name="delete" value="1" class="dangerous">Delete user</button>',
+    hc.push_actions(['<button type="submit" name="delete" value="1" class="btn-danger">Delete user</button>',
         '<button type="button" name="cancel">Cancel</button>']);
     var $d = hc.show();
-    $d.on("submit", "form", function () { $f.addClass("submitting"); });
-});
-
-handle_ui.on("js-plaintext-password", function (event) {
-    foldup.call(this);
-    var open = $(this).closest(".foldo, .foldc").hasClass("foldo");
-    var form = $(this).closest("form")[0];
-    if (form && form.whichpassword)
-        form.whichpassword.value = open ? "t" : "";
+    $d.on("submit", "form", function () { addClass(f, "submitting"); });
 });
 
 var profile_ui = (function ($) {
@@ -7570,33 +8173,55 @@ return function (event) {
 
 // review UI
 handle_ui.on("js-decline-review", function () {
-    var $f = $(this).closest("form"),
-        hc = popup_skeleton({anchor: this, action: $f[0].action});
+    var f = this.closest("form"),
+        hc = popup_skeleton({anchor: this, action: f});
     hc.push('<p>Select “Decline review” to decline this review. Thank you for your consideration.</p>');
-    hc.push('<textarea name="reason" rows="3" cols="60" class="w-99" placeholder="Optional explanation" spellcheck="true"></textarea>');
-    hc.push_actions(['<button type="submit" name="refuse" value="yes" class="btn-primary">Decline review</button>',
+    hc.push('<textarea name="reason" rows="3" cols="60" class="w-99 need-autogrow" placeholder="Optional explanation" spellcheck="true"></textarea>');
+    hc.push_actions(['<button type="submit" name="refuse" value="yes" class="btn-danger">Decline review</button>',
         '<button type="button" name="cancel">Cancel</button>']);
     hc.show();
 });
 
 handle_ui.on("js-deny-review-request", function () {
-    var $f = $(this).closest("form"),
-        hc = popup_skeleton({anchor: this, action: $f[0].action});
+    var f = this.closest("form"),
+        hc = popup_skeleton({anchor: this, action: f});
     hc.push('<p>Select “Deny request” to deny this review request.</p>');
-    hc.push('<textarea name="reason" rows="3" cols="60" class="w-99" placeholder="Optional explanation" spellcheck="true"></textarea>');
-    hc.push_actions(['<button type="submit" name="denyreview" value="1" class="btn-primary">Deny request</button>',
+    hc.push('<textarea name="reason" rows="3" cols="60" class="w-99 need-autogrow" placeholder="Optional explanation" spellcheck="true"></textarea>');
+    hc.push_actions(['<button type="submit" name="denyreview" value="1" class="btn-danger">Deny request</button>',
         '<button type="button" name="cancel">Cancel</button>']);
     var $d = hc.show();
-    transfer_form_values($d, $f, ["firstName", "lastName", "affiliation", "reason"]);
+    transfer_form_values($d, $(f), ["firstName", "lastName", "affiliation", "reason"]);
 });
 
 handle_ui.on("js-delete-review", function () {
-    var $f = $(this).closest("form"),
-        hc = popup_skeleton({anchor: this, action: $f[0].action});
+    var f = this.closest("form"),
+        hc = popup_skeleton({anchor: this, action: f});
     hc.push('<p>Be careful: This will permanently delete all information about this review assignment from the database and <strong>cannot be undone</strong>.</p>');
-    hc.push_actions(['<button type="submit" name="deletereview" value="1" class="dangerous">Delete review</button>',
+    hc.push_actions(['<button type="submit" name="deletereview" value="1" class="btn-danger">Delete review</button>',
         '<button type="button" name="cancel">Cancel</button>']);
     hc.show();
+});
+
+handle_ui.on("js-adopt-review", function (event) {
+    var self = this, hc = popup_skeleton({anchor: this});
+    hc.push('<p>Replace your review with the contents of this review?</p>');
+    hc.push_actions([
+        '<button type="button" name="bsubmit" class="btn-primary">Adopt and submit</button>',
+        '<button type="button" name="bdraft">Adopt as draft</button>',
+        '<button type="button" name="cancel">Cancel</button>'
+    ]);
+    var $d = hc.show();
+    $d.on("click", "button", function (event) {
+        if (event.target.name !== "cancel") {
+            var form = self.closest("form");
+            $(form).append('<input type="hidden" name="adoptreview" value="1">');
+            if (event.target.name === "bsubmit")
+                $(form).append('<input type="hidden" name="adoptsubmit" value="1">');
+            addClass(form, "submitting");
+            form.submit();
+            $d.close();
+        }
+    });
 });
 
 
@@ -7606,19 +8231,24 @@ handle_ui.on("js-edit-formulas", function () {
     function push_formula(hc, f) {
         ++nformulas;
         hc.push('<div class="editformulas-formula" data-formula-number="' + nformulas + '">', '</div>');
-        hc.push('<div class="entryi"><label for="htctl_formulaname_' + nformulas + '">Name</label><div class="entry">');
+        hc.push('<div class="entryi"><label for="htctl_formulaname_' + nformulas + '">Name</label><div class="entry">', '</div></div>');
         if (f.editable) {
-            hc.push('<input type="text" id="htctl_formulaname_' + nformulas + '" class="editformulas-name" name="formulaname_' + nformulas + '" size="30" value="' + escape_entities(f.name) + '">');
+            hc.push('<input type="text" id="htctl_formulaname_' + nformulas + '" class="editformulas-name need-autogrow" name="formulaname_' + nformulas + '" size="30" value="' + escape_entities(f.name) + '">');
             hc.push('<a class="ui closebtn delete-link need-tooltip" href="" aria-label="Delete formula">x</a>');
         } else
             hc.push(escape_entities(f.name));
-        hc.push('</div></div><div class="entryi"><label for="htctl_formulaexpression_' + nformulas + '">Expression</label>');
+        hc.pop();
+        hc.push('<div class="entryi"><label for="htctl_formulaexpression_' + nformulas + '">Expression</label><div class="entry">', '</div></div>');
         if (f.editable)
-            hc.push('<textarea class="editformulas-expression" id="htctl_formulaexpression_' + nformulas + '" name="formulaexpression_' + nformulas + '" rows="1" cols="60" style="width:39.5rem;width:99%">' + escape_entities(f.expression) + '</textarea>')
+            hc.push('<textarea class="editformulas-expression need-autogrow" id="htctl_formulaexpression_' + nformulas + '" name="formulaexpression_' + nformulas + '" rows="1" cols="60" style="width:99%">' + escape_entities(f.expression) + '</textarea>')
                 .push('<input type="hidden" name="formulaid_' + nformulas + '" value="' + f.id + '">');
         else
-            hc.push('<div class="entry">' + escape_entities(f.expression) + '</div>');
-        hc.push_pop('</div>');
+            hc.push(escape_entities(f.expression));
+        hc.pop();
+        if (f.error_html) {
+            hc.push('<div class="entryi"><label class="is-error">Error</label><div class="entry">' + f.error_html + '</div></div>');
+        }
+        hc.pop();
     }
     function click(event) {
         if (this.name === "add") {
@@ -7628,7 +8258,7 @@ handle_ui.on("js-edit-formulas", function () {
             $f[0].setAttribute("data-formula-new", "");
             $f.find("textarea").autogrow();
             focus_at($f.find(".editformulas-name"));
-            $d.find(".popup-bottom").scrollIntoView();
+            $d.find(".modal-dialog").scrollIntoView({atBottom: true, marginBottom: "auto"});
         }
     }
     function ondelete() {
@@ -7693,7 +8323,7 @@ handle_ui.on("js-edit-view-options", function () {
         hc.push('<div class="reportdisplay-default">' + escape_entities(display_default || "") + '</div>');
         hc.pop();
         hc.push('<div class="f-i"><div class="f-c">Current view options</div>', '</div>');
-        hc.push('<textarea class="reportdisplay-current" name="display" rows="1" cols="60" style="width:39.5rem;width:99%">' + escape_entities(display_current || "") + '</textarea>');
+        hc.push('<textarea class="reportdisplay-current w-99 need-autogrow" name="display" rows="1" cols="60">' + escape_entities(display_current || "") + '</textarea>');
         hc.pop();
         hc.push_actions(['<button type="submit" name="save" class="btn-primary">Save options as default</button>', '<button type="button" name="cancel">Cancel</button>']);
         $d = hc.show();
@@ -7711,8 +8341,6 @@ handle_ui.on("js-select-all", function () {
     $(this).closest("table.pltable").find("input[name='pap[]']").prop("checked", true);
 });
 
-
-var paperlist_ui = (function ($) {
 
 handle_ui.on("js-tag-list-action", function () {
     $("select.js-submit-action-info-tag").on("change", function () {
@@ -7749,7 +8377,7 @@ handle_ui.on("js-assign-list-action", function () {
     });
 });
 
-function paperlist_submit(event) {
+handle_ui.on("js-paperlist-submit", function (event) {
     // analyze why this is being submitted
     var $self = $(this), fn = $self.data("submitMark");
     $self.removeData("submitMark");
@@ -7789,13 +8417,7 @@ function paperlist_submit(event) {
         action = hoturl_add(action, "action=" + encodeURIComponent(fn));
     }
     this.action = action;
-}
-
-return function (event) {
-    if (event.type === "submit")
-        paperlist_submit.call(this, event);
-};
-})($);
+});
 
 
 handle_ui.on("js-unfold-pcselector", function () {
@@ -7831,7 +8453,7 @@ handle_ui.on("js-assign-review", function (event) {
             if (self.tagName === "SELECT")
                 self.setAttribute("data-default-value", value);
             else
-                self.setAttribute("data-default-checked", value ? "1" : "");
+                self.setAttribute("data-default-checked", value ? "true" : "false");
             setajaxcheck(self, rv);
             form_highlight(form, self);
         });
@@ -7997,17 +8619,18 @@ function set_list_order(info, tbody) {
     return info.replace(/"ids":"[-0-9'a-zA-Z]+"/, '"ids":"' + l.join("'") + '"');
 }
 function handle_list(e, href) {
-    var $hl, sitehref, m;
+    var hl, sitehref, m;
     if (href
         && href.substring(0, siteurl.length) === siteurl
         && is_listable((sitehref = href.substring(siteurl.length)))
-        && ($hl = $(e).closest(".has-hotlist")).length) {
-        var info = $hl.attr("data-hotlist");
-        if ($hl.is("table.pltable")
-            && $hl[0].hasAttribute("data-reordered")
+        && (hl = e.closest(".has-hotlist"))) {
+        var info = hl.getAttribute("data-hotlist");
+        if (hl.tagName === "TABLE"
+            && hasClass(hl, "pltable")
+            && hl.hasAttribute("data-reordered")
             && document.getElementById("footer"))
             // Existence of `#footer` checks that the table is fully loaded
-            info = set_list_order(info, $hl[0].tBodies[0]);
+            info = set_list_order(info, hl.tBodies[0]);
         m = /^[^\/]*\/(\d+)(?:$|[a-zA-Z]*\/)/.exec(sitehref);
         set_cookie(info, m ? +m[1] : null);
     }
@@ -8018,49 +8641,73 @@ function unload_list() {
         set_cookie(hl);
 }
 function row_click(evt) {
-    var $tgt = $(evt.target);
-    if (evt.target.tagName === "A"
-        || evt.target.tagName === "INPUT"
-        || evt.target.tagName === "TEXTAREA"
-        || evt.target.tagName === "SELECT"
-        || !hasClass(this.parentElement, "pltable"))
+    if (!hasClass(this.parentElement, "pltable")
+        || evt.target.closest("a, input, textarea, select, button"))
+        return;
+    var td = evt.target.closest("td");
+    if (!td || (!hasClass(td, "pl_id") && !hasClass(td, "pl_title") && !hasClass(td, "pl_rowclick")))
         return;
     var pl = this;
     while (pl.nodeType !== 1 || /^plx/.test(pl.className))
         pl = pl.previousSibling;
-    if (hasClass(this.parentElement.parentElement, "pltable-focus-checkbox")) {
-        $(pl).find("input[type=checkbox]").focus().scrollIntoView();
-        evt.preventDefault();
-    } else if (hasClass(evt.target, "pl_id")
-               || hasClass(evt.target, "pl_title")
-               || $(evt.target).closest("td").hasClass("pl_rowclick")) {
+    var $inputs = $(pl).find("input, textarea, select, button")
+        .not("input[type=hidden], .pl_sel > input");
+    if ($inputs.length) {
+        $inputs.first().focus().scrollIntoView();
+    } else {
         var $a = $(pl).find("a.pnum").first(),
             href = $a[0].getAttribute("href");
         handle_list($a[0], href);
-        if (event_key.is_default_a(evt))
+        if (event_key.is_default_a(evt)) {
             window.location = href;
-        else {
+        } else {
             var w = window.open(href, "_blank");
             w && w.blur();
             window.focus();
         }
-        evt.preventDefault();
     }
+    evt.preventDefault();
 }
 handle_ui.on("js-edit-comment", function (event) {
     return papercomment.edit_id(this.hash.substring(1));
 });
+
+function default_click(evt) {
+    var base = location.href;
+    if (location.hash) {
+        base = base.substring(0, base.length - location.hash.length);
+    }
+    if (this.href.substring(0, base.length + 1) === base + "#") {
+        if (jump_hash(this.href)) {
+            push_history_state(this.href);
+            evt.preventDefault();
+        }
+        return true;
+    } else if (after_outstanding()) {
+        after_outstanding(make_link_callback(this));
+        return true;
+    } else {
+        return false;
+    }
+}
+
 $(document).on("click", "a", function (evt) {
-    if (hasClass(this, "fn5"))
+    if (hasClass(this, "fn5")) {
         foldup.call(this, evt, {n: 5, f: false});
-    else if (!hasClass(this, "ui"))
-        handle_list(this, this.getAttribute("href"));
+    } else if (!hasClass(this, "ui")) {
+        if (!event_key.is_default_a(evt)
+            || this.target
+            || !default_click.call(this, evt))
+            handle_list(this, this.getAttribute("href"));
+    }
 });
+
 $(document).on("submit", "form", function (evt) {
-    if (hasClass(this, "submit-ui"))
+    if (hasClass(this, "ui-submit")) {
         handle_ui.call(this, evt);
-    else
+    } else {
         handle_list(this, this.getAttribute("action"));
+    }
 });
 $(document).on("click", "tr.pl", row_click);
 $(window).on("beforeunload", unload_list);
@@ -8137,18 +8784,29 @@ function populate_pcselector(pcs) {
         optids = JSON.parse(optids);
     else
         optids = optids.split(/[\s,]+/);
-    var selected = this.getAttribute("data-pcselector-selected"), selindex = 0;
-    var last_first = pcs.__sort__ === "last", used = {};
+    var selected = this.getAttribute("data-pcselector-selected"), selindex = -1;
+    var last_first = pcs.__sort__ === "last", used = {}, opt, curgroup = this;
 
     for (var i = 0; i < optids.length; ++i) {
         var cid = optids[i], email, name, p;
-        if (cid === "" || cid === "*")
+        if (cid === "" || cid === "*") {
             optids.splice.apply(optids, [i + 1, 0].concat(pcs.__order__));
-        else if (cid === "assignable")
+        } else if (cid === "assignable") {
             optids.splice.apply(optids, [i + 1, 0].concat(pcs.__assignable__[hotcrp_paperid] || []));
-        else if (cid === "selected") {
+        } else if (cid === "selected") {
             if (selected != null)
                 optids.splice.apply(optids, [i + 1, 0, selected]);
+        } else if (cid === "extrev") {
+            var extrevs = pcs.__extrev__ ? pcs.__extrev__[hotcrp_paperid] : null;
+            if (extrevs && extrevs.length) {
+                optids.splice.apply(optids, [i + 1, 0].concat(extrevs));
+                optids.splice(i + 1 + extrevs.length, 0, "endgroup");
+                curgroup = document.createElement("optgroup");
+                curgroup.setAttribute("label", "External reviewers");
+                this.appendChild(curgroup);
+            }
+        } else if (cid === "endgroup") {
+            curgroup = this;
         } else {
             cid = +optids[i];
             if (!cid) {
@@ -8156,27 +8814,47 @@ function populate_pcselector(pcs) {
                 name = optids[i];
                 if (name === "" || name === "0")
                     name = "None";
-            } else if ((p = pcs[cid])) {
+            } else if ((p = pcs[cid])
+                       || (pcs.__other__ && (p = pcs.__other__[cid]))) {
                 email = p.email;
                 name = p.name;
                 if (last_first && p.lastpos) {
                     var nameend = p.emailpos ? p.emailpos - 1 : name.length;
                     name = name.substring(p.lastpos, nameend) + ", " + name.substring(0, p.lastpos - 1) + name.substring(nameend);
                 }
-            } else
+            } else {
                 continue;
+            }
             if (!used[email]) {
                 used[email] = true;
-                var opt = document.createElement("option");
+                opt = document.createElement("option");
                 opt.setAttribute("value", email);
                 opt.text = name;
-                this.add(opt);
+                curgroup.appendChild(opt);
                 if (email === selected || (email !== "none" && cid == selected))
                     selindex = this.options.length - 1;
             }
         }
     }
+
+    if (selindex < 0) {
+        if (selected == 0 || selected == null) {
+            selindex = 0;
+        } else {
+            var opt = document.createElement("option");
+            if ((p = pcs[selected])) {
+                opt.setAttribute("value", p.email);
+                opt.text = p.name + " (not assignable)";
+            } else {
+                opt.setAttribute("value", selected);
+                opt.text = "[removed from PC]";
+            }
+            this.appendChild(opt);
+            selindex = this.options.length - 1;
+        }
+    }
     this.selectedIndex = selindex;
+    this.setAttribute("data-default-value", this.options[selindex].value);
 }
 
 $(function () {
@@ -8287,8 +8965,8 @@ function make_info(n, c, sv) {
         },
         unparse_revnum: function (val) {
             if (val >= 1 && val <= n)
-                return '<span class="rev_num sv ' + sv + fm9(val) + '">' +
-                    unparse(val) + '.</span>';
+                return '<strong class="rev_num sv ' + sv + fm9(val) + '">' +
+                    unparse(val) + '.</strong>';
             else
                 return '(???)';
         },
@@ -8566,27 +9244,41 @@ function make_textarea_autogrower($self) {
 function make_input_autogrower($self) {
     var shadow;
     return function (event) {
-        if (event === false)
+        if (event === false) {
             return remover($self, shadow);
-        var width = $self.outerWidth(), ws;
-        if (width <= 0)
+        }
+        var width = 0, ws;
+        try {
+            width = $self.outerWidth();
+        } catch (e) { // IE11 is annoying here
+        }
+        if (width <= 0) {
             return;
+        }
         if (!shadow) {
             shadow = textarea_shadow($self, width);
             var p = $self.css(["paddingRight", "paddingLeft", "borderLeftWidth", "borderRightWidth"]);
-            shadow.css({width: "auto", display: "table-cell", paddingLeft: p.paddingLeft, paddingLeft: (parseFloat(p.paddingRight) + parseFloat(p.paddingLeft) + parseFloat(p.borderLeftWidth) + parseFloat(p.borderRightWidth)) + "px"});
+            shadow.css({
+                width: "auto",
+                display: "table-cell",
+                paddingLeft: p.paddingLeft,
+                paddingLeft: (parseFloat(p.paddingRight) + parseFloat(p.paddingLeft) + parseFloat(p.borderLeftWidth) + parseFloat(p.borderRightWidth)) + "px"
+            });
             ws = $self.css(["minWidth", "maxWidth"]);
-            if (ws.minWidth == "0px")
+            if (ws.minWidth == "0px") {
                 $self.css("minWidth", width + "px");
-            if (ws.maxWidth == "none" && !$self.hasClass("wide"))
+            }
+            if (ws.maxWidth == "none" && !$self.hasClass("wide")) {
                 $self.css("maxWidth", "640px");
+            }
         }
         shadow.text($self[0].value + "  ");
         ws = $self.css(["minWidth", "maxWidth"]);
         var outerWidth = Math.min(shadow.outerWidth(), $(window).width()),
             maxWidth = parseFloat(ws.maxWidth);
-        if (maxWidth === maxWidth)
+        if (maxWidth === maxWidth) { // i.e., isn't NaN
             outerWidth = Math.min(outerWidth, maxWidth);
+        }
         $self.outerWidth(Math.max(outerWidth, parseFloat(ws.minWidth)));
     };
 }
@@ -8594,10 +9286,11 @@ $.fn.autogrow = function () {
     this.each(function () {
         var $self = $(this), f = $self.data("autogrower");
         if (!f) {
-            if (this.tagName === "TEXTAREA")
+            if (this.tagName === "TEXTAREA") {
                 f = make_textarea_autogrower($self);
-            else if (this.tagName === "INPUT" && this.type === "text")
+            } else if (this.tagName === "INPUT" && this.type === "text") {
                 f = make_input_autogrower($self);
+            }
             if (f) {
                 $self.data("autogrower", f).on("change input", f);
                 if (!autogrowers) {
@@ -8607,8 +9300,10 @@ $.fn.autogrow = function () {
                 autogrowers.push(f);
             }
         }
-        if (f && $self.val() !== "")
+        if (f && $self.val() !== "") {
             f();
+        }
+        removeClass(this, "need-autogrow");
     });
 	return this;
 };
@@ -8621,4 +9316,4 @@ $.fn.unautogrow = function () {
 };
 })(jQuery);
 
-$(function () { $(".need-autogrow").autogrow().removeClass("need-autogrow"); });
+$(function () { $(".need-autogrow").autogrow(); });

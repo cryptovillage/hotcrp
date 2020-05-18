@@ -1,6 +1,6 @@
 <?php
 // search/st_option.php -- HotCRP helper class for searching for papers
-// Copyright (c) 2006-2019 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
 
 class OptionMatcher {
     public $option;
@@ -45,8 +45,8 @@ class OptionMatcher {
     }
     function exec(PaperInfo $prow, Contact $user) {
         $ov = null;
-        if ($user->can_view_paper_option($prow, $this->option)) {
-            $ov = $prow->option($this->option->id);
+        if ($user->can_view_option($prow, $this->option)) {
+            $ov = $prow->option($this->option);
         }
 
         if (!$ov) {
@@ -98,31 +98,35 @@ class Option_SearchTerm extends SearchTerm {
         parent::__construct("option");
         $this->om = $om;
     }
-    static function parse_factory($keyword, Conf $conf, $kwfj, $m) {
-        $f = $conf->find_all_fields($keyword);
-        if (count($f) == 1 && $f[0] instanceof PaperOption)
+    static function parse_factory($keyword, $user, $kwfj, $m) {
+        $f = $user->conf->find_all_fields($keyword);
+        if (count($f) === 1 && $f[0] instanceof PaperOption) {
             return (object) [
                 "name" => $keyword,
                 "parse_callback" => "Option_SearchTerm::parse",
                 "has" => "any"
             ];
-        else
+        } else {
             return null;
+        }
     }
     static function parse($word, SearchWord $sword, PaperSearch $srch) {
-        if ($sword->kwdef->name !== "option")
+        if ($sword->kwdef->name !== "option") {
             $word = $sword->kwdef->name . ":" . $word;
+        }
         $os = self::analyze($srch->conf, $word, $sword->quoted);
-        foreach ($os->warnings as $w)
+        foreach ($os->warnings as $w) {
             $srch->warn($w);
+        }
         if (!empty($os->os)) {
-            $qz = array();
-            foreach ($os->os as $oq)
+            $qz = [];
+            foreach ($os->os as $oq) {
                 $qz[] = new Option_SearchTerm($oq);
-            $t = SearchTerm::make_op("or", $qz);
-            return $os->negated ? SearchTerm::make_not($t) : $t;
-        } else
+            }
+            return SearchTerm::make_op("or", $qz)->negate_if($os->negated);
+        } else {
             return new False_SearchTerm;
+        }
     }
     static function analyze(Conf $conf, $word, $quoted = false) {
         $oms = new OptionMatcherSet;
@@ -164,7 +168,7 @@ class Option_SearchTerm extends SearchTerm {
             if ($isany) {
                 $oms->os[] = new OptionMatcher($o, "!=", null);
             } else if (!$o->parse_search($oms)) {
-                $oms->warnings[] = "Bad search “" . htmlspecialchars($oms->vword) . "” for submission field “" . htmlspecialchars($o->title) . "”.";
+                $oms->warnings[] = "Bad search “" . htmlspecialchars($oms->vword) . "” for submission field “" . $o->title_html() . "”.";
             }
         }
 
@@ -187,12 +191,16 @@ class Option_SearchTerm extends SearchTerm {
     function exec(PaperInfo $row, PaperSearch $srch) {
         return $this->om->exec($row, $srch->user);
     }
-    function compile_edit_condition(PaperInfo $row, PaperSearch $srch) {
-        if ($this->om->kind)
+    function compile_condition(PaperInfo $row, PaperSearch $srch) {
+        if ($this->om->kind) {
             return null;
-        else if (!$srch->user->can_view_paper_option($row, $this->om->option))
+        } else if (!$srch->user->can_view_option($row, $this->om->option)) {
             return false;
-        else
-            return (object) ["type" => "option", "id" => $this->om->option->id, "compar" => $this->om->compar, "value" => $this->om->value];
+        } else {
+            return (object) [
+                "type" => "option", "id" => $this->om->option->id,
+                "compar" => $this->om->compar, "value" => $this->om->value
+            ];
+        }
     }
 }

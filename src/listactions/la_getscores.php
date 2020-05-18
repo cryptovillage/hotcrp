@@ -1,9 +1,9 @@
 <?php
 // listactions/la_getscores.php -- HotCRP helper classes for list actions
-// Copyright (c) 2006-2019 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
 
 class GetScores_ListAction extends ListAction {
-    function allow(Contact $user) {
+    function allow(Contact $user, Qrequest $qreq) {
         return $user->can_view_some_review();
     }
     function run(Contact $user, $qreq, $ssel) {
@@ -12,7 +12,7 @@ class GetScores_ListAction extends ListAction {
         // compose scores; NB chair is always forceShow
         $errors = $texts = $any_scores = array();
         $any_decision = $any_reviewer_identity = $any_ordinal = false;
-        foreach ($user->paper_set($ssel) as $row) {
+        foreach ($ssel->paper_set($user) as $row) {
             if (($whyNot = $user->perm_view_paper($row)))
                 $errors[] = "#$row->paperId: " . whyNotText($whyNot);
             else if (($whyNot = $user->perm_view_review($row, null)))
@@ -27,7 +27,9 @@ class GetScores_ListAction extends ListAction {
                     $this_scores = false;
                     $b = $a;
                     foreach ($rf->forder as $field => $f)
-                        if ($f->view_score > $view_bound && $f->has_options
+                        if ($f->view_score > $view_bound
+                            && $f->has_options
+                            && $f->is_round_visible($rrow)
                             && ($rrow->$field || $f->allow_empty)) {
                             $b[$f->search_keyword()] = $f->unparse_value($rrow->$field);
                             $any_scores[$f->search_keyword()] = $this_scores = true;

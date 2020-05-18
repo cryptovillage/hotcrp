@@ -1,7 +1,7 @@
 #!/usr/bin/perl -w
 #
 # Copyright (C) 2007 Geoffrey M. Voelker
-# Copyright (c) 2016-2019 Eddie Kohler; see LICENSE.
+# Copyright (c) 2016-2020 Eddie Kohler; see LICENSE.
 #
 # banal -- analyze pdf formatting
 #
@@ -90,6 +90,7 @@ banal has three modes of operation:
 -zoom=N   passed to pdftohtml.
 
 -json     JSON output
+-pagenum  include page numbers and headings
 
 -max-pages=N  maximum number of pages for JSON
 
@@ -353,8 +354,10 @@ sub calc_xmap_mode_columns ($) {
             if (@$z == $ncols2) {
                 my ($l2, $r2) = ($z->[$i], $z->[$i + 1]);
                 if (min($r1, $r2) - max($l1, $l2) >= $overlap) {
-                    $l = min $l, $l2 if $colpos[$i]->{$l2} > 3;
-                    $r = max $r, $r2 if $colpos[$i + 1]->{$r2} > 3;
+                    $l = min $l, $l2 if exists($colpos[$i]->{$l2})
+                                        && $colpos[$i]->{$l2} > 3;
+                    $r = max $r, $r2 if exists($colpos[$i + 1]->{$r2})
+                                        && $colpos[$i + 1]->{$r2} > 3;
                     ++$n;
                 }
             }
@@ -441,52 +444,124 @@ sub interval_overlap ($$$$) {
         || ($b + $db >= $a && $b + $db <= $a + $da);
 }
 
-sub calc_page_headings ($$$) {
-    my ($page, $texts, $bodyfontsize) = @_;
+sub column_gap_overlap {
+    my ($text, $coll, $colr, $tt, $th, $bodyfontsize) = @_;
+    my ($slack) = $p2h_per_inch / 8;
+    my ($gap) = 0;
+    if ($text->{sz} <= $bodyfontsize
+        && interval_overlap($coll, $colr - $coll, $text->{l}, $text->{w})) {
+        $gap |= 1 if $text->{t} >= $tt + $th
+                && $text->{t} - ($tt + $th) < $slack;
+        $gap |= 2 if $tt >= $text->{t} + $text->{h}
+                && $tt - ($text->{t} + $text->{h}) < $slack;
+    }
+    return $gap;
+}
+
+sub calc_page_headings ($$$$) {
+    my ($doc, $page, $texts, $bodyfontsize) = @_;
     my ($colpos) = $page->{pagedata}->{colpos};
     my ($slack) = $p2h_per_inch / 8;
     my ($top) = $page->{pagedata}->{textbb}->{top} + 0.075 * $page->{pagedata}->{textbb}->{height};
     my ($near_top) = 1;
+    my ($contents) = 0;
 
-    for (my $tpos = 0; $tpos < @$texts; ++$tpos) {
+    TPOS: for (my $tpos = 0; $tpos < @$texts; ) {
+        my ($tpos1) = $tpos;
         my ($text) = $texts->[$tpos];
-        next if $text->{sz} < $bodyfontsize;
-        $near_top = 0 if $near_top && $text->{t} + $text->{h} > $top && !$text->{num};
-        next if $text->{content} !~ /\A[\dABCDEIRVX]/;
-        my ($coli) = 0;
-        while ($coli < @$colpos && $colpos->[$coli] < $text->{l} - $slack) {
-            $coli += 2;
-        }
-        next if $coli == @$colpos || $colpos->[$coli] > $text->{l} + 2 * $slack;
-        my ($colj) = $coli + 1;
-        while ($colj + 2 < @$colpos && $colpos->[$colj] < $colpos->[$coli] + $p2h_per_inch) {
-            $colj += 2;
+        if ($text->{sz} < $bodyfontsize || $text->{sz} < $slack) {
+            ++$tpos;
+            next;
         }
 
-        # It must look like a heading (end before end of column, not end with
-        # period).
-        my ($content) = $text->{content};
-        my ($tr) = $text->{l} + $text->{w};
+        # detect when we've moved beyond the top
         my ($tt) = $text->{t};
         my ($th) = $text->{h};
-        my ($xp) = $tpos + 1;
-        while ($xp < @$texts
-               && interval_overlap($tt, $th, $texts->[$xp]->{t}, $texts->[$xp]->{h})
-               && $texts->[$xp]->{l} >= $tr - $slack) {
-            $content .= " " if $texts->[$xp]->{l} - $tr > $text->{sz} / 6;
-            $content .= $texts->[$xp]->{content};
-            $tr = $texts->[$xp]->{l} + $texts->[$xp]->{w};
-            $xp += 1;
+        my ($was_near_top) = $near_top;
+        $near_top = 0 if $near_top && $tt + $th > $top && !$text->{num};
+
+        # skip unless it looks interesting
+        my ($content) = $text->{content};
+        if ($content !~ /\A[\dABCDEFIRVX]/) {
+            ++$tpos;
+            next;
         }
-        next if $tr >= $colpos->[$colj] - $slack && $text->{sz} == $bodyfontsize;
+
+        # compute length of line
+        my ($tl) = $text->{l};
+        my ($tr) = $tl + $text->{w};
+        ++$tpos;
+        while ($tpos < @$texts
+               && interval_overlap($tt, $th, $texts->[$tpos]->{t}, $texts->[$tpos]->{h})
+               && $texts->[$tpos]->{l} >= $tr - $slack
+               && $texts->[$tpos]->{l} < $tr + 3 * $slack) {
+            $content .= " " if $texts->[$tpos]->{l} - $tr > $text->{sz} / 6;
+            $content .= $texts->[$tpos]->{content};
+            $tr = $texts->[$tpos]->{l} + $texts->[$tpos]->{w};
+            ++$tpos;
+        }
+
+        # find containing column
+        my ($colli) = 0;
+        while ($colli < @$colpos
+               && $colpos->[$colli] < $tl - $slack
+               && $colpos->[$colli + 1] < $tr) {
+            $colli += 2;
+        }
+        next if $colli == @$colpos;
+        my ($colri) = $colli;
+        while ($colri + 3 < @$colpos
+               && $colpos->[$colri + 2] <= $tr
+               && $colpos->[$colri + 1] < $colpos->[$colli] + $p2h_per_inch) {
+            $colri += 2;
+        }
+        my ($coll) = $colpos->[$colli];
+        my ($colr) = $colpos->[$colri + 1];
+
+        # skip if not left-aligned or centered
+        if (($coll < $tl - 2 * $slack
+             && abs(($tl - $coll) - ($colr - $tr)) > $p2h_per_inch / 4)
+            || ($tr >= $colr - $slack && $text->{sz} <= $bodyfontsize)) {
+            next;
+        }
+
+        # check for expected headings
         $content =~ s/\s+\z//;
-        next if $content !~ /\A(?:(?:X+V?I+[VX]?|X+V?|V)\.? +[^,;()]*|\d\d?\d?(?:\.\d+)*\.? +[A-Za-z_][^,;()]*|[ABCDE](?:\.\d+)*\.? +[A-Za-z_][^,;()]*|Abstract|Acknowledge?ments?|References?|Bibliography|Introduction|Appendix(?:es)?[^,;()]*)\z/i
+        next if $content !~ /\A(?:(?:X*(?:I?[XV]|V?I+))\.? +[^,;()]*|\d\d?\d?(?:\.\d+)*\.? +[A-Za-z_][^,;()]*|[ABCDEF](?:\.\d+)*\.? +[A-Z_][^,;()]*|(?:(?i)Abstract|Acknowledge?ments?|Contents|References?|Bibliography|Introduction|Appendix(?:es)?[^,;()]*))\z/
             || $content =~ /[.,:]\z/;
+
+        # skip if part of paragraph
+        if ($text->{sz} <= $bodyfontsize) {
+            my ($gaps) = 0;
+            my ($tposl) = $tpos1 - 1;
+            my ($tposr) = $tpos;
+            while ($tposl >= 0 || $tposr < @$texts) {
+                $gaps |= column_gap_overlap($texts->[$tposl], $coll, $colr, $tt, $th, $bodyfontsize) if $tposl >= 0;
+                $gaps |= column_gap_overlap($texts->[$tposr], $coll, $colr, $tt, $th, $bodyfontsize) if $tposr < @$texts;
+                next TPOS if $gaps == 3;
+                --$tposl;
+                ++$tposr;
+            }
+        }
+
+        # skip if already seen or unexpected
+        if ($content =~ /\A(\d+)((?:\.\d+)*)/) {
+            next TPOS if $1 > 99 && $doc->{max_numeric_heading} > 0
+                         && $doc->{max_numeric_heading} < 20;
+            next TPOS if exists($doc->{headings}->{$1 . $2});
+            $doc->{max_numeric_heading} = +$1 if $1 > $doc->{max_numeric_heading};
+            $doc->{headings}->{$1} = 1;
+        }
 
         $page->{pagedata}->{headings} = [] if !exists $page->{pagedata}->{headings};
         push @{$page->{pagedata}->{headings}}, $content;
-        $page->{pagedata}->{heading1} = 1 if $near_top;
-        $tpos = $xp - 1;
+        $page->{pagedata}->{heading1} = 1 if $was_near_top;
+
+        # skip rest if saw contents
+        if (@{$page->{pagedata}->{headings}} == 1
+            && lc($content) eq "contents") {
+            last TPOS;
+        }
     }
 }
 
@@ -840,8 +915,7 @@ sub report_verbose ($) {
         printf "  margins: %.2fin x %.2fin x %.2fin x %.2fin (l/r/t/b)\n",
                $left_i, $right_i, $top_i, $bot_i;
 
-        printf "  body font: %gpt (id %d)\n", $page->{pagespec}->{bodyfont},
-               $page->{pagedata}->{bodyfont}->{id};
+        printf "  body font: %gpt\n", $page->{pagespec}->{bodyfont};
         printf "  leading: %gpt\n", $page->{pagespec}->{lead};
         printf "  columns: %d\n", $page->{pagespec}->{ncols};
         print   "  type: ", $page->{pagespec}->{type}, "\n";
@@ -1269,8 +1343,8 @@ sub unxml ($) {
     $t;
 }
 
-sub parse_p2h_text ($$) {
-    my ($line, $page) = @_;
+sub parse_p2h_text ($$$) {
+    my ($doc, $line, $page) = @_;
     my ($pagewidth) = $page->{pagedata}->{pagebb}->{width};
     my ($pageheight) = $page->{pagedata}->{pagebb}->{height};
 
@@ -1379,7 +1453,7 @@ sub parse_p2h_text ($$) {
     calc_page_nchars($page, \%alen_bysize, $bodyfontsize);
 
     # compute headings
-    calc_page_headings($page, \@texts, $bodyfontsize);
+    calc_page_headings($doc, $page, \@texts, $bodyfontsize);
 }
 
 sub parse_p2h_page ($) {
@@ -1453,7 +1527,7 @@ sub parse_p2h_page ($) {
 
     # process text segments
     if ($line =~ /<(?:text|image)/) {
-        parse_p2h_text ($line, $page);
+        parse_p2h_text ($doc, $line, $page);
     } elsif ($debug_parse) {
         print STDERR "$banal_filename: Curious, empty page $page->{num}, found:\n";
         print STDERR "$line";
@@ -1542,6 +1616,8 @@ sub banal_file ($$) {
         fonts => {},
         pages => {},
         textbb => {},
+        headings => {},
+        max_numeric_heading => 0,
         app => '',
         fullpath => $file,
         filename => basename($file),
@@ -1686,13 +1762,15 @@ sub main () {
         return 1;
     }
 
+    my $any = 0;
     foreach my $file (@ARGV) {
         # open input file into FILE
         next unless (banal_open_input ($file));
         banal_file ($file, $spec);
         close $FILE;
+        $any = 1;
     }
-    return 0;
+    return 1 - $any;
 }
 
 exit (main ());

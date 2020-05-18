@@ -1,6 +1,6 @@
 <?php
 // pc_administrator.php -- HotCRP helper classes for paper list content
-// Copyright (c) 2006-2019 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
 
 class Administrator_PaperColumn extends PaperColumn {
     function __construct(Conf $conf, $cj) {
@@ -14,7 +14,7 @@ class Administrator_PaperColumn extends PaperColumn {
             return $row->managerContactId;
         return 0;
     }
-    function analyze_sort(PaperList $pl, &$rows, ListSorter $sorter) {
+    function analyze_sort(PaperList $pl, PaperInfoSet $rows, ListSorter $sorter) {
         $sorter->anno = Contact::parse_sortanno($pl->conf, $sorter->anno);
     }
     function sort_name(PaperList $pl, ListSorter $sorter = null) {
@@ -23,9 +23,6 @@ class Administrator_PaperColumn extends PaperColumn {
     function compare(PaperInfo $a, PaperInfo $b, ListSorter $sorter) {
         $pl = $sorter->pl;
         return $pl->_compare_pc(self::cid($pl, $a), self::cid($pl, $b), $sorter);
-    }
-    function header(PaperList $pl, $is_text) {
-        return "Administrator";
     }
     function content_empty(PaperList $pl, PaperInfo $row) {
         return !self::cid($pl, $row);

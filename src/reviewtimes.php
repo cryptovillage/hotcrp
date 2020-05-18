@@ -1,6 +1,6 @@
 <?php
 // src/reviewtimes.php -- HotCRP review form definition page
-// Copyright (c) 2006-2019 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
 
 class ReviewTimes {
     private $conf;
@@ -43,7 +43,7 @@ class ReviewTimes {
         $rs = $rs_nvis = [];
         foreach ($user->paper_set(["reviewSignatures" => true]) as $prow) {
             if (!$user->can_view_paper($prow)
-                || ($prow->conflict_type($user) > 0
+                || ($prow->has_conflict($user)
                     && (!$user->can_view_review_assignment($prow, null)
                         || !$user->can_view_review_identity($prow, null)))) {
                 continue;
@@ -116,18 +116,22 @@ class ReviewTimes {
         $this->conf->load_missing_cached_users();
 
         $users = array();
-        $tags = $this->user->can_view_reviewer_tags();
-        foreach ($this->r as $cid => $x)
+        $tags = $this->user->can_view_user_tags();
+        foreach ($this->r as $cid => $x) {
             if ($cid !== "conflicts") {
                 $users[$cid] = $u = (object) array();
                 $p = $this->conf->cached_user_by_id($cid, true);
-                if ($p)
+                if ($p) {
                     $u->name = Text::name_text($p);
-                if (count($x) < $heavy_boundary)
+                }
+                if (count($x) < $heavy_boundary) {
                     $u->light = true;
-                if ($p && $tags && ($t = $p->viewable_color_classes($this->user)))
+                }
+                if ($p && $tags && ($t = $p->viewable_color_classes($this->user))) {
                     $u->color_classes = $t;
+                }
             }
+        }
 
         return (object) ["type" => "procrastination", "reviews" => $this->r, "deadlines" => $this->dl, "users" => $users];
     }

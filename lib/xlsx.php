@@ -1,6 +1,6 @@
 <?php
 // xlsx.php -- HotCRP XLSX generator functions
-// Copyright (c) 2006-2019 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
 
 class XlsxGenerator {
 
@@ -35,16 +35,16 @@ class XlsxGenerator {
         foreach ($data as $x) {
             if ($x !== null && $x !== "") {
                 $t .= "<c r=\"" . self::colname($col) . $row . "\"" . $style;
-                if (is_int($x) || is_float($x))
+                if (is_int($x) || is_float($x)) {
                     $t .= "><v>$x</v></c>";
-                else {
+                } else {
                     if (!isset($this->sst[$x])) {
                         $this->sst[$x] = $this->nsst;
                         ++$this->nsst;
                     }
                     $t .= " t=\"s\"><v>" . $this->sst[$x] . "</v></c>";
                 }
-                $this->widths[$col] = max(strlen($x), (int) get($this->widths, $col));
+                $this->widths[$col] = max(strlen((string) $x), $this->widths[$col] ?? 0);
             }
             ++$col;
         }

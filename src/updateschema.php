@@ -1,75 +1,92 @@
 <?php
 // updateschema.php -- HotCRP function for updating old schemata
-// Copyright (c) 2006-2019 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
 
 function update_schema_create_review_form($conf) {
-    if (!($result = $conf->ql("select * from ReviewFormField where fieldName!='outcome'")))
+    $result = $conf->ql("select * from ReviewFormField where fieldName!='outcome'");
+    if (Dbl::is_error($result)) {
         return false;
+    }
     $rfj = (object) array();
-    while (($row = edb_orow($result))) {
+    while (($row = $result->fetch_object())) {
         $field = (object) array();
         $field->name = $row->shortName;
-        if (trim($row->description) != "")
+        if (trim($row->description) != "") {
             $field->description = trim($row->description);
-        if ($row->sortOrder >= 0)
+        }
+        if ($row->sortOrder >= 0) {
             $field->position = $row->sortOrder + 1;
-        if ($row->rows > 3)
+        }
+        if ($row->rows > 3) {
             $field->display_space = (int) $row->rows;
+        }
         $field->view_score = (int) $row->authorView;
         if (in_array($row->fieldName, ["overAllMerit", "technicalMerit", "novelty",
                                 "grammar", "reviewerQualification", "potential",
                                 "fixability", "interestToCommunity", "longevity",
                                 "likelyPresentation", "suitableForShort"])) {
             $field->options = array();
-            if ((int) $row->levelChar > 1)
+            if ((int) $row->levelChar > 1) {
                 $field->option_letter = (int) $row->levelChar;
+            }
         }
         $fname = $row->fieldName;
         $rfj->$fname = $field;
     }
 
-    if (!($result = $conf->ql("select * from ReviewFormOptions where fieldName!='outcome' order by level asc")))
+    $result = $conf->ql("select * from ReviewFormOptions where fieldName!='outcome' order by level asc");
+    if (Dbl::is_error($result)) {
         return false;
-    while (($row = edb_orow($result))) {
+    }
+    while (($row = $result->fetch_object())) {
         $fname = $row->fieldName;
-        if (isset($rfj->$fname) && isset($rfj->$fname->options))
+        if (isset($rfj->$fname) && isset($rfj->$fname->options)) {
             $rfj->$fname->options[$row->level - 1] = $row->description;
+        }
     }
 
-    return $conf->save_setting("review_form", 1, $rfj);
+    $conf->save_setting("review_form", 1, $rfj);
+    return true;
 }
 
 function update_schema_create_options($conf) {
-    if (!($result = $conf->ql("select * from OptionType")))
+    $result = $conf->ql("select * from OptionType");
+    if (Dbl::is_error($result)) {
         return false;
+    }
     $opsj = (object) array();
     $byabbr = array();
-    while (($row = edb_orow($result))) {
+    while (($row = $result->fetch_object())) {
         // backward compatibility with old schema versions
-        if (!isset($row->optionValues))
+        if (!isset($row->optionValues)) {
             $row->optionValues = "";
-        if (!isset($row->type) && $row->optionValues == "\x7Fi")
+        }
+        if (!isset($row->type) && $row->optionValues == "\x7Fi") {
             $row->type = 2;
-        else if (!isset($row->type))
+        } else if (!isset($row->type)) {
             $row->type = ($row->optionValues ? 1 : 0);
+        }
 
         $opj = (object) array();
         $opj->id = $row->optionId;
         $opj->name = $row->optionName;
 
-        if (trim($row->description) != "")
+        if (trim($row->description) != "") {
             $opj->description = trim($row->description);
+        }
 
-        if ($row->pcView == 2)
+        if ($row->pcView == 2) {
             $opj->view_type = "nonblind";
-        else if ($row->pcView == 0)
+        } else if ($row->pcView == 0) {
             $opj->view_type = "admin";
+        }
 
         $opj->position = (int) $row->sortOrder;
-        if ($row->displayType == 1)
+        if ($row->displayType == 1) {
             $opj->highlight = true;
-        else if ($row->displayType == 2)
+        } else if ($row->displayType == 2) {
             $opj->near_submission = true;
+        }
 
         switch ($row->type) {
         case 0:
@@ -124,58 +141,68 @@ function update_schema_create_options($conf) {
         $opsj->$oid = $opj;
     }
 
-    return $conf->save_setting("options", 1, $opsj);
+    $conf->save_setting("options", 1, $opsj);
+    return true;
 }
 
 function update_schema_transfer_address($conf) {
     $result = $conf->ql("select * from ContactAddress");
-    while (($row = edb_orow($result)))
+    while (($row = $result->fetch_object())) {
         if (($c = $conf->user_by_id($row->contactId))) {
             $x = (object) array();
-            if ($row->addressLine1 || $row->addressLine2)
+            if ($row->addressLine1 || $row->addressLine2) {
                 $x->address = array();
-            foreach (array("addressLine1", "addressLine2") as $k)
+            }
+            foreach (["addressLine1", "addressLine2"] as $k) {
                 if ($row->$k)
                     $x->address[] = $row->$k;
-            foreach (array("city" => "city", "state" => "state",
-                           "zipCode" => "zip", "country" => "country") as $k => $v)
+            }
+            foreach (["city" => "city", "state" => "state",
+                      "zipCode" => "zip", "country" => "country"] as $k => $v) {
                 if ($row->$k)
                     $x->$v = $row->$k;
+            }
             $c->merge_and_save_data($x);
         }
+    }
     return true;
 }
 
 function update_schema_unaccented_name($conf) {
-    if (!$conf->ql("alter table ContactInfo add `unaccentedName` varchar(120) NOT NULL DEFAULT ''"))
+    if (!$conf->ql("alter table ContactInfo add `unaccentedName` varchar(120) NOT NULL DEFAULT ''")) {
         return false;
+    }
 
     $result = $conf->ql("select contactId, firstName, lastName from ContactInfo");
-    if (!$result)
+    if (Dbl::is_error($result)) {
         return false;
+    }
 
     $qs = $qv = array();
-    while ($result && ($x = $result->fetch_row())) {
+    while (($x = $result->fetch_row())) {
         $qs[] = "update ContactInfo set unaccentedName=? where contactId=$x[0]";
         $qv[] = Text::unaccented_name($x[1], $x[2]);
     }
     Dbl::free($result);
 
     $q = Dbl::format_query_apply($conf->dblink, join(";", $qs), $qv);
-    if (!$conf->dblink->multi_query($q))
+    if (!$conf->dblink->multi_query($q)) {
         return false;
+    }
     do {
-        if (($result = $conf->dblink->store_result()))
+        if (($result = $conf->dblink->store_result())) {
             $result->free();
+        }
     } while ($conf->dblink->more_results() && $conf->dblink->next_result());
     return true;
 }
 
 function update_schema_transfer_country($conf) {
     $result = $conf->ql("select * from ContactInfo where `data` is not null and `data`!='{}'");
-    while ($result && ($c = Contact::fetch($result, $conf))) {
-        if (($country = $c->data("country")))
+    while (($c = Contact::fetch($result, $conf))) {
+        if (($country = $c->data("country"))) {
             $conf->ql("update ContactInfo set country=? where contactId=?", $country, $c->contactId);
+        }
     }
     return true;
 }
@@ -185,13 +212,15 @@ function update_schema_review_word_counts($conf) {
     do {
         $q = array();
         $result = $conf->ql("select * from PaperReview where reviewWordCount is null limit 32");
-        while (($rrow = edb_orow($result)))
+        while (($rrow = $result->fetch_object())) {
             $q[] = "update PaperReview set reviewWordCount="
                 . $rf->word_count($rrow) . " where reviewId=" . $rrow->reviewId;
+        }
         Dbl::free($result);
         $conf->dblink->multi_query(join(";", $q));
-        while ($conf->dblink->more_results())
+        while ($conf->dblink->more_results()) {
             Dbl::free($conf->dblink->next_result());
+        }
     } while (count($q) == 32);
 }
 
@@ -203,13 +232,15 @@ function update_schema_bad_comment_timeDisplayed($conf) {
 function update_schema_drop_keys_if_exist($conf, $table, $key) {
     $indexes = Dbl::fetch_first_columns($conf->dblink, "select distinct index_name from information_schema.statistics where table_schema=database() and `table_name`='$table'");
     $drops = [];
-    foreach (is_array($key) ? $key : [$key] as $k)
+    foreach (is_array($key) ? $key : [$key] as $k) {
         if (in_array($k, $indexes))
             $drops[] = ($k === "PRIMARY" ? "drop primary key" : "drop key `$k`");
-    if (count($drops))
+    }
+    if (count($drops)) {
         return $conf->ql("alter table `$table` " . join(", ", $drops));
-    else
+    } else {
         return true;
+    }
 }
 
 function update_schema_check_column_exists($conf, $table, $column) {
@@ -217,26 +248,31 @@ function update_schema_check_column_exists($conf, $table, $column) {
 }
 
 function update_schema_mimetype_extensions($conf) {
-    if (!($result = $conf->ql("select * from Mimetype where extension is null")))
+    $result = $conf->ql("select * from Mimetype where extension is null");
+    if (Dbl::is_error($result)) {
         return false;
+    }
     $qv = [];
-    while (($row = $result->fetch_object()))
+    while (($row = $result->fetch_object())) {
         if (($extension = Mimetype::extension($row->mimetype)))
             $qv[] = [$row->mimetypeid, $row->mimetype, $extension];
+    }
     Dbl::free($result);
     return empty($qv) || $conf->ql("insert into Mimetype (mimetypeid, mimetype, extension) values ?v on duplicate key update extension=values(extension)", $qv);
 }
 
 function update_schema_paper_review_tfields(Conf $conf) {
     if (!$conf->ql("alter table PaperReview add `tfields` longblob")
-        || !$conf->ql("alter table PaperReview add `sfields` varbinary(2048) DEFAULT NULL"))
+        || !$conf->ql("alter table PaperReview add `sfields` varbinary(2048) DEFAULT NULL")) {
         return false;
+    }
     $cleanf = Dbl::make_multi_ql_stager($conf->dblink);
     $result = $conf->ql("select * from PaperReview");
     while (($row = ReviewInfo::fetch($result, $conf))) {
         $data = $row->unparse_tfields();
-        if ($data !== null)
+        if ($data !== null) {
             $cleanf("update PaperReview set `tfields`=? where paperId=? and reviewId=?", [$data, $row->paperId, $row->reviewId]);
+        }
     }
     Dbl::free($result);
     $cleanf(true);
@@ -270,8 +306,9 @@ function update_schema_paper_review_null_main_fields(Conf $conf) {
 function update_schema_paper_review_drop_main_fields(Conf $conf) {
     $rid = [];
     $kf = array_map(function ($k) { return "$k is not null"; }, array_keys(ReviewInfo::$text_field_map));
-    if (!$conf->ql("lock tables PaperReview write"))
+    if (!$conf->ql("lock tables PaperReview write")) {
         return false;
+    }
     $result = $conf->ql("select * from PaperReview where " . join(" or ", $kf));
     $rrow = ReviewInfo::fetch($result, $conf);
     Dbl::free($result);
@@ -280,8 +317,9 @@ function update_schema_paper_review_drop_main_fields(Conf $conf) {
         $ok = false;
     } else {
         $ok = true;
-        foreach (ReviewInfo::$text_field_map as $kmain => $kjson)
+        foreach (ReviewInfo::$text_field_map as $kmain => $kjson) {
             $ok = $ok && $conf->ql("alter table PaperReview drop column `$kmain`");
+        }
     }
     $conf->ql("unlock tables");
     return $ok;
@@ -290,11 +328,12 @@ function update_schema_paper_review_drop_main_fields(Conf $conf) {
 function update_schema_split_review_request_name(Conf $conf) {
     if (!$conf->ql("alter table ReviewRequest add `firstName` varbinary(120) DEFAULT NULL")
         || !$conf->ql("alter table ReviewRequest add `lastName` varbinary(120) DEFAULT NULL")
-        || !$conf->ql("lock tables ReviewRequest write"))
+        || !$conf->ql("lock tables ReviewRequest write")) {
         return false;
+    }
     $result = $conf->ql("select * from ReviewRequest");
     $cleanf = Dbl::make_multi_ql_stager($conf->dblink);
-    while ($result && ($row = $result->fetch_object())) {
+    while (($row = $result->fetch_object())) {
         list($first, $last) = Text::split_name($row->name);
         $cleanf("update ReviewRequest set firstName=?, lastName=? where paperId=? and email=?", [(string) $first === "" ? null : $first,
                    (string) $last === "" ? null : $last,
@@ -312,10 +351,11 @@ function update_schema_missing_sha1($conf) {
     while (($doc = DocumentInfo::fetch($result, $conf))) {
         $hash = $doc->content_binary_hash();
         $cleanf("update PaperStorage set sha1=? where paperId=? and paperStorageId=?", [$hash, $doc->paperId, $doc->paperStorageId]);
-        if ($doc->documentType == DTYPE_SUBMISSION)
+        if ($doc->documentType == DTYPE_SUBMISSION) {
             $cleanf("update Paper set sha1=? where paperId=? and paperStorageId=? and finalPaperStorageId<=0", [$hash, $doc->paperId, $doc->paperStorageId]);
-        else if ($doc->documentType == DTYPE_FINAL)
+        } else if ($doc->documentType == DTYPE_FINAL) {
             $cleanf("update Paper set sha1=? where paperId=? and finalPaperStorageId=?", [$hash, $doc->paperId, $doc->paperStorageId]);
+        }
     }
     Dbl::free($result);
     $cleanf(true);
@@ -323,17 +363,25 @@ function update_schema_missing_sha1($conf) {
 
 function update_schema_selector_options($conf) {
     $oids = [];
-    foreach ($conf->paper_opts->full_option_list() as $opt)
-        if ($opt->has_selector())
+    foreach ($conf->paper_opts->full_option_list() as $opt) {
+        if ($opt instanceof SelectorPaperOption) {
             $oids[] = $opt->id;
+        }
+    }
     return empty($oids)
         || $conf->ql("update PaperOption set value=value+1 where optionId?a", $oids);
 }
 
 function update_schema_missing_review_ordinals($conf) {
-    $pids = Dbl::fetch_first_columns($conf->dblink, "select distinct paperId from PaperReview where reviewSubmitted>0 and reviewAuthorModified>0 and reviewOrdinal=0");
-    if (empty($pids))
+    $pids = [];
+    $result = $conf->qe("select distinct paperId from PaperReview where reviewSubmitted>0 and reviewAuthorModified>0 and reviewOrdinal=0");
+    while (($row = $result->fetch_row())) {
+        $pids[] = (int) $row[0];
+    }
+    Dbl::free($result);
+    if (empty($pids)) {
         return true;
+    }
     $rf = $conf->review_form();
     foreach ($conf->paper_set(["paperId" => $pids, "tags" => true]) as $prow) {
         $prow->ensure_full_reviews();
@@ -341,13 +389,15 @@ function update_schema_missing_review_ordinals($conf) {
         $update_rrows = [];
         foreach ($prow->reviews_by_id() as $rrow) {
             $next_ordinal = max($next_ordinal, $rrow->reviewOrdinal);
-            if ($rrow->reviewOrdinal > 0)
+            if ($rrow->reviewOrdinal > 0) {
                 $next_displayed = max($next_displayed, $rrow->timeDisplayed);
+            }
             if ($rrow->reviewSubmitted > 0
                 && $rrow->reviewModified > 0
                 && $rrow->reviewOrdinal == 0
-                && $rf->nonempty_view_score($rrow) >= VIEWSCORE_AUTHORDEC)
+                && $rf->nonempty_view_score($rrow) >= VIEWSCORE_AUTHORDEC) {
                 $update_rrows[] = $rrow;
+            }
         }
         assert(count($update_rrows) <= 1);
         if ($update_rrows) {
@@ -359,14 +409,101 @@ function update_schema_missing_review_ordinals($conf) {
     return true;
 }
 
+function update_schema_clean_options_json($conf) {
+    $oj = $conf->setting_json("options");
+    if ($oj && is_object($oj)) {
+        $ol = [];
+        foreach (get_object_vars($oj) as $kk => $vv) {
+            if (!isset($vv->id))
+                $vv->id = (int) $kk;
+            $ol[] = $vv;
+        }
+        if (empty($ol)) {
+            $conf->save_setting("options", null);
+        } else {
+            $conf->save_setting("options", 1, json_encode($ol));
+        }
+    }
+    return true;
+}
+
+function update_schema_set_review_time_displayed($conf) {
+    $pids = [];
+    $result = $conf->qe("select distinct paperId from PaperReview where (reviewSubmitted is not null or reviewOrdinal!=0) and timeDisplayed=0");
+    while (($row = $result->fetch_row())) {
+        $pids[] = (int) $row[0];
+    }
+    Dbl::free($result);
+    if (empty($pids)) {
+        return true;
+    }
+
+    $cleanf = Dbl::make_multi_ql_stager($conf->dblink);
+    foreach ($conf->paper_set(["paperId" => $pids]) as $prow) {
+        $rrows = array_values(array_filter($prow->reviews_by_id(), function ($r) {
+            return $r->reviewSubmitted || $r->reviewOrdinal;
+        }));
+        usort($rrows, function ($a, $b) {
+            if ($a->timeDisplayed && $b->timeDisplayed
+                && $a->timeDisplayed != $b->timeDisplayed) {
+                return $a->timeDisplayed < $b->timeDisplayed ? -1 : 1;
+            } else if ($a->reviewOrdinal && $b->reviewOrdinal) {
+                return $a->reviewOrdinal < $b->reviewOrdinal ? -1 : 1;
+            } else if ($a->reviewSubmitted != $b->reviewSubmitted) {
+                if ($a->reviewSubmitted != 0 && $b->reviewSubmitted != 0) {
+                    return $a->reviewSubmitted < $b->reviewSubmitted ? -1 : 1;
+                } else {
+                    return $a->reviewSubmitted != 0 ? -1 : 1;
+                }
+            } else {
+                return $a->reviewId < $b->reviewId ? -1 : 1;
+            }
+        });
+
+        $rt = array_map(function ($r) {
+            return +$r->timeDisplayed ? : +$r->reviewSubmitted ? : +$r->reviewModified;
+        }, $rrows);
+        $last = 0;
+        foreach ($rrows as $i => $rrow) {
+            if (!$rrow->timeDisplayed) {
+                $t = max($rt[$i], $last);
+                for ($j = $i + 1; $j < count($rrows); ++$j) {
+                    $t = min($t, $rt[$j]);
+                }
+                $cleanf("update PaperReview set timeDisplayed=? where paperId=? and reviewId=?", [$t, $prow->paperId, $rrow->reviewId]);
+                $rrow->timeDisplayed = $t;
+            }
+            $last = +$rrow->timeDisplayed;
+        }
+    }
+    $cleanf(true);
+    return true;
+}
+
+function update_schema_add_comment_tag_values($conf, $response_only) {
+    if (!$conf->ql("lock tables PaperComment write")) {
+        return false;
+    }
+    $result = $conf->ql("select distinct commentTags from PaperComment where commentTags is not null" . ($response_only ? " and commentTags like '%response'" : ""));
+    $ok = true;
+    while (($row = $result->fetch_row())) {
+        $rev = preg_replace('/( [^#\s]+)(?= |\z)/', "\$1#0", $row[0]);
+        $ok = $ok && $conf->ql("update PaperComment set commentTags=? where commentTags=?", $rev, $row[0]);
+    }
+    Dbl::free($result);
+    $conf->ql("unlock tables");
+    return $ok;
+}
+
 function updateSchema($conf) {
     // avoid error message about timezone, set to $Opt
     // (which might be overridden by database values later)
     if (function_exists("date_default_timezone_set") && $conf->opt("timezone"))
         date_default_timezone_set($conf->opt("timezone"));
     while (($result = $conf->ql("insert into Settings set name='__schema_lock', value=1 on duplicate key update value=1"))
-           && $result->affected_rows == 0)
+           && $result->affected_rows == 0) {
         time_nanosleep(0, 200000000);
+    }
     $conf->update_schema_version(null);
     $old_conf_g = Conf::$g;
     Conf::$g = $conf;
@@ -399,7 +536,7 @@ function updateSchema($conf) {
             // update review rounds (XXX locking)
             $result = $conf->ql("select paperId, tag from PaperTag where tag like '%~%'");
             $rrs = array();
-            while (($row = edb_row($result))) {
+            while (($row = $result->fetch_row())) {
                 list($contact, $round) = explode("~", $row[1]);
                 if (($round = array_search($round, $conf->round_list()))) {
                     if (!isset($rrs[$round]))
@@ -570,7 +707,7 @@ function updateSchema($conf) {
         $conf->update_schema_version(43);
     if ($conf->sversion == 42
         && ($result = $conf->ql("describe PaperComment `ordinal`"))
-        && ($o = edb_orow($result))
+        && ($o = $result->fetch_object())
         && substr($o->Type, 0, 3) == "int"
         && (!$o->Null || $o->Null == "NO")
         && (!$o->Default || $o->Default == "0"))
@@ -616,21 +753,23 @@ function updateSchema($conf) {
     if (($conf->sversion == 52
          || ($conf->sversion >= 53
              && ($result = $conf->ql("show columns from PaperComment like 'commentType'"))
-             && edb_nrows($result) == 0))
+             && !Dbl::is_error($result)
+             && $result->num_rows == 0))
         && $conf->ql("lock tables PaperComment write, Settings write")
         && $conf->ql("alter table PaperComment add `commentType` int(11) NOT NULL DEFAULT '0'")) {
         $new_sversion = max($conf->sversion, 53);
         $result = $conf->ql("show columns from PaperComment like 'forAuthors'");
-        if (!$result
-            || edb_nrows($result) == 0
-            || ($conf->ql("update PaperComment set commentType=" . (COMMENTTYPE_AUTHOR | COMMENTTYPE_RESPONSE) . " where forAuthors=2")
-                && $conf->ql("update PaperComment set commentType=commentType|" . COMMENTTYPE_DRAFT . " where forAuthors=2 and forReviewers=0")
-                && $conf->ql("update PaperComment set commentType=" . COMMENTTYPE_ADMINONLY . " where forAuthors=0 and forReviewers=2")
-                && $conf->ql("update PaperComment set commentType=" . COMMENTTYPE_PCONLY . " where forAuthors=0 and forReviewers=0")
-                && $conf->ql("update PaperComment set commentType=" . COMMENTTYPE_REVIEWER . " where forAuthors=0 and forReviewers=1")
-                && $conf->ql("update PaperComment set commentType=" . COMMENTTYPE_AUTHOR . " where forAuthors!=0 and forAuthors!=2")
-                && $conf->ql("update PaperComment set commentType=commentType|" . COMMENTTYPE_BLIND . " where blind=1")))
+        if (Dbl::is_error($result)
+            || $result->num_rows == 0
+            || ($conf->ql("update PaperComment set commentType=0x30004 where forAuthors=2") /* CT_AUTHOR|CT_RESPONSE */
+                && $conf->ql("update PaperComment set commentType=commentType|1 where forAuthors=2 and forReviewers=0") /* CT_DRAFT */
+                && $conf->ql("update PaperComment set commentType=0 where forAuthors=0 and forReviewers=2") /* CT_ADMINONLY */
+                && $conf->ql("update PaperComment set commentType=0x10000 where forAuthors=0 and forReviewers=0") /* CT_PC */
+                && $conf->ql("update PaperComment set commentType=0x20000 where forAuthors=0 and forReviewers=1") /* CT_REVIEWER */
+                && $conf->ql("update PaperComment set commentType=0x30000 where forAuthors!=0 and forAuthors!=2") /* CT_AUTHOR */
+                && $conf->ql("update PaperComment set commentType=commentType|2 where blind=1") /* CT_BLIND */)) {
             $conf->update_schema_version($new_sversion);
+        }
     }
     if ($conf->sversion < 53)
         Dbl::qx_raw($conf->dblink, "alter table PaperComment drop column `commentType`");
@@ -715,7 +854,7 @@ function updateSchema($conf) {
         $conf->update_schema_version(60);
     if ($conf->sversion == 60) {
         foreach (["conflictdef", "home"] as $k)
-            if ($conf->setting_data("{$k}msg", false) !== false) {
+            if ($conf->has_setting("{$k}msg")) {
                 $conf->save_setting("msg.$k", 1, $conf->setting_data("{$k}msg"));
                 $conf->save_setting("{$k}msg", null);
             }
@@ -727,8 +866,9 @@ function updateSchema($conf) {
     if (!isset($conf->settings["outcome_map"])) {
         $ojson = array();
         $result = $conf->ql("select * from ReviewFormOptions where fieldName='outcome'");
-        while (($row = edb_orow($result)))
+        while (($row = $result->fetch_object())) {
             $ojson[$row->level] = $row->description;
+        }
         $conf->save_setting("outcome_map", 1, $ojson);
     }
     if ($conf->sversion == 62
@@ -965,7 +1105,7 @@ function updateSchema($conf) {
     // author-visible comments
     if ($conf->sversion == 107) {
         $result = $conf->ql("select paperId, commentId from PaperComment where ordinal=0 and (commentType&" . (COMMENTTYPE_RESPONSE | COMMENTTYPE_DRAFT) . ")=0 and commentType>=" . COMMENTTYPE_PCONLY . " and commentType<" . COMMENTTYPE_AUTHOR . " order by commentId");
-        while (($row = edb_row($result))) {
+        while (($row = $result->fetch_row())) {
             $conf->ql("update PaperComment,
 (select coalesce(count(commentId),0) commentCount from Paper
     left join PaperComment on (PaperComment.paperId=Paper.paperId and (commentType&" . (COMMENTTYPE_RESPONSE | COMMENTTYPE_DRAFT) . ")=0 and commentType>=" . COMMENTTYPE_PCONLY . " and commentType<" . COMMENTTYPE_AUTHOR . " and commentId<$row[1])
@@ -974,7 +1114,7 @@ set ordinal=(t.commentCount+1) where commentId=$row[1]");
         }
 
         $result = $conf->ql("select paperId, commentId from PaperComment where ordinal=0 and (commentType&" . (COMMENTTYPE_RESPONSE | COMMENTTYPE_DRAFT) . ")=0 and commentType>=" . COMMENTTYPE_AUTHOR . " order by commentId");
-        while (($row = edb_row($result))) {
+        while (($row = $result->fetch_row())) {
             $conf->ql("update PaperComment,
 (select coalesce(count(commentId),0) commentCount from Paper
     left join PaperComment on (PaperComment.paperId=Paper.paperId and (commentType&" . (COMMENTTYPE_RESPONSE | COMMENTTYPE_DRAFT) . ")=0 and commentType>=" . COMMENTTYPE_AUTHOR . " and commentId<$row[1])
@@ -983,7 +1123,7 @@ set authorOrdinal=(t.commentCount+1) where commentId=$row[1]");
         }
 
         $result = $conf->ql("select paperId, commentId from PaperComment where ordinal=authorOrdinal and (commentType&" . (COMMENTTYPE_RESPONSE | COMMENTTYPE_DRAFT) . ")=0 and commentType>=" . COMMENTTYPE_AUTHOR . " order by commentId");
-        while (($row = edb_row($result))) {
+        while (($row = $result->fetch_row())) {
             $conf->ql("update PaperComment,
 (select coalesce(max(ordinal),0) maxOrdinal from Paper
     left join PaperComment on (PaperComment.paperId=Paper.paperId and (commentType&" . (COMMENTTYPE_RESPONSE | COMMENTTYPE_DRAFT) . ")=0 and commentType>=" . COMMENTTYPE_PCONLY . " and commentType<" . COMMENTTYPE_AUTHOR . " and commentId<$row[1])
@@ -1496,6 +1636,113 @@ set ordinal=(t.maxOrdinal+1) where commentId=$row[1]");
         && $conf->ql("alter table ActionLog drop `time`")
         && $conf->ql("alter table ActionLog add `data` varbinary(8192) DEFAULT NULL"))
         $conf->update_schema_version(209);
+    if ($conf->sversion == 209) {
+        $conf->ql("update Settings set name=concat('opt.', substr(name, 5)) where name like 'ova.%'");
+        $conf->update_schema_version(210);
+    }
+    if ($conf->sversion == 210) {
+        $conf->ql("update Settings set data=replace(data, '#', '') where name='tracks'");
+        $conf->update_schema_version(211);
+    }
+    if ($conf->sversion == 211) {
+        $conf->ql("update Settings set name='msg.resp_instrux_0' where name='msg.resp_instrux'");
+        $conf->update_schema_version(212);
+    }
+    if ($conf->sversion == 212
+        && $conf->ql("update PaperConflict set conflictType=(64 + conflictType - 9) where conflictType>=9 and conflictType<64"))
+        $conf->update_schema_version(213);
+    if ($conf->sversion == 213
+        && update_schema_clean_options_json($conf))
+        $conf->update_schema_version(214);
+    if ($conf->sversion == 214
+        && $conf->ql("alter table PaperReview add `data` varbinary(8192) DEFAULT NULL"))
+        $conf->update_schema_version(215);
+    if ($conf->sversion == 215
+        && $conf->ql("alter table PaperReviewRefused add `data` varbinary(8192) DEFAULT NULL"))
+        $conf->update_schema_version(216);
+    if ($conf->sversion == 216
+        && $conf->ql("alter table PaperReviewRefused add `reviewType` tinyint(1) NOT NULL DEFAULT '0'"))
+        $conf->update_schema_version(217);
+    if ($conf->sversion == 217) {
+        if ($conf->setting("extrev_approve")
+            && $conf->setting("pcrev_editdelegate")) {
+            $conf->ql("delete from Settings where name='extrev_approve'");
+            $conf->save_setting("pcrev_editdelegate", 2);
+        }
+        $conf->update_schema_version(218);
+    }
+    if ($conf->sversion == 218) {
+        if (($mb = $conf->setting_data("mailbody_requestreview"))) {
+            $mb1 = str_replace("/review/%NUMBER%?accept=1&%LOGINURLPARTS%", "/review/%NUMBER%?cap=%REVIEWACCEPTOR%&accept=1", $mb);
+            $mb1 = str_replace("/review/%NUMBER%?decline=1&%LOGINURLPARTS%", "/review/%NUMBER%?cap=%REVIEWACCEPTOR%&decline=1", $mb1);
+            if ($mb1 !== $mb) {
+                $conf->save_setting("mailbody_requestreview", 1, $mb1);
+            }
+        }
+        $conf->update_schema_version(219);
+    }
+    if ($conf->sversion == 219
+        && $conf->ql("alter table MailLog add `status` tinyint(1) NOT NULL DEFAULT '0'"))
+        $conf->update_schema_version(220);
+    if ($conf->sversion == 220
+        && $conf->ql("update PaperReview set reviewNeedsSubmit=0 where reviewNeedsSubmit>0 and timeApprovalRequested<0"))
+        $conf->update_schema_version(221);
+    if ($conf->sversion == 221
+        && $conf->ql("alter table PaperComment drop column `paperStorageId`"))
+        $conf->update_schema_version(222);
+    if ($conf->sversion == 222
+        && $conf->ql("update PaperComment set timeDisplayed=if(timeNotified=0,timeModified,timeNotified) where timeDisplayed=0 and (commentType&" . COMMENTTYPE_DRAFT . ")=0"))
+        $conf->update_schema_version(223);
+    if ($conf->sversion == 223
+        && update_schema_set_review_time_displayed($conf))
+        $conf->update_schema_version(224);
+    if ($conf->sversion == 224
+        && $conf->ql("update ContactInfo set contactTags=null where contactTags=''"))
+        $conf->update_schema_version(225);
+    if ($conf->sversion == 225
+        && $conf->ql("lock tables PaperReview write")) {
+        if ($conf->ql("alter table PaperReview add `reviewViewScore` tinyint(1) NOT NULL DEFAULT '-3'")) {
+            $conf->ql("update PaperReview set reviewViewScore=" . ReviewInfo::VIEWSCORE_RECOMPUTE);
+            $conf->review_form()->compute_view_scores();
+            $ok = true;
+        } else {
+            $ok = false;
+        }
+        $conf->ql("unlock tables");
+        if ($ok) {
+            $conf->update_schema_version(226);
+        }
+    }
+    if ($conf->sversion == 226
+        && $conf->ql("update ContactInfo set contactTags=trim(trailing from contactTags) where contactTags is not null")
+        && $conf->ql("update PaperComment set commentTags=trim(trailing from commentTags) where commentTags is not null")) {
+        $conf->update_schema_version(227);
+    }
+    if ($conf->sversion == 227
+        && update_schema_add_comment_tag_values($conf, 0)) {
+        $conf->update_schema_version(228);
+    }
+    if ($conf->sversion == 228
+        && $conf->ql("alter table Formula drop column `heading`")
+        && $conf->ql("alter table Formula drop column `headingTitle`")) {
+        $conf->update_schema_version(229);
+    }
+    if ($conf->sversion == 229
+        && update_schema_add_comment_tag_values($conf, 1)) {
+        $conf->update_schema_version(230);
+    }
+    if ($conf->sversion == 230
+        && $conf->ql("alter table Paper add `dataOverflow` longblob")) {
+        $conf->update_schema_version(231);
+    }
+    if ($conf->sversion == 231
+        && $conf->ql("update PaperConflict set conflictType=if(conflictType>64,64,32) where conflictType>=64")) {
+        $conf->update_schema_version(232);
+    }
+    if ($conf->sversion == 232
+        && $conf->ql("update PaperConflict set conflictType=(case conflictType&31 when 8 then 3 when 1 then 2 when 0 then 0 else (conflictType-1)*2 end + (conflictType&96))")) {
+        $conf->update_schema_version(233);
+    }
 
     $conf->ql("delete from Settings where name='__schema_lock'");
     Conf::$g = $old_conf_g;

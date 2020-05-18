@@ -1,6 +1,6 @@
 <?php
 // author.php -- HotCRP author objects
-// Copyright (c) 2006-2019 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
 
 class Author {
     public $firstName = "";
@@ -23,6 +23,7 @@ class Author {
             $this->assign_string($x);
         }
     }
+    /** @return Author */
     static function make_tabbed($s) {
         $au = new Author;
         $w = explode("\t", $s);
@@ -32,6 +33,7 @@ class Author {
         $au->affiliation = isset($w[3]) ? $w[3] : "";
         return $au;
     }
+    /** @return Author */
     static function make_string($s) {
         $au = new Author;
         $au->assign_string($s);
@@ -62,6 +64,7 @@ class Author {
             list($this->firstName, $this->lastName, $this->email) = Text::split_name($s, true);
         }
     }
+    /** @return Author */
     static function make_string_guess($s) {
         $au = new Author;
         $au->assign_string_guess($s);
@@ -70,13 +73,15 @@ class Author {
     function assign_string_guess($s) {
         $hash = strpos($s, "#");
         $pct = strpos($s, "%");
-        if ($hash !== false || $pct !== false)
+        if ($hash !== false || $pct !== false) {
             $s = substr($s, 0, $hash === false ? $pct : ($pct === false ? $hash : min($hash, $pct)));
+        }
         $this->assign_string($s);
         if ($this->firstName === ""
             && (strcasecmp($this->lastName, "all") === 0
-                || strcasecmp($this->lastName, "none") === 0))
+                || strcasecmp($this->lastName, "none") === 0)) {
             $this->lastName = "";
+        }
         if ($this->affiliation === ""
             && $this->email === "") {
             if (strpos($s, ",") !== false
@@ -91,75 +96,100 @@ class Author {
             }
         }
     }
+    /** @param string $s
+     * @param int $paren
+     * @return int */
     static function skip_balanced_parens($s, $paren) {
-        for ($len = strlen($s), $depth = 1, ++$paren; $paren < $len; ++$paren)
-            if ($s[$paren] === "(")
+        // assert($s[$paren] === "("); -- precondition
+        for ($len = strlen($s), $depth = 1, ++$paren; $paren < $len; ++$paren) {
+            if ($s[$paren] === "(") {
                 ++$depth;
-            else if ($s[$paren] === ")") {
-                if (--$depth === 0)
-                    return $paren;
+            } else if ($s[$paren] === ")") {
+                --$depth;
+                if ($depth === 0) {
+                    break;
+                }
             }
+        }
         return $paren;
     }
+    /** @return string */
     function name() {
-        if ($this->_name !== null)
+        if ($this->_name !== null) {
             return $this->_name;
-        else if ($this->firstName !== "" && $this->lastName !== "")
+        } else if ($this->firstName !== "" && $this->lastName !== "") {
             return $this->firstName . " " . $this->lastName;
-        else if ($this->lastName !== "")
+        } else if ($this->lastName !== "") {
             return $this->lastName;
-        else
+        } else {
             return $this->firstName;
+        }
     }
+    /** @return string */
     function nameaff_html() {
         $n = htmlspecialchars($this->name());
-        if ($n === "")
+        if ($n === "") {
             $n = htmlspecialchars($this->email);
-        if ($this->affiliation)
+        }
+        if ($this->affiliation) {
             $n .= ' <span class="auaff">(' . htmlspecialchars($this->affiliation) . ')</span>';
+        }
         return ltrim($n);
     }
+    /** @return string */
     function nameaff_text() {
         $n = $this->name();
-        if ($n === "")
+        if ($n === "") {
             $n = $this->email;
-        if ($this->affiliation)
+        }
+        if ($this->affiliation) {
             $n .= ' (' . $this->affiliation . ')';
+        }
         return ltrim($n);
     }
+    /** @return string */
     function name_email_aff_text() {
         $n = $this->name();
-        if ($n === "")
+        if ($n === "") {
             $n = $this->email;
-        else if ($this->email !== "")
+        } else if ($this->email !== "") {
             $n .= " <$this->email>";
-        if ($this->affiliation)
+        }
+        if ($this->affiliation) {
             $n .= ' (' . $this->affiliation . ')';
+        }
         return ltrim($n);
     }
+    /** @return string */
     function abbrevname_text() {
         if ($this->lastName !== "") {
             $u = "";
-            if ($this->firstName !== "" && ($u = Text::initial($this->firstName)) != "")
+            if ($this->firstName !== ""
+                && ($u = Text::initial($this->firstName)) != "") {
                 $u .= " "; // non-breaking space
+            }
             return $u . $this->lastName;
-        } else if ($this->firstName !== "")
+        } else if ($this->firstName !== "") {
             return $this->firstName;
-        else if ($this->email !== "")
+        } else if ($this->email !== "") {
             return $this->email;
-        else
+        } else {
             return "???";
+        }
     }
+    /** @return string */
     function abbrevname_html() {
         return htmlspecialchars($this->abbrevname_text());
     }
+    /** @return string */
     function deaccent($component) {
-        if ($this->_deaccents === null)
+        if ($this->_deaccents === null) {
             $this->_deaccents = [
                 strtolower(UnicodeHelper::deaccent($this->firstName)),
                 strtolower(UnicodeHelper::deaccent($this->lastName)),
                 strtolower(UnicodeHelper::deaccent($this->affiliation))
             ];
+        }
         return $this->_deaccents[$component];
     }
 }

@@ -1,6 +1,6 @@
 <?php
 // mergeaccounts.php -- HotCRP account merging page
-// Copyright (c) 2006-2019 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
 
 require_once("src/initweb.php");
 if (!$Me->email)
@@ -25,22 +25,22 @@ function crpmerge($qreq, $MiniMe) {
         $merger = new MergeContacts($MiniMe, $Me);
 
     // send mail at start of process
-    HotCRPMailer::send_to($merger->oldu, "@mergeaccount", null,
-                          array("cc" => Text::user_email_to($merger->newu),
-                                "other_contact" => $merger->newu));
+    HotCRPMailer::send_to($merger->oldu, "@mergeaccount",
+                          ["cc" => Text::user_email_to($merger->newu),
+                           "other_contact" => $merger->newu]);
 
     // actually merge users or change email
     $merger->run();
 
     if (!$merger->has_error()) {
         $Conf->confirmMsg("Merged account " . htmlspecialchars($merger->oldu->email) . ".");
-        $merger->newu->log_activity("Merged account " . $merger->oldu->email);
+        $merger->newu->log_activity("Account merged " . $merger->oldu->email);
         go(hoturl("index"));
     } else {
-        $merger->newu->log_activity("Merged account " . $merger->oldu->email . " with errors");
+        $merger->newu->log_activity("Account merged " . $merger->oldu->email . " with errors");
         $MergeError = '<div class="multimessage">'
             . join("\n", array_map(function ($m) { return '<div class="mmm">' . $m . '</div>'; },
-                                   $merger->errors()))
+                                   $merger->error_texts()))
             . '</div>';
     }
 }
@@ -54,13 +54,15 @@ if (isset($Qreq->merge) && $Qreq->post_ok()) {
         Ht::error_at("password");
     } else {
         $MiniMe = $Conf->user_by_email($Qreq->email);
+        if (!$MiniMe)
+            $MiniMe = $Conf->contactdb_user_by_email($Qreq->email);
         if (!$MiniMe) {
             $MergeError = "No account for " . htmlspecialchars($Qreq->email) . " exists.  Did you enter the correct email address?";
             Ht::error_at("email");
         } else if (!$MiniMe->check_password($Qreq->password)) {
             $MergeError = "That password is incorrect.";
             Ht::error_at("password");
-        } else if ($MiniMe->contactId == $Me->contactId) {
+        } else if ($MiniMe->contactId && $MiniMe->contactId == $Me->contactId) {
             $Conf->confirmMsg("Accounts successfully merged.");
             go(hoturl("index"));
         } else

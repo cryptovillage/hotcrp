@@ -124,8 +124,6 @@ DROP TABLE IF EXISTS `Formula`;
 CREATE TABLE `Formula` (
   `formulaId` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(200) NOT NULL,
-  `heading` varchar(200) NOT NULL DEFAULT '',
-  `headingTitle` varbinary(4096) NOT NULL,
   `expression` varbinary(4096) NOT NULL,
   `createdBy` int(11) NOT NULL DEFAULT '0',
   `timeModified` bigint(11) NOT NULL DEFAULT '0',
@@ -150,6 +148,7 @@ CREATE TABLE `MailLog` (
   `subject` blob,
   `emailBody` blob,
   `fromNonChair` tinyint(1) NOT NULL DEFAULT '0',
+  `status` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`mailId`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
@@ -187,6 +186,7 @@ CREATE TABLE `Paper` (
   `pdfFormatStatus` bigint(11) NOT NULL DEFAULT '0',
   `withdrawReason` varbinary(1024) DEFAULT NULL,
   `paperFormat` tinyint(1) DEFAULT NULL,
+  `dataOverflow` longblob,
   PRIMARY KEY (`paperId`),
   KEY `timeSubmitted` (`timeSubmitted`),
   KEY `leadContactId` (`leadContactId`),
@@ -210,7 +210,6 @@ CREATE TABLE `PaperComment` (
   `comment` varbinary(32767) DEFAULT NULL,
   `commentType` int(11) NOT NULL DEFAULT '0',
   `replyTo` int(11) NOT NULL,
-  `paperStorageId` int(11) NOT NULL DEFAULT '0',
   `ordinal` int(11) NOT NULL DEFAULT '0',
   `authorOrdinal` int(11) NOT NULL DEFAULT '0',
   `commentTags` varbinary(1024) DEFAULT NULL,
@@ -279,6 +278,7 @@ CREATE TABLE `PaperReview` (
   `reviewAuthorNotified` bigint(11) NOT NULL DEFAULT '0',
   `reviewAuthorSeen` bigint(1) DEFAULT NULL,
   `reviewOrdinal` int(1) NOT NULL DEFAULT '0',
+  `reviewViewScore` tinyint(2) NOT NULL DEFAULT '-3',
   `timeDisplayed` bigint(11) NOT NULL DEFAULT '0',
   `timeApprovalRequested` bigint(11) NOT NULL DEFAULT '0',
   `reviewEditVersion` int(1) NOT NULL DEFAULT '0',
@@ -300,6 +300,7 @@ CREATE TABLE `PaperReview` (
 
   `tfields` longblob,
   `sfields` varbinary(2048) DEFAULT NULL,
+  `data` varbinary(8192) DEFAULT NULL,
 
   PRIMARY KEY (`paperId`,`reviewId`),
   UNIQUE KEY `reviewId` (`reviewId`),
@@ -342,7 +343,9 @@ CREATE TABLE `PaperReviewRefused` (
   `timeRequested` bigint(11) DEFAULT NULL,
   `refusedBy` int(11) DEFAULT NULL,
   `timeRefused` bigint(11) DEFAULT NULL,
+  `reviewType` tinyint(1) NOT NULL DEFAULT '0',
   `reviewRound` int(1) DEFAULT NULL,
+  `data` varbinary(8192) DEFAULT NULL,
   `reason` varbinary(32767) DEFAULT NULL,
   PRIMARY KEY (`paperId`,`email`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
@@ -510,7 +513,7 @@ CREATE TABLE `TopicInterest` (
 
 
 
-insert into Settings (name, value) values ('allowPaperOption', 209);
+insert into Settings (name, value) values ('allowPaperOption', 233);
 insert into Settings (name, value) values ('setupPhase', 1);
 -- there are no submissions yet
 insert into Settings (name, value) values ('no_papersub', 1);

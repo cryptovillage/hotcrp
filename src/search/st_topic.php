@@ -1,6 +1,6 @@
 <?php
 // search/st_topic.php -- HotCRP helper class for searching for papers
-// Copyright (c) 2006-2019 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
 
 class Topic_SearchTerm extends SearchTerm {
     private $topics;
@@ -68,7 +68,7 @@ class Topic_SearchTerm extends SearchTerm {
         }
         return $this->negated ? !$v : $v;
     }
-    function compile_edit_condition(PaperInfo $row, PaperSearch $srch) {
+    function compile_condition(PaperInfo $row, PaperSearch $srch) {
         $o = (object) ["type" => "topic", "topics" => $this->topics];
         if ($this->negated)
             $o = (object) ["type" => "not", "child" => [$o]];

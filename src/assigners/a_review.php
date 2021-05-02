@@ -1,6 +1,71 @@
 <?php
 // a_review.php -- HotCRP assignment helper classes
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
+
+class Review_Assignable extends Assignable {
+    /** @var ?int */
+    public $cid;
+    /** @var ?int */
+    public $_rtype;
+    /** @var ?string */
+    public $_round;
+    /** @var ?int */
+    public $_rsubmitted;
+    /** @var ?int */
+    public $_rnondraft;
+    /** @var ?int */
+    public $_requested_by;
+    /** @var ?string */
+    public $_reason;
+    /** @var ?int */
+    public $_override;
+    /** @param ?int $pid
+     * @param ?int $cid
+     * @param ?int $rtype
+     * @param ?string $round */
+    function __construct($pid, $cid, $rtype = null, $round = null) {
+        $this->type = "review";
+        $this->pid = $pid;
+        $this->cid = $cid;
+        $this->_rtype = $rtype;
+        $this->_round = $round;
+    }
+    /** @return self */
+    function fresh() {
+        return new Review_Assignable($this->pid, $this->cid);
+    }
+    /** @param int $x
+     * @return $this */
+    function set_rsubmitted($x) {
+        $this->_rsubmitted = $x;
+        return $this;
+    }
+    /** @param int $x
+     * @return $this */
+    function set_rnondraft($x) {
+        $this->_rnondraft = $x;
+        return $this;
+    }
+    /** @param int $x
+     * @return $this */
+    function set_requested_by($x) {
+        $this->_requested_by = $x;
+        return $this;
+    }
+    /** @param int $reviewId
+     * @return ReviewInfo */
+    function make_reviewinfo(Conf $conf, $reviewId) {
+        $rrow = new ReviewInfo;
+        $rrow->conf = $conf;
+        $rrow->paperId = $this->pid;
+        $rrow->contactId = $this->cid;
+        $rrow->reviewType = $this->_rtype;
+        $rrow->reviewId = $reviewId;
+        $rrow->reviewRound = $this->_round ? (int) $conf->round_number($this->_round, false) : 0;
+        $rrow->requestedBy = $this->_requested_by;
+        return $rrow;
+    }
+}
 
 class Review_AssignmentParser extends AssignmentParser {
     private $rtype;
@@ -14,15 +79,14 @@ class Review_AssignmentParser extends AssignmentParser {
     }
     static function load_review_state(AssignmentState $state) {
         if ($state->mark_type("review", ["pid", "cid"], "Review_Assigner::make")) {
-            $result = $state->conf->qe("select paperId, contactId, reviewType, reviewRound, reviewSubmitted, timeApprovalRequested from PaperReview where paperId?a", $state->paper_ids());
+            $result = $state->conf->qe("select paperId, contactId, reviewType, reviewRound, reviewSubmitted, timeApprovalRequested, requestedBy from PaperReview where paperId?a", $state->paper_ids());
             while (($row = $result->fetch_row())) {
-                $round = $state->conf->round_name($row[3]);
-                $state->load([
-                    "type" => "review", "pid" => +$row[0], "cid" => +$row[1],
-                    "_rtype" => +$row[2], "_round" => $round,
-                    "_rsubmitted" => $row[4] > 0 ? 1 : 0,
-                    "_rnondraft" => $row[4] > 0 || $row[5] != 0 ? 1 : 0
-                ]);
+                $round = $state->conf->round_name((int) $row[3]);
+                $ra = new Review_Assignable((int) $row[0], (int) $row[1], (int) $row[2], $round);
+                $ra->set_rsubmitted($row[4] > 0 ? 1 : 0);
+                $ra->set_rnondraft($row[4] > 0 || $row[5] != 0 ? 1 : 0);
+                $ra->set_requested_by((int) $row[6]);
+                $state->load($ra);
             }
             Dbl::free($result);
         }
@@ -31,37 +95,40 @@ class Review_AssignmentParser extends AssignmentParser {
         self::load_review_state($state);
         Conflict_AssignmentParser::load_conflict_state($state);
     }
+    /** @param CsvRow $req */
     private function make_rdata($req, AssignmentState $state) {
         return ReviewAssigner_Data::make($req, $state, $this->rtype);
     }
+    /** @param CsvRow $req */
     function user_universe($req, AssignmentState $state) {
         if ($this->rtype > REVIEW_EXTERNAL) {
             return "pc";
         } else if ($this->rtype == 0
                    || (($rdata = $this->make_rdata($req, $state))
-                       && !$rdata->can_create_review())) {
+                       && !$rdata->might_create_review())) {
             return "reviewers";
         } else {
             return "any";
         }
     }
-    private function make_filter($fkey, $key, $value, $req, AssignmentState $state) {
-        $rdata = $this->make_rdata($req, $state);
-        if ($rdata->can_create_review()) {
-            return null;
-        }
-        return $state->make_filter($fkey, [
-                "type" => "review", $key => $value,
-                "_rtype" => $rdata->oldtype ? : null,
-                "_round" => $rdata->oldround
-            ]);
-    }
     function paper_filter($contact, $req, AssignmentState $state) {
-        return $this->make_filter("pid", "cid", $contact->contactId, $req, $state);
+        $rdata = $this->make_rdata($req, $state);
+        if ($rdata->might_create_review()) {
+            return null;
+        } else {
+            return $state->make_filter("pid",
+                new Review_Assignable(null, $contact->contactId, $rdata->oldtype ? : null, $rdata->oldround));
+        }
     }
     function expand_any_user(PaperInfo $prow, $req, AssignmentState $state) {
-        $cf = $this->make_filter("cid", "pid", $prow->paperId, $req, $state);
-        return $cf !== null ? $state->users_by_id(array_keys($cf)) : false;
+        $rdata = $this->make_rdata($req, $state);
+        if ($rdata->might_create_review()) {
+            return false;
+        } else {
+            $cf = $state->make_filter("cid",
+                new Review_Assignable($prow->paperId, null, $rdata->oldtype ? : null, $rdata->oldround));
+            return $state->users_by_id(array_keys($cf));
+        }
     }
     function expand_missing_user(PaperInfo $prow, $req, AssignmentState $state) {
         return $this->expand_any_user($prow, $req, $state);
@@ -70,13 +137,12 @@ class Review_AssignmentParser extends AssignmentParser {
         if ($user === "anonymous-new") {
             $suf = "";
             while (($u = $state->user_by_email("anonymous" . $suf))
-                   && $state->query(["type" => "review", "pid" => $prow->paperId,
-                                     "cid" => $u->contactId])) {
+                   && $state->query(new Review_Assignable($prow->paperId, $u->contactId))) {
                 $suf = $suf === "" ? 2 : $suf + 1;
             }
             $user = "anonymous" . $suf;
         }
-        if (preg_match('/\Aanonymous\d*\z/i', $user)
+        if (Contact::is_anonymous_email($user)
             && ($u = $state->user_by_email($user, true, []))) {
             return [$u];
         } else {
@@ -91,18 +157,18 @@ class Review_AssignmentParser extends AssignmentParser {
         // PC reviews must be PC members
         $rdata = $this->make_rdata($req, $state);
         if ($rdata->newtype >= REVIEW_PC && !$contact->is_pc_member()) {
-            return Text::user_html_nolink($contact) . " is not a PC member and cannot be assigned a PC review.";
+            return $contact->name_h(NAME_E) . " is not a PC member and cannot be assigned a PC review.";
         }
         // Conflict allowed if we're not going to assign a new review
         if ($this->rtype == 0
             || $prow->has_reviewer($contact)
-            || !$rdata->can_create_review()) {
+            || !$rdata->might_create_review()) {
             return true;
         }
         // Check whether review assignments are acceptable
         if ($contact->is_pc_member()
             && !$contact->can_accept_review_assignment_ignore_conflict($prow)) {
-            return Text::user_html_nolink($contact) . " cannot be assigned to review #{$prow->paperId}.";
+            return $contact->name_h(NAME_E) . " cannot be assigned to review #{$prow->paperId}.";
         }
         // Conflicts are checked later
         return true;
@@ -113,49 +179,48 @@ class Review_AssignmentParser extends AssignmentParser {
             return $rdata->error;
         }
 
-        $revmatch = ["type" => "review", "pid" => $prow->paperId,
-                     "cid" => $contact->contactId];
+        $revmatch = new Review_Assignable($prow->paperId, $contact->contactId);
         $res = $state->remove($revmatch);
         assert(count($res) <= 1);
         $rev = empty($res) ? null : $res[0];
-        '@phan-var ?array{type:string,pid:int,cid:int,_rtype:int,_round:int,_rsubmitted:int,_rnondraft:int} $rev';
 
         if ($rev !== null
-            && (($rdata->oldtype !== null && $rdata->oldtype !== $rev["_rtype"])
-                || ($rdata->oldround !== null && $rdata->oldround !== $rev["_round"])
-                || (!$rdata->newtype && $rev["_rsubmitted"]))) {
+            && (($rdata->oldtype !== null && $rdata->oldtype !== $rev->_rtype)
+                || ($rdata->oldround !== null && $rdata->oldround !== $rev->_round)
+                || (!$rdata->newtype && $rev->_rsubmitted))) {
             $state->add($rev);
             return true;
         } else if (!$rdata->newtype
-                   || ($rev === null && !$rdata->can_create_review())) {
+                   || ($rev === null && !$rdata->might_create_review())) {
             return true;
         }
 
         if ($rev === null) {
             $rev = $revmatch;
-            $rev["_rtype"] = 0;
-            $rev["_round"] = $rdata->newround;
-            $rev["_rsubmitted"] = 0;
-            $rev["_rnondraft"] = 0;
+            $rev->_rtype = 0;
+            $rev->_round = $rdata->newround;
+            $rev->_rsubmitted = 0;
+            $rev->_rnondraft = 0;
+            $rev->_requested_by = $state->user->contactId;
         }
-        if (!$rev["_rtype"] || $rdata->newtype > 0) {
-            $rev["_rtype"] = $rdata->newtype;
+        if (!$rev->_rtype || $rdata->newtype > 0) {
+            $rev->_rtype = $rdata->newtype;
         }
-        if ($rev["_rtype"] <= 0) {
-            $rev["_rtype"] = REVIEW_EXTERNAL;
+        if ($rev->_rtype <= 0) {
+            $rev->_rtype = REVIEW_EXTERNAL;
         }
-        if ($rev["_rtype"] === REVIEW_EXTERNAL
-            && $state->conf->pc_member_by_id($rev["cid"])) {
-            $rev["_rtype"] = REVIEW_PC;
+        if ($rev->_rtype === REVIEW_EXTERNAL
+            && $state->conf->pc_member_by_id($rev->cid)) {
+            $rev->_rtype = REVIEW_PC;
         }
         if ($rdata->newround !== null && $rdata->explicitround) {
-            $rev["_round"] = $rdata->newround;
+            $rev->_round = $rdata->newround;
         }
-        if ($rev["_rtype"] && isset($req["reason"])) {
-            $rev["_reason"] = $req["reason"];
+        if ($rev->_rtype && isset($req["reason"])) {
+            $rev->_reason = $req["reason"];
         }
         if (isset($req["override"]) && friendly_boolean($req["override"])) {
-            $rev["_override"] = 1;
+            $rev->_override = 1;
         }
         $state->add($rev);
         return true;
@@ -167,7 +232,6 @@ class Review_Assigner extends Assigner {
     private $notify = false;
     private $unsubmit = false;
     private $token = false;
-    static public $prefinfo = null;
     function __construct(AssignmentItem $item, AssignmentState $state) {
         parent::__construct($item, $state);
         $this->rtype = $item->post("_rtype");
@@ -199,12 +263,7 @@ class Review_Assigner extends Assigner {
             $t .= ' <span class="revround" title="Review round">'
                 . htmlspecialchars($round) . '</span>';
         }
-        if (self::$prefinfo
-            && ($cpref = get(self::$prefinfo, $this->cid))
-            && ($pref = get($cpref, $this->pid))) {
-            $t .= unparse_preference_span($pref);
-        }
-        return $t;
+        return $t . unparse_preference_span($aset->prow($this->pid)->preference($this->cid, true));
     }
     private function icon($before) {
         return review_type_icon($this->item->get($before, "_rtype"),
@@ -235,10 +294,8 @@ class Review_Assigner extends Assigner {
         } else if (($round = $this->item["_round"])) {
             $t .= ' <span class="revround" title="Review round">' . htmlspecialchars($round) . '</span>';
         }
-        if (!$this->item->existed() && self::$prefinfo
-            && ($cpref = get(self::$prefinfo, $this->cid))
-            && ($pref = get($cpref, $this->pid))) {
-            $t .= unparse_preference_span($pref);
+        if (!$this->item->existed()) {
+            $t .= unparse_preference_span($aset->prow($this->pid)->preference($this->cid, true));
         }
         return $t;
     }
@@ -260,7 +317,7 @@ class Review_Assigner extends Assigner {
     function account(AssignmentSet $aset, AssignmentCountSet $deltarev) {
         $aset->show_column("reviewers");
         if ($this->cid > 0) {
-            $deltarev->rev = true;
+            $deltarev->has |= AssignmentCountSet::HAS_REVIEW;
             $ct = $deltarev->ensure($this->cid);
             ++$ct->ass;
             $oldtype = $this->item->pre("_rtype") ? : 0;
@@ -282,24 +339,27 @@ class Review_Assigner extends Assigner {
         if ($this->contact->is_anonymous_user()
             && (!$this->item->existed() || $this->item->deleted())) {
             $extra["token"] = true;
-            $aset->cleanup_callback("rev_token", function ($aset, $vals) {
+            $aset->cleanup_callback("rev_token", function ($vals) use ($aset) {
                 $aset->conf->update_rev_tokens_setting(min($vals));
             }, $this->item->existed() ? 0 : 1);
         }
         $reviewId = $aset->user->assign_review($this->pid, $this->cid, $this->rtype, $extra);
         if ($this->unsubmit && $reviewId) {
-            $aset->user->unsubmit_review_row((object) ["paperId" => $this->pid, "contactId" => $this->cid, "reviewType" => $this->rtype, "reviewId" => $reviewId], ["no_autosearch" => true]);
+            assert($this->item->after !== null);
+            /** @phan-suppress-next-line PhanUndeclaredMethod */
+            $rrow = $this->item->after->make_reviewinfo($aset->conf, $reviewId);
+            $aset->user->unsubmit_review_row($rrow, ["no_autosearch" => true]);
         }
-        if (get($extra, "token") && $reviewId) {
+        if (($extra["token"] ?? false) && $reviewId) {
             $this->token = $aset->conf->fetch_ivalue("select reviewToken from PaperReview where paperId=? and reviewId=?", $this->pid, $reviewId);
         }
     }
     function cleanup(AssignmentSet $aset) {
         if ($this->notify) {
             $reviewer = $aset->conf->user_by_id($this->cid);
-            $prow = $aset->conf->fetch_paper($this->pid, $reviewer);
+            $prow = $aset->conf->paper_by_id($this->pid, $reviewer);
             HotCRPMailer::send_to($reviewer, $this->notify, [
-                "prow" => $prow, "rrow" => $prow->fresh_review_of_user($this->cid),
+                "prow" => $prow, "rrow" => $prow->fresh_review_by_user($this->cid),
                 "requester_contact" => $aset->user, "reason" => $this->item["_reason"]
             ]);
         }

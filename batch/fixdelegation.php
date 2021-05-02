@@ -1,9 +1,7 @@
 <?php
-$ConfSitePATH = preg_replace(',/batch/[^/]+,', '', __FILE__);
-require_once("$ConfSitePATH/src/init.php");
-require_once("$ConfSitePATH/lib/getopt.php");
+require_once(preg_replace('/\/batch\/[^\/]+/', '/src/init.php', __FILE__));
 
-$arg = getopt_rest($argv, "hn:q", array("help", "name:"));
+$arg = Getopt::rest($argv, "hn:q", array("help", "name:"));
 if (isset($arg["h"]) || isset($arg["help"])
     || count($arg["_"]) > 0) {
     fwrite(STDOUT, "Usage: php batch/fixdelegation.php [-n CONFID]\n");
@@ -16,7 +14,7 @@ function fix_one_delegation() {
     $row = Dbl::fetch_first_row("select r.paperId, r.contactId, u.email, q.ct, q.cs, r.reviewNeedsSubmit
             from PaperReview r
             left join (select paperId, requestedBy, count(reviewId) ct, count(reviewSubmitted) cs
-                       from PaperReview where reviewType<" . REVIEW_SECONDARY . "
+                       from PaperReview where reviewType>0 and reviewType<" . REVIEW_SECONDARY . "
                        group by paperId, requestedBy) q
                 on (q.paperId=r.paperId and q.requestedBy=r.contactId)
             left join ContactInfo u on (u.contactId=r.contactId)
@@ -29,7 +27,7 @@ function fix_one_delegation() {
     $pid = (int) $row[0];
     $req_cid = (int) $row[1];
     $req_email = $row[2];
-    $prow = $Conf->fetch_paper($pid);
+    $prow = $Conf->paper_by_id($pid);
     fwrite(STDERR, "Problem: #$pid review by $req_email\n");
     fwrite(STDERR, "  reviewNeedsSubmit $row[5], " . plural($row[3] ? : 0, "delegate") . ", " . plural($row[4] ? : 0, "submitted delegate") . "\n");
 
@@ -38,8 +36,8 @@ function fix_one_delegation() {
     while (($row = $result->fetch_object())) {
         if ($row->contactId == $req_cid
             && preg_match('/\ALogged proposal for (\S+) to review/', $row->action, $m)
-            && ($xid = $Conf->user_id_by_email($m[1]))) {
-            $proposals[$xid] = true;
+            && ($xuser = $Conf->cached_user_by_email($m[1]))) {
+            $proposals[$xuser->contactId] = true;
         } else if (preg_match('/\AAdded External review by (\S+)/', $row->action, $m)
                    && ($pc = $Conf->pc_member_by_email($m[1]))
                    && $pc->can_administer($prow)) {

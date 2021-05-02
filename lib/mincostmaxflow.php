@@ -1,19 +1,20 @@
 <?php
 // mincostmaxflow.php -- HotCRP min-cost max-flow
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class MinCostMaxFlow_Node {
     /** @var string */
     public $name;
     /** @var int */
     public $vindex;
+    /** @var ?string */
     public $klass;
     /** @var int|float */
     public $flow = 0;
     /** @var ?MinCostMaxFlow_Node|false */
-    public $link = null;
+    public $link;
     /** @var ?MinCostMaxFlow_Node */
-    public $xlink = null;
+    public $xlink;
     /** @var int */
     public $npos = 0;
     /** @var int|float */
@@ -25,8 +26,7 @@ class MinCostMaxFlow_Node {
     /** @var int */
     public $n_outgoing_admissible = 0;
     /** @var list<MinCostMaxFlow_Edge> */
-    public $e = array();
-    public $xe;
+    public $e = [];
     /** @param string $name */
     function __construct($name, $klass) {
         $this->name = $name;
@@ -172,6 +172,8 @@ class MinCostMaxFlow {
     private $sink;
     /** @var list<MinCostMaxFlow_Edge> */
     private $e;
+    /** @var bool */
+    private $has_edges = false;
     /** @var null|int|float */
     private $maxflow;
     /** @var int|float */
@@ -180,7 +182,7 @@ class MinCostMaxFlow {
     private $mincost;
     /** @var int|float */
     private $maxcost;
-    private $progressf = array();
+    private $progressf = [];
     private $hasrun;
     /** @var bool */
     private $debug;
@@ -210,11 +212,15 @@ class MinCostMaxFlow {
 
     const DEBUG = 1;
 
+    /** @param int $flags */
     function __construct($flags = 0) {
         $this->clear();
         $this->debug = ($flags & self::DEBUG) !== 0;
     }
 
+    /** @param string $name
+     * @param string $klass
+     * @return MinCostMaxFlow_Node */
     function add_node($name, $klass = "") {
         if ($name === "") {
             $name = ".v" . count($this->v);
@@ -225,6 +231,11 @@ class MinCostMaxFlow {
         return $v;
     }
 
+    /** @param string|MinCostMaxFlow_Node $vs
+     * @param string|MinCostMaxFlow_Node $vd
+     * @param int|float $cap
+     * @param int|float $cost
+     * @param int|float $mincap */
     function add_edge($vs, $vd, $cap, $cost = 0, $mincap = 0) {
         if (is_string($vs)) {
             $vs = $this->vmap[$vs];
@@ -241,7 +252,8 @@ class MinCostMaxFlow {
         $this->maxcost = max($this->maxcost, $cost);
     }
 
-    function add_progressf($progressf) {
+    /** @param callable(MinCostMaxFlow,int,...) $progressf */
+    function add_progress_handler($progressf) {
         $this->progressf[] = $progressf;
     }
 
@@ -254,6 +266,8 @@ class MinCostMaxFlow {
         return isset($this->vmap[$name]);
     }
 
+    /** @param string $klass
+     * @return list<MinCostMaxFlow_Node> */
     function nodes($klass) {
         $a = array();
         foreach ($this->v as $v) {
@@ -301,7 +315,10 @@ class MinCostMaxFlow {
         if (is_string($v)) {
             $v = $this->vmap[$v];
         }
-        $a = array();
+        if (!$this->has_edges) {
+            $this->initialize_edges();
+        }
+        $a = [];
         $this->add_reachable($v, $klass, $a);
         return $a;
     }
@@ -327,10 +344,13 @@ class MinCostMaxFlow {
         if (is_string($v)) {
             $v = $this->vmap[$v];
         }
+        if (!$this->has_edges) {
+            $this->initialize_edges();
+        }
         foreach ($this->v as $vx) {
             $vx->npos = 0;
         }
-        $a = array();
+        $a = [];
         $this->topological_sort_visit($v, $klass, $a);
         return array_reverse($a);
     }
@@ -339,6 +359,9 @@ class MinCostMaxFlow {
     // internals
 
     private function initialize_edges() {
+        foreach ($this->v as $v) {
+            $v->e = [];
+        }
         // all sources must come before all destinations
         foreach ($this->e as $e) {
             $e->src->e[] = $e;
@@ -346,6 +369,7 @@ class MinCostMaxFlow {
         foreach ($this->e as $e) {
             $e->dst->e[] = $e;
         }
+        $this->has_edges = true;
     }
 
 
@@ -604,7 +628,7 @@ class MinCostMaxFlow {
         // loop over buckets, pricing one node at a time
         $bi = 0;
         while ($bi < count($b) && $excess > 0) {
-            if (!get($b, $bi)) {
+            if (!($b[$bi] ?? false)) {
                 ++$bi;
                 continue;
             }
@@ -665,10 +689,10 @@ class MinCostMaxFlow {
                         if ($e->is_price_admissible_from($v)) {
                             --$v->n_outgoing_admissible;
                         }
-                        $v->xe[] = $e;
                         $v->e[$i] = $v->e[count($v->e) - 1];
                         array_pop($v->e);
                         $v->npos = 0; // keep npos in bounds
+                        $this->has_edges = false;
                         ++$ndropped;
                     } else {
                         ++$i;
@@ -765,7 +789,6 @@ class MinCostMaxFlow {
 
         foreach ($this->v as $v) {
             $v->n_outgoing_admissible = $v->count_outgoing_price_admissible();
-            $v->xe = array();
         }
 
         $this->debug && $this->cspushrelabel_check();
@@ -776,12 +799,6 @@ class MinCostMaxFlow {
         }
         $this->mincost_end_at = microtime(true);
 
-        foreach ($this->v as $v) {
-            if ($v->xe) {
-                $v->e = array_merge($v->e, $v->xe);
-                $v->xe = null;
-            }
-        }
         foreach ($this->progressf as $progressf) {
             call_user_func($progressf, $this, self::PMINCOST_DONE);
         }
@@ -796,14 +813,13 @@ class MinCostMaxFlow {
     }
 
     private function make_debug_file() {
-        global $Conf, $Now;
-        if (!($dir = $Conf->opt("minCostMaxFlowDebug"))) {
+        if (!($dir = Conf::$main->opt("minCostMaxFlowDebug"))) {
             return null;
         }
         $f = null;
         $time = time();
-        while (!$f && $time < $Now + 20) {
-            $f = @fopen($dir . "/mcmf-{$Conf->dbname}-{$time}.txt", "xb");
+        while (!$f && $time < Conf::$now + 20) {
+            $f = @fopen("$dir/mcmf-".Conf::$main->dbname."-{$time}.txt", "xb");
             ++$time;
         }
         return $f;
@@ -815,7 +831,7 @@ class MinCostMaxFlow {
         $this->infeasible = false;
         $this->initialize_edges();
         if (($f = $this->make_debug_file())) {
-            fwrite($f, $this->mincost_dimacs_input());
+            fwrite($f, $this->dimacs_input(self::DIMACS_MINCOST | self::DIMACS_NAMES));
             fwrite($f, "\nc begintime " . microtime(true) . "\n");
         }
         $this->pushrelabel_run();
@@ -839,7 +855,7 @@ class MinCostMaxFlow {
         if ($this->hasrun) {
             foreach ($this->v as $v) {
                 $v->distance = $v->excess = $v->price = 0;
-                $v->e = array();
+                $v->e = [];
             }
             foreach ($this->e as $e) {
                 $e->flow = 0;
@@ -847,7 +863,7 @@ class MinCostMaxFlow {
             $this->maxflow = null;
             $this->maxflow_start_at = $this->maxflow_end_at = null;
             $this->mincost_start_at = $this->mincost_end_at = null;
-            $this->hasrun = false;
+            $this->hasrun = $this->has_edges = false;
         }
     }
 
@@ -868,7 +884,7 @@ class MinCostMaxFlow {
     }
 
     function debug_info($only_flow = false) {
-        $ex = array();
+        $ex = [];
         $cost = 0;
         foreach ($this->e as $e) {
             if ($e->flow || $e->mincap || !$only_flow) {
@@ -893,7 +909,12 @@ class MinCostMaxFlow {
     }
 
 
-    private function dimacs_input($mincost) {
+    const DIMACS_MAXFLOW = 0;
+    const DIMACS_MINCOST = 1;
+    const DIMACS_NAMES = 2;
+
+    private function dimacs_input($flags) {
+        $mincost = ($flags & self::DIMACS_MINCOST) !== 0;
         $x = array("p " . ($mincost ? "min" : "max") . " "
                    . count($this->v) . " " . count($this->e) . "\n");
         foreach ($this->v as $i => $v) {
@@ -909,33 +930,36 @@ class MinCostMaxFlow {
         foreach ($this->v as $v) {
             if ($v !== $this->source && $v !== $this->sink) {
                 $cmt = "c ninfo {$v->vindex} {$v->name}";
-                if ($v->klass !== "")
+                if ($v->klass !== "") {
                     $cmt .= " {$v->klass}";
+                }
                 $x[] = "$cmt\n";
             }
         }
-        if ($mincost) {
-            foreach ($this->e as $e) {
-                $x[] = "a {$e->src->vindex} {$e->dst->vindex} {$e->mincap} {$e->cap} {$e->cost}\n";
-            }
-        } else {
-            foreach ($this->e as $e) {
-                $x[] = "a {$e->src->vindex} {$e->dst->vindex} {$e->cap}\n";
+        $names = ($flags & self::DIMACS_NAMES) !== 0;
+        foreach ($this->e as $e) {
+            $src = $names ? $e->src->name : $e->src->vindex;
+            $dst = $names ? $e->dst->name : $e->dst->vindex;
+            if ($mincost) {
+                $x[] = "a $src $dst {$e->mincap} {$e->cap} {$e->cost}\n";
+            } else {
+                $x[] = "a $src $dst {$e->cap}\n";
             }
         }
         return join("", $x);
     }
 
     function maxflow_dimacs_input() {
-        return $this->dimacs_input(false);
+        return $this->dimacs_input(self::DIMACS_MAXFLOW);
     }
 
     function mincost_dimacs_input() {
-        return $this->dimacs_input(true);
+        return $this->dimacs_input(self::DIMACS_MINCOST);
     }
 
 
-    private function dimacs_output($mincost) {
+    private function dimacs_output($flags) {
+        $mincost = ($flags & self::DIMACS_MINCOST) !== 0;
         $x = array("c p " . ($mincost ? "min" : "max") . " "
                    . count($this->v) . " " . count($this->e) . "\n");
         foreach ($this->v as $i => $v) {
@@ -970,16 +994,16 @@ class MinCostMaxFlow {
     }
 
     function maxflow_dimacs_output() {
-        return $this->dimacs_output(false);
+        return $this->dimacs_output(self::DIMACS_MAXFLOW);
     }
 
     function mincost_dimacs_output() {
-        return $this->dimacs_output(true);
+        return $this->dimacs_output(self::DIMACS_MINCOST);
     }
 
 
     private function dimacs_node(&$vnames, $num, $name = "", $klass = "") {
-        if (!($v = get($vnames, $num))) {
+        if (!($v = $vnames[$num] ?? null)) {
             $v = $vnames[$num] = $this->add_node($name, $klass);
         }
         return $v;
@@ -990,14 +1014,13 @@ class MinCostMaxFlow {
         $vnames = array();
         $ismax = null;
         $next_cap = $next_cost = null;
-        $has_edges = false;
         foreach (CsvParser::split_lines($str) as $lineno => $line) {
             if ($line[0] !== "f") {
                 $next_cap = $next_cost = null;
             }
             if (preg_match('/\An (\d+) (-?\d+|s|t)\s*\z/', $line, $m)) {
                 $issink = $m[2] === "t" || $m[2] < 0;
-                assert(!get($vnames, $m[1]));
+                assert(!isset($vnames[$m[1]]));
                 $vnames[$m[1]] = $v = $issink ? $this->sink : $this->source;
                 if ($m[2] !== "s" && $m[2] !== "t") {
                     $v->excess = (int) $m[2];
@@ -1010,12 +1033,12 @@ class MinCostMaxFlow {
                 $v = $this->dimacs_node($vnames, $m[1]);
                 $v->price = (float) $m[2];
             } else if (preg_match('/\Aa (\d+) (\d+) (\d+)\s*\z/', $line, $m)) {
-                assert(!$has_edges);
+                assert(!$this->has_edges);
                 $this->add_edge($this->dimacs_node($vnames, $m[1]),
                                 $this->dimacs_node($vnames, $m[2]),
                                 (int) $m[3], 0);
             } else if (preg_match('/\Aa (\d+) (\d+) (\d+) (\d+) (-?\d+)\s*\z/', $line, $m)) {
-                assert(!$has_edges);
+                assert(!$this->has_edges);
                 $this->add_edge($this->dimacs_node($vnames, $m[1]),
                                 $this->dimacs_node($vnames, $m[2]),
                                 (int) $m[4], (int) $m[5], (int) $m[3]);
@@ -1023,9 +1046,8 @@ class MinCostMaxFlow {
                 $next_cap = (int) $m[1];
                 $next_cost = (int) $m[2];
             } else if (preg_match('/\Af (\d+) (\d+) (-?\d+)\s*\z/', $line, $m)) {
-                if (!$has_edges) {
+                if (!$this->has_edges) {
                     $this->initialize_edges();
-                    $has_edges = true;
                 }
                 $src = $this->dimacs_node($vnames, $m[1]);
                 $dst = $this->dimacs_node($vnames, $m[2]);

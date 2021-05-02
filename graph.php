@@ -3,7 +3,6 @@
 // Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
 
 require_once("src/initweb.php");
-require_once("src/papersearch.php");
 
 $Graph = $Qreq->g;
 if (!$Graph
@@ -31,7 +30,7 @@ if ($Graph && isset($GraphSynonym[$Graph])) {
     $Graph = $GraphSynonym[$Graph];
 }
 if (!$Graph || !isset($Graphs[$Graph])) {
-    $Conf->self_redirect($Qreq, ["g" => key($Graphs)]);
+    $Conf->redirect_self($Qreq, ["g" => key($Graphs)]);
 }
 
 // Header and body
@@ -43,7 +42,7 @@ echo $Conf->make_script_file("scripts/graph.js");
 function echo_graph($searchable, $fg, $h2) {
     echo '<div class="has-hotgraph" style="max-width:960px;margin-bottom:4em">';
     if ($searchable) {
-        echo Ht::entry("q", "", ["placeholder" => "Find on graph", "class" => "uii js-hotgraph-highlight papersearch float-right need-autogrow need-suggest"]);
+        echo Ht::entry("q", "", ["placeholder" => "Find on graph", "class" => "uii js-hotgraph-highlight papersearch float-right need-autogrow need-suggest", "spellcheck" => false]);
     }
     if ($h2) {
         echo "<h2>", $h2, "</h2>\n";
@@ -60,7 +59,7 @@ function echo_graph($searchable, $fg, $h2) {
 if ($Graph == "procrastination") {
     echo_graph(false, null, "Procrastination");
     $rt = new ReviewTimes($Me);
-    echo Ht::unstash_script('$(function () { hotcrp_graph("#hotgraph",' . json_encode_browser($rt->json()) . ') })');
+    echo Ht::unstash_script('$(function () { hotcrp.graph("#hotgraph",' . json_encode_browser($rt->json()) . ') })');
 }
 
 
@@ -69,8 +68,8 @@ function formulas_qrow($i, $q, $s, $status) {
     if ($q === "all") {
         $q = "";
     }
-    $klass = MessageSet::status_class($status, "papersearch");
-    $t = '<tr><td class="lentry">' . Ht::entry("q$i", $q, array("size" => 40, "placeholder" => "(All)", "class" => $klass, "id" => "q$i"));
+    $klass = MessageSet::status_class($status, "need-suggest papersearch want-focus");
+    $t = '<tr><td class="lentry">' . Ht::entry("q$i", $q, ["size" => 40, "placeholder" => "(All)", "class" => $klass, "id" => "q$i", "spellcheck" => false, "autocomplete" => "off", "aria-label" => "Search"]);
     $t .= " <span style=\"padding-left:1em\">Style:</span> &nbsp;" . Ht::select("s$i", array("default" => "default", "plain" => "plain", "redtag" => "red", "orangetag" => "orange", "yellowtag" => "yellow", "greentag" => "green", "bluetag" => "blue", "purpletag" => "purple", "graytag" => "gray"), $s !== "" ? $s : "by-tag");
     $t .= ' <span class="nb btnbox aumovebox" style="margin-left:1em"><a href="#" class="ui btn qx row-order-ui moveup" tabindex="-1">'
         . Icons::ui_triangle(0)
@@ -146,7 +145,7 @@ if ($Graph == "formula") {
         } else if ($fg->type === FormulaGraph::BOXPLOT) {
             $gtype = "boxplot";
         }
-        echo Ht::unstash_script("\$(function () { hotcrp_graph(\"#hotgraph\", " . json_encode_browser($fg->graph_json()) . ") });"), "\n";
+        echo Ht::unstash_script("\$(function () { hotcrp.graph(\"#hotgraph\", " . json_encode_browser($fg->graph_json()) . ") });"), "\n";
     } else {
         echo "<h2>Formulas</h2>\n";
     }
@@ -186,7 +185,7 @@ if ($Graph == "formula") {
         Ht::button("Add data set", ["class" => "ui row-order-ui addrow"]),
         "</td></tr></tbody></table></div></div>\n";
     echo '<div class="g"></div>';
-    echo Ht::submit(null, "Graph");
+    echo Ht::submit("Graph");
     echo '</form>';
 }
 

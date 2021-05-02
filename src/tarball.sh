@@ -1,4 +1,4 @@
-export VERSION=2.102
+export VERSION=3.0b1
 
 # check that schema.sql and updateschema.php agree on schema version
 updatenum=`grep 'settings.*allowPaperOption.*=\|update_schema_version' src/updateschema.php | tail -n 1 | sed 's/.*= *//;s/.*[(] *//;s/[;)].*//'`
@@ -64,6 +64,7 @@ log.php
 mail.php
 manualassign.php
 mergeaccounts.php
+newaccount.php
 offline.php
 paper.php
 profile.php
@@ -73,19 +74,23 @@ reviewprefs.php
 scorechart.php
 search.php
 settings.php
+signin.php
+signout.php
 users.php
 
 batch/.htaccess
-batch/addusers.php
 batch/assign.php
 batch/checkinvariants.php
 batch/deletepapers.php
 batch/fixdelegation.php
 batch/killinactivedoc.php
+batch/paperjson.php
+batch/reviewcsv.php
 batch/s3test.php
 batch/s3transfer.php
 batch/s3verifyall.php
 batch/savepapers.php
+batch/saveusers.php
 batch/search.php
 batch/updatecontactdb.php
 
@@ -108,6 +113,7 @@ etc/pagepartials.json
 etc/papercolumns.json
 etc/profilegroups.json
 etc/reviewformlibrary.json
+etc/sample.pdf
 etc/searchkeywords.json
 etc/settinginfo.json
 etc/settinggroups.json
@@ -124,7 +130,7 @@ lib/countmatcher.php
 lib/countries.php
 lib/createdb.sh
 lib/csv.php
-lib/curls3document.php
+lib/curls3result.php
 lib/dbhelper.sh
 lib/dbl.php
 lib/filer.php
@@ -147,16 +153,13 @@ lib/qrequest.php
 lib/redirect.php
 lib/restoredb.sh
 lib/runsql.sh
-lib/s3document.php
+lib/s3client.php
+lib/s3result.php
 lib/scoreinfo.php
 lib/tagger.php
 lib/text.php
 lib/unicodehelper.php
 lib/xlsx.php
-lib/zipdocument.php
-
-pages/.htaccess
-pages/home.php
 
 src/.htaccess
 src/api/api_alltags.php
@@ -174,6 +177,7 @@ src/api/api_search.php
 src/api/api_searchconfig.php
 src/api/api_session.php
 src/api/api_taganno.php
+src/api/api_tags.php
 src/api/api_user.php
 src/assigners/a_conflict.php
 src/assigners/a_decision.php
@@ -185,22 +189,28 @@ src/assigners/a_review.php
 src/assigners/a_status.php
 src/assigners/a_tag.php
 src/assigners/a_unsubmitreview.php
+src/assignmentcountset.php
 src/assignmentset.php
 src/author.php
 src/authormatcher.php
 src/autoassigner.php
 src/banal
-src/capability.php
+src/capabilities/cap_authorview.php
+src/capabilities/cap_reviewaccept.php
+src/capabilityinfo.php
 src/checkformat.php
 src/commentinfo.php
 src/conference.php
+src/confinvariants.php
 src/conflict.php
 src/contact.php
+src/contactcountmatcher.php
 src/contactlist.php
 src/contactsearch.php
 src/distoptions.php
 src/documentfiletree.php
 src/documentinfo.php
+src/documentinfoset.php
 src/documenthashmatcher.php
 src/documentrequest.php
 src/fieldrender.php
@@ -212,7 +222,8 @@ src/formulas/f_author.php
 src/formulas/f_conflict.php
 src/formulas/f_decision.php
 src/formulas/f_now.php
-src/formulas/f_option.php
+src/formulas/f_optionpresent.php
+src/formulas/f_optionvalue.php
 src/formulas/f_pdfsize.php
 src/formulas/f_pref.php
 src/formulas/f_reviewer.php
@@ -242,20 +253,25 @@ src/helprenderer.php
 src/hotcrpmailer.php
 src/init.php
 src/initweb.php
-src/intrinsicvalue.php
 src/listaction.php
 src/listactions/la_assign.php
 src/listactions/la_decide.php
+src/listactions/la_get.php
+src/listactions/la_getabstracts.php
+src/listactions/la_getauthors.php
 src/listactions/la_getallrevpref.php
 src/listactions/la_getdocument.php
 src/listactions/la_getjson.php
 src/listactions/la_getjsonrqc.php
 src/listactions/la_getlead.php
 src/listactions/la_getrank.php
+src/listactions/la_getpcassignments.php
+src/listactions/la_getreviewbase.php
+src/listactions/la_getreviewforms.php
+src/listactions/la_getreviews.php
 src/listactions/la_getreviewcsv.php
 src/listactions/la_getrevpref.php
 src/listactions/la_getscores.php
-src/listactions/la_get_rev.php
 src/listactions/la_get_sub.php
 src/listactions/la_mail.php
 src/listactions/la_tag.php
@@ -264,9 +280,19 @@ src/mailclasses.php
 src/meetingtracker.php
 src/mergecontacts.php
 src/multiconference.php
+src/options/o_abstract.php
+src/options/o_authors.php
+src/options/o_collaborators.php
+src/options/o_contacts.php
+src/options/o_nonblind.php
+src/options/o_pcconflicts.php
+src/options/o_submissionversion.php
+src/options/o_title.php
+src/options/o_topics.php
 src/paperapi.php
 src/papercolumn.php
 src/papercolumns/pc_administrator.php
+src/papercolumns/pc_assignreview.php
 src/papercolumns/pc_commenters.php
 src/papercolumns/pc_conflict.php
 src/papercolumns/pc_conflictmatch.php
@@ -276,6 +302,7 @@ src/papercolumns/pc_formulagraph.php
 src/papercolumns/pc_lead.php
 src/papercolumns/pc_option.php
 src/papercolumns/pc_pagecount.php
+src/papercolumns/pc_paperidorder.php
 src/papercolumns/pc_pcconflicts.php
 src/papercolumns/pc_preference.php
 src/papercolumns/pc_preferencelist.php
@@ -291,7 +318,7 @@ src/paperevents.php
 src/paperinfo.php
 src/paperlist.php
 src/paperoption.php
-src/papersaver.php
+src/paperrequest.php
 src/papersearch.php
 src/paperstatus.php
 src/papertable.php
@@ -299,31 +326,44 @@ src/paperrank.php
 src/partials/p_adminhome.php
 src/partials/p_home.php
 src/partials/p_signin.php
+src/permissionproblem.php
 src/review.php
 src/reviewdiffinfo.php
 src/reviewinfo.php
-src/reviewtable.php
+src/reviewrefusalinfo.php
+src/reviewrequestinfo.php
 src/reviewtimes.php
-src/sample.pdf
 src/schema.sql
 src/search/st_admin.php
 src/search/st_author.php
 src/search/st_authormatch.php
+src/search/st_color.php
 src/search/st_comment.php
 src/search/st_conflict.php
 src/search/st_decision.php
+src/search/st_documentcount.php
+src/search/st_documentname.php
 src/search/st_editfinal.php
 src/search/st_formula.php
 src/search/st_option.php
+src/search/st_optionpresent.php
+src/search/st_optiontext.php
+src/search/st_optionvalue.php
+src/search/st_optionvaluein.php
 src/search/st_paperpc.php
 src/search/st_paperstatus.php
+src/search/st_proposal.php
+src/search/st_perm.php
 src/search/st_pdf.php
+src/search/st_reconflict.php
 src/search/st_review.php
 src/search/st_reviewtoken.php
 src/search/st_revpref.php
 src/search/st_tag.php
 src/search/st_topic.php
+src/searchexample.php
 src/searchselection.php
+src/searchsplitter.php
 src/sessionlist.php
 src/settings/s_basics.php
 src/settings/s_decisions.php
@@ -342,6 +382,7 @@ src/settings/s_topics.php
 src/settings/s_tracks.php
 src/settings/s_users.php
 src/settingvalues.php
+src/siteloader.php
 src/tagrankparser.php
 src/tagsearchmatcher.php
 src/textformat.php
@@ -408,7 +449,7 @@ scripts/buzzer.js
 scripts/emojicodes.json
 scripts/graph.js
 scripts/jquery-1.12.4.min.js
-scripts/jquery-3.4.1.min.js
+scripts/jquery-3.5.1.min.js
 scripts/script.js
 scripts/settings.js
 

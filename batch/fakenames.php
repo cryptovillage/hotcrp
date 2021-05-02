@@ -1,7 +1,5 @@
 <?php
-$ConfSitePATH = preg_replace(',/batch/[^/]+,', '', __FILE__);
-require_once("$ConfSitePATH/src/init.php");
-require_once("$ConfSitePATH/lib/getopt.php");
+require_once(preg_replace('/\/batch\/[^\/]+/', '/src/init.php', __FILE__));
 
 $arg = getopt("hn:", array("help", "name:"));
 if (isset($arg["h"]) || isset($arg["help"])) {
@@ -13,20 +11,21 @@ class Fakes {
     private $data = [];
 
     function load($file = null) {
-        global $ConfSitePATH;
-        if ($file === null)
-            $file = "$ConfSitePATH/extra/fakenames.csv";
-        if (($s = file_get_contents($file)) === false)
+        if ($file === null) {
+            $file = SiteLoader::find("extra/fakenames.csv");
+        }
+        if (($s = file_get_contents($file)) === false) {
             return false;
+        }
         $csv = new CsvParser($s);
-        while (($x = $csv->next_array())) {
+        while (($x = $csv->next_list())) {
             list($name, $type, $count) = $x;
             if ((string) $type === "")
                 continue;
             if (!isset($this->data[$type]))
                 $this->data[$type] = [0];
             $max = $this->data[$type][count($this->data[$type]) - 1];
-            $max += (int) ($count * 10 + 0.5);
+            $max += (int) ((float) $count * 10 + 0.5);
             array_push($this->data[$type], $name, $max);
         }
         return true;

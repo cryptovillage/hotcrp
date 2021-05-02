@@ -1,6 +1,6 @@
 <?php
 // src/help/h_formulas.php -- HotCRP help functions
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class Formulas_HelpTopic {
     static function render(HelpRenderer $hth) {
@@ -17,7 +17,7 @@ To search for a formula, use a search term such as “",
 $hth->search_link("formula:var(OveMer)>0.5"), "”
 (select papers with variance in Overall merit greater than 0.5).
 Or save formulas using ",
-$hth->search_link("Search &gt; View options", ["q" => "", "anchor" => "view"]),
+$hth->search_link("Search &gt; View options", ["q" => "", "#" => "view"]),
 " &gt; Edit formulas</a>.</p>
 
 <p>Formulas use a familiar expression language.
@@ -102,11 +102,11 @@ scores A, B, and D is A. For instance:</p>
 
         echo $hth->subhead("Aggregate functions");
         echo "<p>Aggregate functions calculate a
-value based on all of a paper’s submitted reviews and/or review preferences.
+value based on all of a paper’s reviews and/or review preferences.
 For instance, “max(OveMer)” would return the maximum Overall merit score
 assigned to a paper.</p>
 
-<p>An aggregate function’s argument is calculated once per visible review
+<p>An aggregate function’s argument is calculated once per viewable review
 or preference.
 For instance, “max(OveMer/RevExp)” calculates the maximum value of
 “OveMer/RevExp” for any review, whereas

@@ -1,7 +1,9 @@
 // graph.js -- HotCRP JavaScript library for graph drawing
 // Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
 
-var hotcrp_graph = (function ($, d3) {
+hotcrp.graph = (function ($, d3) {
+var handle_ui = hotcrp.handle_ui;
+var hoturl = hotcrp.hoturl;
 var BOTTOM_MARGIN = 30;
 var PATHSEG_ARGMAP = {
     m: 2, M: 2, z: 0, Z: 0, l: 2, L: 2, h: 1, H: 1, v: 1, V: 1, c: 6, C: 6,
@@ -71,7 +73,7 @@ function normalize_svg_path(s) {
             preva = res.length ? res[res.length - 1] : null;
             if (copen) {
                 if (cx != cx0 || cy != cy0)
-                    res.push(["L", cx0, cy0]);
+                    res.push(["L", cx, cy, cx0, cy0]);
                 res.push(["Z"]);
                 copen = false;
             }
@@ -176,8 +178,8 @@ function pathNodeMayBeNearer(pathNode, point, dist) {
     }
     // check bounding rectangle of path
     if ("clientX" in point) {
-        var bounds = pathNode.getBoundingClientRect();
-        var dx = point[0] - point.clientX, dy = point[1] - point.clientY;
+        var bounds = pathNode.getBoundingClientRect(),
+            dx = point[0] - point.clientX, dy = point[1] - point.clientY;
         if (bounds && oob(bounds.left + dx, bounds.top + dy,
                           bounds.right + dx, bounds.bottom + dy))
             return false;
@@ -403,7 +405,7 @@ function pid_renderer(ps, cc) {
     return a.join(" ");
 }
 
-function clicker(pids) {
+function clicker(pids, event) {
     var m, x, i, url, last_review = null;
     if (!pids)
         return;
@@ -420,18 +422,18 @@ function clicker(pids) {
         x.push(p);
     }
     if (x.length === 1 && pids.length === 1 && last_review !== null)
-        clicker_go(hoturl("paper", {p: x[0], anchor: "r" + last_review}));
+        clicker_go(hoturl("paper", {p: x[0], anchor: "r" + last_review}), event);
     else if (x.length === 1)
-        clicker_go(hoturl("paper", {p: x[0]}));
+        clicker_go(hoturl("paper", {p: x[0]}), event);
     else {
-        x = d3.set(x).values();
+        x = Array.from(new Set(x).values());
         x.sort(pid_sorter);
-        clicker_go(hoturl("search", {q: x.join(" ")}));
+        clicker_go(hoturl("search", {q: x.join(" ")}), event);
     }
 }
 
-function clicker_go(url) {
-    if (d3.event && d3.event.metaKey)
+function clicker_go(url, event) {
+    if (event && event.metaKey)
         window.open(url, "_blank");
     else
         window.location = url;
@@ -498,7 +500,7 @@ function graph_cdf(selector, args) {
     // massage data
     var series = args.data;
     if (!series.length) {
-        series = d3.values(series);
+        series = Object.values(series);
         series.sort(function (a, b) {
             return d3.ascending(a.priority || 0, b.priority || 0);
         });
@@ -565,10 +567,10 @@ function graph_cdf(selector, args) {
         .on("mouseout", mouseout);
 
     var hovered_path, hubble;
-    function mousemoved() {
-        var m = d3.mouse(this), p = {distance: 16};
-        m.clientX = d3.event.clientX;
-        m.clientY = d3.event.clientY;
+    function mousemoved(event) {
+        var m = d3.pointer(event), p = {distance: 16};
+        m.clientX = event.clientX;
+        m.clientY = event.clientY;
         for (var i in data)
             if (series[i].label || args.cdf_tooltip_position)
                 p = closestPoint(svg.select("[data-index='" + i + "']").node(), m, p);
@@ -593,7 +595,7 @@ function graph_cdf(selector, args) {
                 hubble.html(label);
             } else
                 hubble.text(u.label);
-            hubble.dir(dir >= 0.25*Math.PI && dir <= 0.75*Math.PI ? "r" : "b")
+            hubble.anchor(dir >= 0.25*Math.PI && dir <= 0.75*Math.PI ? "e" : "s")
                 .at(p[0] + args.left, p[1], this);
         } else if (hubble) {
             hubble = hubble.remove() && null;
@@ -617,7 +619,7 @@ function procrastination_filter(revdata) {
         var d = {d: revdata.reviews[cid], className: "gcdf-many"};
         if ((u = revdata.users[cid]) && u.name)
             d.label = u.name;
-        if (cid && cid == hotcrp_user.cid) {
+        if (cid && cid == siteinfo.user.cid) {
             d.className = "gcdf-highlight";
             d.priority = 1;
         } else if (u && u.light)
@@ -769,7 +771,7 @@ function data_to_scatter(data) {
     if (!$.isArray(data)) {
         for (var i in data)
             i && data[i].forEach(function (d) { d.push(i); });
-        data = d3.merge(d3.values(data));
+        data = d3.merge(Object.values(data));
     }
     return data;
 }
@@ -926,8 +928,8 @@ function graph_scatter(selector, args) {
     }
 
     var hovered_data, hubble;
-    function mousemoved() {
-        var m = d3.mouse(this), p = data.quadtree.gfind(m, 4);
+    function mousemoved(event) {
+        var m = d3.pointer(event), p = data.quadtree.gfind(m, 4);
         if (p && (p.head || p.next))
             p = scatter_union(p);
         if (p != hovered_data) {
@@ -944,7 +946,7 @@ function graph_scatter(selector, args) {
         if (p) {
             hubble = hubble || make_bubble("", {color: "graphtip", "pointer-events": "none"});
             hubble.html(make_tooltip(p[2][0], p[2]))
-                .dir("b")
+                .anchor("s")
                 .near(hovers.node());
         } else if (hubble)
             hubble = hubble.remove() && null;
@@ -956,8 +958,8 @@ function graph_scatter(selector, args) {
         hovered_data = hubble = null;
     }
 
-    function mouseclick() {
-        clicker(hovered_data ? hovered_data[2].map(proj2) : null);
+    function mouseclick(event) {
+        clicker(hovered_data ? hovered_data[2].map(proj2) : null, event);
     }
 
     function highlight(event) {
@@ -1121,7 +1123,7 @@ function graph_bars(selector, args) {
         }
         if (p) {
             hubble = hubble || make_bubble("", {color: "graphtip", "pointer-events": "none"});
-            hubble.html(make_tooltip(p)).dir("h").near(hovers.node());
+            hubble.html(make_tooltip(p)).anchor("h").near(hovers.node());
         }
     }
 
@@ -1131,8 +1133,8 @@ function graph_bars(selector, args) {
         hovered_data = hubble = null;
     }
 
-    function mouseclick() {
-        clicker(hovered_data ? hovered_data[2] : null);
+    function mouseclick(event) {
+        clicker(hovered_data ? hovered_data[2] : null, event);
     }
 };
 
@@ -1347,7 +1349,7 @@ function graph_boxplot(selector, args) {
             hubble = hubble || make_bubble("", {color: "graphtip", "pointer-events": "none"});
             if (!p.th)
                 p.th = make_tooltip(p, p.p, p.d, p.c);
-            hubble.html(p.th).dir("h").near(hovers.filter(".box").node());
+            hubble.html(p.th).anchor("h").near(hovers.filter(".box").node());
         }
     }
 
@@ -1364,7 +1366,7 @@ function graph_boxplot(selector, args) {
             hubble = hubble || make_bubble("", {color: "graphtip", "pointer-events": "none"});
             if (!p.th)
                 p.th = make_tooltip(p[2][0], p[2].map(proj2), p[2].map(proj1), p[3]);
-            hubble.html(p.th).dir("h").near(hovers.filter(".outlier").node());
+            hubble.html(p.th).anchor("h").near(hovers.filter(".outlier").node());
         }
     }
 
@@ -1375,17 +1377,15 @@ function graph_boxplot(selector, args) {
     }
 
     function mouseclick(event) {
-        d3.event = event;
         var s;
         if (!hovered_data)
-            clicker(null);
+            clicker(null, event);
         else if (!hovered_data.q)
-            clicker(hovered_data[2].map(proj2));
+            clicker(hovered_data[2].map(proj2), event);
         else if ((s = args.x.ticks.search(hovered_data[0])))
-            clicker_go(hoturl("search", {q: s}));
+            clicker_go(hoturl("search", {q: s}), event);
         else
-            clicker(hovered_data.p);
-        d3.event = null;
+            clicker(hovered_data.p, event);
     }
 
     function highlight(event) {
@@ -1501,9 +1501,9 @@ function get_sample_tick_height(axis) {
 }
 
 function named_integer_ticks(map) {
-    var want_tilt = d3.values(map).length > 30
-        || d3.max(d3.keys(map).map(function (k) { return mtext(k).length; })) > 4;
-    var want_mclasses = d3.keys(map).some(function (k) { return mclasses(k); });
+    var want_tilt = Object.values(map).length > 30
+        || d3.max(Object.keys(map).map(function (k) { return mtext(k).length; })) > 4;
+    var want_mclasses = Object.keys(map).some(function (k) { return mclasses(k); });
 
     function mtext(value) {
         var m = map[value];
@@ -1561,7 +1561,7 @@ function named_integer_ticks(map) {
 
         // prevent label overlap
         if (want_tilt) {
-            var total_height = d3.values(map).length * (example_height * Math.cos(1.13446) + 8);
+            var total_height = Object.values(map).length * (example_height * Math.cos(1.13446) + 8);
             var alternation = Math.ceil(total_height / this.node().getBBox().width - 0.1);
             if (alternation > 1)
                 this.selectAll("g.tick").each(function (i) {

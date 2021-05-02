@@ -8,6 +8,7 @@ class Conflict_PaperColumn extends PaperColumn {
     private $not_me;
     private $show_description;
     private $editable = false;
+    private $basicheader = false;
     function __construct(Conf $conf, $cj) {
         parent::__construct($conf, $cj);
         $this->override = PaperColumn::OVERRIDE_IFEMPTY;
@@ -19,7 +20,17 @@ class Conflict_PaperColumn extends PaperColumn {
         if ($cj->edit ?? false) {
             $this->mark_editable();
         }
-        $this->editable = !!get($cj, "edit");
+    }
+    function add_decoration($decor) {
+        if ($decor === "basicheader") {
+            $this->basicheader = true;
+            return $this->__add_decoration($decor);
+        } else if ($decor === "edit") {
+            $this->mark_editable();
+            return $this->__add_decoration($decor);
+        } else {
+            return parent::add_decoration($decor);
+        }
     }
     function mark_editable() {
         $this->editable = true;
@@ -43,9 +54,9 @@ class Conflict_PaperColumn extends PaperColumn {
             return 0;
         }
     }
-    function compare(PaperInfo $a, PaperInfo $b, ListSorter $sorter) {
-        $act = $this->conflict_type($sorter->pl, $a);
-        $bct = $this->conflict_type($sorter->pl, $b);
+    function compare(PaperInfo $a, PaperInfo $b, PaperList $pl) {
+        $act = $this->conflict_type($pl, $a);
+        $bct = $this->conflict_type($pl, $b);
         if ($this->show_description) {
             return $bct - $act;
         } else {
@@ -54,7 +65,7 @@ class Conflict_PaperColumn extends PaperColumn {
     }
     function header(PaperList $pl, $is_text) {
         if ((!$this->show_user && !$this->not_me && !$this->editable)
-            || $pl->report_id() === "conflictassign") {
+            || $this->basicheader) {
             return "Conflict";
         } else if ($is_text) {
             return $pl->user->reviewer_text_for($this->contact) . " conflict";
@@ -111,7 +122,7 @@ class Conflict_PaperColumn extends PaperColumn {
         }
     }
 
-    static function expand($name, $user, $xfj, $m) {
+    static function expand($name, Contact $user, $xfj, $m) {
         if (!($fj = (array) $user->conf->basic_paper_column($m[1], $user))) {
             return null;
         }

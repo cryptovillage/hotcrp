@@ -8,22 +8,18 @@ class Option_PaperColumn extends PaperColumn {
     function __construct(Conf $conf, $cj) {
         parent::__construct($conf, $cj);
         $this->override = PaperColumn::OVERRIDE_IFEMPTY;
-        $this->opt = $conf->paper_opts->get($cj->option_id);
+        $this->opt = $conf->checked_option_by_id($cj->option_id);
     }
     function prepare(PaperList $pl, $visible) {
-        if (!$pl->user->can_view_some_option($this->opt))
+        if (!$pl->user->can_view_some_option($this->opt)) {
             return false;
-        $pl->qopts["options"] = true;
-        $this->fr = new FieldRender(0);
-        $optcj = $this->opt->list_display($this->row);
-        if (is_array($optcj) && isset($optcj["className"])) {
-            $this->className = $optcj["className"];
-        } else {
-            $this->className = "pl_option";
         }
+        $pl->qopts["options"] = true;
+        $this->fr = new FieldRender(0, $pl->user);
+        $this->className = preg_replace('/(?: +|\A)(?:pl-no-suggest|pl-prefer-row' . ($this->as_row ? '|plrd|plr|plc' : '') . ')(?= |\z)/', '', $this->className);
         return true;
     }
-    function compare(PaperInfo $a, PaperInfo $b, ListSorter $sorter) {
+    function compare(PaperInfo $a, PaperInfo $b, PaperList $pl) {
         return $this->opt->value_compare($a->option($this->opt),
                                          $b->option($this->opt));
     }
@@ -43,7 +39,7 @@ class Option_PaperColumn extends PaperColumn {
         }
 
         $fr = $this->fr;
-        $fr->clear(FieldRender::CFLIST | FieldRender::CFHTML | ($this->viewable_row() ? 0 : FieldRender::CFCOLUMN));
+        $fr->clear(FieldRender::CFLIST | FieldRender::CFHTML | ($this->as_row ? 0 : FieldRender::CFCOLUMN));
         $this->opt->render($fr, $ov);
         if ((string) $fr->value === "") {
             return "";
@@ -85,32 +81,26 @@ class Option_PaperColumnFactory {
         $cj = (array) $xfj;
         $cj["name"] = $opt->search_keyword();
         $cj["option_id"] = $opt->id;
-        $optcj = $opt->list_display(null);
-        if ($optcj === true) {
-            $cj["column"] = true;
-        } else if (is_array($optcj)) {
-            $cj += $optcj;
-        }
+        $cj["className"] = $opt->list_class;
+        $cj["row"] = strpos($opt->list_class, "pl-prefer-row") !== false;
+        $cj["column"] = !$cj["row"];
         return (object) $cj;
     }
-    static function expand($name, $user, $xfj, $m) {
+    static function expand($name, Contact $user, $xfj, $m) {
         list($ocolon, $oname) = [$m[1], $m[2]];
         if (!$ocolon && $oname === "options") {
             $x = [];
             foreach ($user->user_option_list() as $opt) {
-                if ($opt->display_position() !== false
-                    && $opt->list_display(null)
-                    && $opt->example_searches())
+                if ($opt->supports_list_display(PaperOption::LIST_DISPLAY_SUGGEST))
                     $x[] = self::option_json($xfj, $opt);
             }
             return $x;
         }
-        $opts = $user->conf->paper_opts->find_all($oname);
+        $opts = $user->conf->options()->find_all($oname);
         if (count($opts) == 1) {
             reset($opts);
             $opt = current($opts);
-            if ($opt->display_position() !== false
-                && $opt->list_display(null)) {
+            if ($opt->supports_list_display()) {
                 return self::option_json($xfj, $opt);
             }
             PaperColumn::column_error($user, "Option “" . htmlspecialchars($oname) . "” can’t be displayed.");
@@ -123,10 +113,11 @@ class Option_PaperColumnFactory {
         $cs = array_map(function ($opt) {
             return $opt->search_keyword();
         }, array_filter($user->user_option_list(), function ($opt) {
-            return $opt->display_position() !== false && $opt->example_searches();
+            return $opt->supports_list_display(PaperOption::LIST_DISPLAY_SUGGEST);
         }));
-        if (!empty($cs))
+        if (!empty($cs)) {
             array_unshift($cs, "options");
+        }
         return $cs;
     }
 }

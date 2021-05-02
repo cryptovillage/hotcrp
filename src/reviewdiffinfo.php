@@ -1,10 +1,13 @@
 <?php
 // reviewdiffinfo.php -- HotCRP class representing review diffs
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class ReviewDiffInfo {
+    /** @var Conf */
     public $conf;
+    /** @var PaperInfo */
     public $prow;
+    /** @var ReviewInfo */
     public $rrow;
     private $fields = [];
     private $newv = [];
@@ -14,7 +17,7 @@ class ReviewDiffInfo {
     static private $use_xdiff = null;
     static private $has_xpatch = null;
 
-    function __construct(PaperInfo $prow, ReviewInfo $rrow = null) {
+    function __construct(PaperInfo $prow, ReviewInfo $rrow) {
         $this->conf = $prow->conf;
         $this->prow = $prow;
         $this->rrow = $rrow;
@@ -49,7 +52,7 @@ class ReviewDiffInfo {
         }
     }
     function make_patch($dir = 0) {
-        if (!$this->rrow) {
+        if (!$this->rrow || !$this->rrow->reviewId) {
             return null;
         }
         self::check_xdiff();
@@ -123,10 +126,10 @@ class ReviewDiffInfo {
             if (str_ends_with($n, ":x")
                 && is_string($v)
                 && self::$has_xpatch
-                && ($fi = ReviewInfo::field_info(substr($n, 0, -2), $rrow->conf))
+                && ($fi = ReviewInfo::field_info(substr($n, 0, -2)))
                 && !$fi->has_options) {
                 $rrow->{$fi->id} = xdiff_string_bpatch($rrow->{$fi->id}, $v);
-            } else if (($fi = ReviewInfo::field_info($n, $rrow->conf))) {
+            } else if (($fi = ReviewInfo::field_info($n))) {
                 $rrow->{$fi->id} = (string) $v;
             } else {
                 $ok = false;

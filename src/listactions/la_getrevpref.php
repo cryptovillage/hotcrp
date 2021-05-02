@@ -19,7 +19,7 @@ class GetRevpref_ListAction extends ListAction {
         return [Ht::entry("pref", "", array("class" => "want-focus js-autosubmit", "size" => 4, "data-autosubmit-type" => "setpref"))
                 . " &nbsp;" . Ht::submit("fn", "Go", ["value" => "setpref", "class" => "uic js-submit-mark"])];
     }
-    function run(Contact $user, $qreq, $ssel) {
+    function run(Contact $user, Qrequest $qreq, SearchSelection $ssel) {
         // maybe download preferences for someone else
         $Rev = $user;
         if ($qreq->reviewer) {
@@ -40,11 +40,13 @@ class GetRevpref_ListAction extends ListAction {
         $has_conflict = false;
         $texts = [];
         foreach ($ssel->paper_set($user, ["topics" => 1, "reviewerPreference" => 1]) as $prow) {
-            if ($not_me && !$user->allow_administer($prow))
+            if ($not_me && !$user->allow_administer($prow)) {
                 continue;
+            }
             $item = ["paper" => $prow->paperId, "title" => $prow->title];
-            if ($not_me)
+            if ($not_me) {
                 $item["email"] = $Rev->email;
+            }
             $item["preference"] = unparse_preference($prow->preference($Rev));
             if ($prow->has_conflict($Rev)) {
                 $item["notes"] = "conflict";
@@ -56,17 +58,19 @@ class GetRevpref_ListAction extends ListAction {
                     $x .= prefix_word_wrap(" Authors: ", $prow->pretty_text_author_list(), "          ");
                 }
                 $x .= prefix_word_wrap("Abstract: ", rtrim($prow->abstract_text()), "          ");
-                if ($prow->topicIds != "")
+                if ($prow->topicIds !== "") {
                     $x .= prefix_word_wrap("  Topics: ", $prow->unparse_topics_text(), "          ");
+                }
                 $item["__postcomment__"] = $x;
             }
             $texts[] = $item;
         }
         $fields = array_merge(["paper", "title"], $not_me ? ["email"] : [], ["preference"], $has_conflict ? ["notes"] : []);
         $title = "revprefs";
-        if ($not_me)
+        if ($not_me) {
             $title .= "-" . (preg_replace('/@.*|[^\w@.]/', "", $Rev->email) ? : "user");
+        }
         return $user->conf->make_csvg($title, CsvGenerator::FLAG_ITEM_COMMENTS)
-            ->select($fields)->add($texts);
+            ->select($fields)->append($texts);
     }
 }

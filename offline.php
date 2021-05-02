@@ -1,10 +1,11 @@
 <?php
 // offline.php -- HotCRP offline review management page
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 require_once("src/initweb.php");
-if (!$Me->email)
+if (!$Me->email) {
     $Me->escape();
+}
 $rf = $Conf->review_form();
 
 
@@ -15,15 +16,18 @@ if ($Qreq->post && $Qreq->post_empty())
 
 // download blank review form action
 if (isset($Qreq->downloadForm)) {
-    $text = $rf->textFormHeader("blank") . $rf->textForm(null, null, $Me, null) . "\n";
-    downloadText($text, "review");
+    $Conf->make_csvg("review", CsvGenerator::TYPE_STRING)
+        ->set_inline(false)
+        ->add_string($rf->text_form_header(false) . $rf->text_form(null, null, $Me, null) . "\n")
+        ->emit();
+    exit;
 }
 
 
 // upload review form action
 if (isset($Qreq->uploadForm)
     && $Qreq->has_file("uploadedFile")
-    && $Qreq->post_ok()) {
+    && $Qreq->valid_post()) {
     $tf = ReviewValues::make_text($rf, $Qreq->file_contents("uploadedFile"),
                         $Qreq->file_filename("uploadedFile"));
     while ($tf->parse_text($Qreq->override))
@@ -65,7 +69,7 @@ function setTagIndexes(Contact $user, $qreq) {
 }
 if ((isset($Qreq->setvote) || isset($Qreq->setrank))
     && $Me->is_reviewer()
-    && $Qreq->post_ok()) {
+    && $Qreq->valid_post()) {
     setTagIndexes($Me, $Qreq);
 }
 
@@ -74,7 +78,7 @@ $pastDeadline = !$Conf->time_review(null, $Me->isPC, true);
 
 if (!$Conf->time_review_open() && !$Me->privChair) {
     Conf::msg_error("The site is not open for review.");
-    go(hoturl("index"));
+    $Conf->redirect();
 }
 
 $Conf->header("Offline reviewing", "offline");
@@ -88,8 +92,9 @@ if ($Me->is_reviewer()) {
         PaperTable::echo_review_clickthrough();
         echo '</div>';
     }
-} else
+} else {
     $Conf->infoMsg("You aren’t registered as a reviewer or PC member for this conference, but for your information, you may download the review form anyway.");
+}
 
 
 echo '<table id="offlineform">';
@@ -109,7 +114,7 @@ echo "</td>\n";
 if ($Me->is_reviewer()) {
     $disabled = ($pastDeadline && !$Me->privChair ? " disabled" : "");
     echo "<td><h3>Upload filled-out forms</h3>\n",
-        Ht::form(hoturl_post("offline", "uploadForm=1")),
+        Ht::form($Conf->hoturl_post("offline", "uploadForm=1")),
         Ht::hidden("postnonempty", 1),
         '<input type="file" name="uploadedFile" accept="text/plain" size="30"', $disabled, '>&nbsp; ',
         Ht::submit("Go", array("disabled" => !!$disabled));
@@ -133,7 +138,7 @@ if ($Conf->setting("tag_rank") && $Me->is_reviewer()) {
 
     $disabled = ($pastDeadline && !$Me->privChair ? " disabled" : "");
     echo "<td><h3>Upload ranking file</h3>\n",
-        Ht::form(hoturl_post("offline", "setrank=1&amp;tag=%7E$ranktag")),
+        Ht::form($Conf->hoturl_post("offline", "setrank=1&amp;tag=%7E$ranktag")),
         Ht::hidden("upload", 1),
         '<input type="file" name="file" accept="text/plain" size="30"', $disabled, '>&nbsp; ',
         Ht::submit("Go", array("disabled" => !!$disabled));

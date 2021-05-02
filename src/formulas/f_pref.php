@@ -1,6 +1,6 @@
 <?php
 // formulas/f_pref.php -- HotCRP helper class for formula expressions
-// Copyright (c) 2009-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2009-2021 Eddie Kohler; see LICENSE.
 
 class Pref_Fexpr extends Fexpr {
     private $is_expertise;
@@ -30,8 +30,8 @@ class Pref_Fexpr extends Fexpr {
     function inferred_index() {
         return Fexpr::IDX_PC;
     }
-    function view_score(Contact $user) {
-        return VIEWSCORE_PC;
+    function viewable_by(Contact $user) {
+        return $user->isPC;
     }
     function compile(FormulaCompiler $state) {
         if (!$state->user->is_reviewer()) {

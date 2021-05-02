@@ -1,16 +1,22 @@
 <?php
 // pc_reviewerlist.php -- HotCRP helper classes for paper list content
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class ReviewerList_PaperColumn extends PaperColumn {
     private $pref = false;
     private $topics = false;
     function __construct(Conf $conf, $cj) {
         parent::__construct($conf, $cj);
-        if (isset($cj->options) && in_array("pref", $cj->options)) {
+    }
+    function add_decoration($decor) {
+        if ($decor[0] === "p" && in_array($decor, ["pref", "prefs", "preference", "preferences"])) {
             $this->pref = true;
-            $this->topics = in_array("topics", $cj->options)
-                || in_array("topic", $cj->options);
+            return $this->__add_decoration("prefs");
+        } else if ($decor === "topic" || $decor === "topics" || $decor === "topicscore") {
+            $this->topics = true;
+            return $this->__add_decoration("topics");
+        } else {
+            return parent::add_decoration($decor);
         }
     }
     function prepare(PaperList $pl, $visible) {
@@ -23,8 +29,9 @@ class ReviewerList_PaperColumn extends PaperColumn {
         $pl->qopts["reviewSignatures"] = true;
         if ($visible && $this->pref) {
             $pl->qopts["allReviewerPreference"] = true;
-            if ($this->topics && $pl->conf->has_topics())
+            if ($this->topics && $pl->conf->has_topics()) {
                 $pl->qopts["topics"] = true;
+            }
         }
         if ($pl->conf->review_blindness() === Conf::BLIND_OPTIONAL
             || $this->pref) {
@@ -41,7 +48,7 @@ class ReviewerList_PaperColumn extends PaperColumn {
         // see also search.php > getaction == "reviewers"
         $x = [];
         $pref = $pl->user->can_view_preference($row);
-        foreach ($row->reviews_by_display($pl->user) as $xrow) {
+        foreach ($row->reviews_as_display() as $xrow) {
             if ($pl->user->can_view_review_identity($row, $xrow)) {
                 $ranal = $pl->make_review_analysis($xrow, $row);
                 $t = $pl->user->reviewer_html_for($xrow) . " " . $ranal->icon_html(false);
@@ -60,7 +67,7 @@ class ReviewerList_PaperColumn extends PaperColumn {
     function text(PaperList $pl, PaperInfo $row) {
         $x = [];
         $pref = $pl->user->can_view_preference($row);
-        foreach ($row->reviews_by_display($pl->user) as $xrow) {
+        foreach ($row->reviews_as_display() as $xrow) {
             if ($pl->user->can_view_review_identity($row, $xrow)) {
                 $t = $pl->user->reviewer_text_for($xrow);
                 if ($pref) {

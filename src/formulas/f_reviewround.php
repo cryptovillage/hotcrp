@@ -1,6 +1,6 @@
 <?php
 // formulas/f_reviewround.php -- HotCRP helper class for formula expressions
-// Copyright (c) 2009-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2009-2021 Eddie Kohler; see LICENSE.
 
 class ReviewRound_Fexpr extends Fexpr {
     function __construct() {
@@ -9,8 +9,8 @@ class ReviewRound_Fexpr extends Fexpr {
     function inferred_index() {
         return Fexpr::IDX_PC;
     }
-    function view_score(Contact $user) {
-        return VIEWSCORE_PC;
+    function viewable_by(Contact $user) {
+        return $user->is_reviewer();
     }
     function compile(FormulaCompiler $state) {
         $rrow = $state->_rrow();

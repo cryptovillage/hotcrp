@@ -1,6 +1,6 @@
 <?php
 // pc_reviewdelegation.php -- HotCRP helper classes for paper list content
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class ReviewDelegation_PaperColumn extends PaperColumn {
     private $requester;
@@ -16,11 +16,10 @@ class ReviewDelegation_PaperColumn extends PaperColumn {
         return true;
     }
     function content(PaperList $pl, PaperInfo $row) {
-        global $Now;
         $rx = [];
         $row->ensure_reviewer_names();
         $old_overrides = $pl->user->add_overrides(Contact::OVERRIDE_CONFLICT);
-        foreach ($row->reviews_by_display($pl->user) as $rrow) {
+        foreach ($row->reviews_as_display() as $rrow) {
             if ($rrow->reviewType == REVIEW_EXTERNAL
                 && $rrow->requestedBy == $this->requester->contactId) {
                 if (!$pl->user->can_view_review_assignment($row, $rrow)) {
@@ -34,24 +33,22 @@ class ReviewDelegation_PaperColumn extends PaperColumn {
                 $ranal = $pl->make_review_analysis($rrow, $row);
                 $d = $rrow->status_description();
                 if ($rrow->reviewOrdinal) {
-                    $d = rtrim("#" . $rrow->unparse_ordinal() . " " . $d);
+                    $d = rtrim("#" . $rrow->unparse_ordinal_id() . " " . $d);
                 }
                 $d = $ranal->wrap_link($d, "uu nw");
-                if (!$rrow->reviewSubmitted
-                    && $rrow->timeApprovalRequested == 0) {
+                if ($rrow->reviewStatus < ReviewInfo::RS_DELIVERED) {
                     if ($rrow->reviewNeedsSubmit >= 0) {
                         $d = '<strong class="overdue">' . $d . '</strong>';
                     }
                     $pl->mark_has("need_review");
                     $row->ensure_reviewer_last_login();
-                    if (!$rrow->reviewLastLogin) {
+                    if (!$rrow->lastLogin) {
                         $login = 'never logged in';
                     } else {
-                        $login = 'activity ' . $pl->conf->unparse_time_relative((int) $rrow->reviewLastLogin);
+                        $login = 'activity ' . $pl->conf->unparse_time_relative($rrow->lastLogin);
                     }
                     $d .= ' <span class="hint">(' . $login . ')</span>';
-                } else if (!$rrow->reviewSubmitted
-                           && $rrow->timeApprovalRequested > 0) {
+                } else if ($rrow->reviewStatus === ReviewInfo::RS_DELIVERED) {
                     $d = '<strong>' . $d . '</strong>';
                 }
                 $rx[] = $t . ', ' . $d;

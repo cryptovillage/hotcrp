@@ -1,6 +1,6 @@
 <?php
 // formulas/f_topic.php -- HotCRP helper class for formula expressions
-// Copyright (c) 2009-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2009-2021 Eddie Kohler; see LICENSE.
 
 class Topic_Fexpr extends Fexpr {
     private $match;
@@ -22,7 +22,7 @@ class Topic_Fexpr extends Fexpr {
             if (str_starts_with($arg, ":")) {
                 $arg = substr($arg, 1);
             }
-            $w = new SearchWord($arg);
+            $w = new SearchWord($arg, $arg);
             if (strcasecmp($w->word, "any") === 0 && !$w->quoted) {
                 $ff->modifier = true;
             } else if (strcasecmp($w->word, "none") === 0 && !$w->quoted) {

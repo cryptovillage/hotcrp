@@ -1,6 +1,6 @@
 <?php
 // formula.php -- HotCRP helper class for formula expressions
-// Copyright (c) 2009-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2009-2021 Eddie Kohler; see LICENSE.
 
 class FormulaCall {
     /** @var Formula */
@@ -24,28 +24,32 @@ class FormulaCall {
 
     function __construct(Formula $formula, $kwdef, $name) {
         $this->formula = $formula;
-        $this->name = $kwdef->name;
+        $this->name = $kwdef ? $kwdef->name : "";
         $this->text = $name;
         $this->kwdef = $kwdef;
     }
+    /** @return MessageItem */
     function lerror($message_html) {
         return $this->formula->lerror($this->pos1, $this->pos2, $message_html);
     }
 }
 
-class Fexpr implements JsonSerializable {
+abstract class Fexpr implements JsonSerializable {
+    /** @var string */
     public $op = "";
     /** @var list<Fexpr> */
     public $args = [];
-    public $text;
     public $_format = false;
+    /** @var ?int */
     public $pos1;
+    /** @var ?int */
     public $pos2;
 
     const IDX_NONE = 0;
     const IDX_PC = 1;
     const IDX_REVIEW = 2;
     const IDX_MY = 4;
+    const IDX_TAGPC = 8;
 
     const FNULL = -1;
     const FERROR = -2;
@@ -94,9 +98,11 @@ class Fexpr implements JsonSerializable {
     function format() {
         return $this->_format;
     }
+    /** @return bool */
     function math_format() {
         return $this->_format !== self::FREVIEWER;
     }
+    /** @return bool */
     function unknown_format() {
         return $this->_format === false;
     }
@@ -132,7 +138,8 @@ class Fexpr implements JsonSerializable {
         foreach ($this->args as $a) {
             if ($a->typecheck($formula)) {
                 if ($ismath && !$a->math_format()) {
-                    $ok = $formula->fexpr_lerror($a, "Unusable in math expressions.");
+                    $formula->fexpr_lerror($a, "Unusable in math expressions.");
+                    $ok = false;
                 }
             } else {
                 $ok = false;
@@ -152,6 +159,7 @@ class Fexpr implements JsonSerializable {
         return null;
     }
 
+    /** @return int */
     function inferred_index() {
         $lt = 0;
         foreach ($this->args as $a) {
@@ -160,26 +168,25 @@ class Fexpr implements JsonSerializable {
         return $lt;
     }
 
-    function view_score(Contact $user) {
-        $score = VIEWSCORE_AUTHOR;
+    /** @return bool */
+    function viewable_by(Contact $user) {
         foreach ($this->args as $e) {
-            $score = min($score, $e->view_score($user));
+            if (!$e->viewable_by($user))
+                return false;
         }
-        return $score;
+        return true;
     }
 
     static function cast_bool($t) {
         return "($t !== null ? (bool) $t : null)";
     }
 
+    /** @return bool */
     function matches_at_most_once() {
         return false;
     }
 
-    function compile(FormulaCompiler $state) {
-        assert("no compile for $this->op" && false);
-        return "null";
-    }
+    abstract function compile(FormulaCompiler $state);
 
     /** @param ?Fexpr $other_expr */
     function compiled_comparator($cmp, Conf $conf, $other_expr = null) {
@@ -232,9 +239,11 @@ class Constant_Fexpr extends Fexpr {
         if ($this->_format === self::FREVTYPE
             && is_string($this->x)
             && !$this->_check_revtype()) {
-            return $formula->fexpr_lerror($this, "Unknown review type.");
+            $formula->fexpr_lerror($this, "Unknown review type.");
+            return false;
         } else if ($this->_format === false) {
-            return $formula->fexpr_lerror($this, "Undefined.");
+            $formula->fexpr_lerror($this, "Undefined.");
+            return false;
         } else {
             return true;
         }
@@ -266,6 +275,9 @@ class Constant_Fexpr extends Fexpr {
             return;
         }
         $this->_format = $format;
+    }
+    function viewable_by(Contact $user) {
+        return true;
     }
     function compile(FormulaCompiler $state) {
         return $this->x;
@@ -314,11 +326,9 @@ class Ternary_Fexpr extends Fexpr {
     function typecheck_format() {
         return self::common_format([$this->args[1], $this->args[2]]);
     }
-    function view_score(Contact $user) {
-        $t = $this->args[0]->view_score($user);
-        $tt = $this->args[1]->view_score($user);
-        $tf = $this->args[2]->view_score($user);
-        return min($t, max($tt, $tf));
+    function viewable_by(Contact $user) {
+        return $this->args[2]->viewable_by($user)
+            || ($this->args[0]->viewable_by($user) && $this->args[1]->viewable_by($user));
     }
     function compile(FormulaCompiler $state) {
         $t = $state->_addltemp($this->args[0]->compile($state));
@@ -391,8 +401,8 @@ class Or_Fexpr extends Fexpr {
     function typecheck_format() {
         return self::common_format($this->args);
     }
-    function view_score(Contact $user) {
-        return $this->args[0]->view_score($user);
+    function viewable_by(Contact $user) {
+        return $this->args[0]->viewable_by($user) || $this->args[1]->viewable_by($user);
     }
     function compile(FormulaCompiler $state) {
         $t1 = $state->_addltemp($this->args[0]->compile($state));
@@ -436,15 +446,15 @@ class Additive_Fexpr extends Fexpr {
         return $this->typecheck_arguments($formula, true);
     }
     function typecheck_format() {
-        $a0 = $this->args[0];
-        $f0 = $a0->format();
-        $d0 = is_int($f0) && $f0 >= self::FDATE && $f0 <= self::FTIMEDELTA;
-        $a1 = $this->args[1];
-        $f1 = $a1->format();
-        $d1 = is_int($f1) && $f1 >= self::FDATE && $f1 <= self::FTIMEDELTA;
+        $fx0 = $this->args[0]->format();
+        $fx1 = $this->args[1]->format();
+        $f0 = is_int($fx0) ? $fx0 : 0;
+        $f1 = is_int($fx1) ? $fx1 : 0;
+        $d0 = $f0 >= self::FDATE && $f0 <= self::FTIMEDELTA;
+        $d1 = $f1 >= self::FDATE && $f1 <= self::FTIMEDELTA;
         if ((!$d0 && !$d1)
-            || (!$d0 && $f0)
-            || (!$d1 && $f1)) {
+            || (!$d0 && $fx0)
+            || (!$d1 && $fx1)) {
             return null;
         } else if ($this->op === "-"
                    && $d0 && !($f0 & self::FDELTABIT)
@@ -638,7 +648,7 @@ class Aggregate_Fexpr extends Fexpr {
             && !$ff->modifier[0]) {
             $ff->modifier[0] = Fexpr::IDX_PC;
             return true;
-        } else if ($arg === ".re"
+        } else if (in_array($arg, [".re", ".rev", ".review"])
                    && !$ff->modifier[0]) {
             $ff->modifier[0] = Fexpr::IDX_REVIEW;
             return true;
@@ -699,10 +709,12 @@ class Aggregate_Fexpr extends Fexpr {
         $ok = $this->typecheck_arguments($formula);
         if (($this->op !== "argmin" && $this->op !== "argmax")
             && !$this->args[0]->math_format()) {
-            $ok = $formula->fexpr_lerror($this->args[0], "Unusable in math expressions.");
+            $formula->fexpr_lerror($this->args[0], "Unusable in math expressions.");
+            $ok = false;
         }
         if (count($this->args) > 1 && !$this->args[1]->math_format()) {
-            $ok = $formula->fexpr_lerror($this->args[1], "Unusable in math expressions.");
+            $formula->fexpr_lerror($this->args[1], "Unusable in math expressions.");
+            $ok = false;
         }
         if ($ok && !$this->index_type) {
             $lt = parent::inferred_index();
@@ -712,6 +724,13 @@ class Aggregate_Fexpr extends Fexpr {
                 $formula->fexpr_lerror($this, "Can’t infer index, specify “{$this->op}.pc” or “{$this->op}.re”.");
                 $ok = false;
             }
+        }
+        if ($ok
+            && $this->index_type === self::IDX_PC
+            && ($this->op === "sum" || $this->op === "count")
+            && $this->args[0] instanceof Tag_Fexpr
+            && $this->args[0]->inferred_index()) {
+            $this->index_type = self::IDX_TAGPC;
         }
         return $ok;
     }
@@ -778,7 +797,7 @@ class Aggregate_Fexpr extends Fexpr {
         } else if ($this->op === "count") {
             return ["0", "(~l~ !== null && ~l~ !== false ? ~r~ + 1 : ~r~)"];
         } else if ($this->op === "sum") {
-            return ["null", "(~l~ !== null ? (~r~ !== null ? ~r~ + ~l~ : ~l~) : ~r~)"];
+            return ["null", "(~l~ !== null ? (~r~ !== null ? ~r~ + ~l~ : +~l~) : ~r~)"];
         } else if ($this->op === "avg") {
             return ["[0, 0]", "(~l~ !== null ? [~r~[0] + ~l~, ~r~[1] + 1] : ~r~)",
                     "(~x~[1] ? ~x~[0] / ~x~[1] : null)"];
@@ -791,7 +810,7 @@ class Aggregate_Fexpr extends Fexpr {
                     $q = "1 - $q";
                 }
             }
-            return ["[]", "if (~l~ !== null)\n  array_push(~r~, ~l~);",
+            return ["[]", "if (~l~ !== null)\n  array_push(~r~, +~l~);",
                     "Aggregate_Fexpr::quantile(~x~, $q)"];
         } else if ($this->op === "wavg") {
             return ["[0, 0]", "(~l~ !== null && ~l1~ !== null ? [~r~[0] + ~l~ * ~l1~, ~r~[1] + ~l1~] : ~r~)",
@@ -840,8 +859,8 @@ class Score_Fexpr extends Fexpr {
     function inferred_index() {
         return self::IDX_REVIEW;
     }
-    function view_score(Contact $user) {
-        return $this->field->view_score;
+    function viewable_by(Contact $user) {
+        return $this->field->view_score > $user->permissive_view_score_bound();
     }
     function compile(FormulaCompiler $state) {
         if ($this->field->view_score <= $state->user->permissive_view_score_bound()) {
@@ -850,16 +869,17 @@ class Score_Fexpr extends Fexpr {
         $fid = $this->field->id;
         $state->_ensure_rrow_score($fid);
         $rrow = $state->_rrow();
-        $rrow_vsb = $state->_rrow_view_score_bound();
-        if ($this->field->allow_empty) {
-            return "({$this->field->view_score} > $rrow_vsb ? (int) {$rrow}->$fid : null)";
-        } else {
+        $rrow_vsb = $state->_rrow_view_score_bound(true);
+        if ($this->field->required) {
             return "({$this->field->view_score} > $rrow_vsb && ({$rrow}->$fid ?? 0) ? (int) {$rrow}->$fid : null)";
+        } else {
+            return "({$this->field->view_score} > $rrow_vsb ? (int) {$rrow}->$fid : null)";
         }
     }
 }
 
 class Let_Fexpr extends Fexpr {
+    /** @var VarDef_Fexpr */
     private $vardef;
     function __construct(VarDef_Fexpr $vardef, Fexpr $val, Fexpr $body) {
         parent::__construct("let", [$val, $body]);
@@ -876,6 +896,9 @@ class Let_Fexpr extends Fexpr {
         $ok1 = $this->args[1]->typecheck($formula);
         $this->_format = $ok0 && $ok1 ? $this->args[1]->format() : self::FERROR;
         return $ok0 && $ok1;
+    }
+    function viewable_by(Contact $user) {
+        return $this->args[1]->viewable_by($user);
     }
     function compile(FormulaCompiler $state) {
         $this->vardef->ltemp = $state->_addltemp($this->args[0]->compile($state));
@@ -902,12 +925,16 @@ class VarDef_Fexpr extends Fexpr {
         assert($this->_index_type !== null);
         return $this->_index_type;
     }
+    function compile(FormulaCompiler $state) {
+        assert(false);
+    }
     function jsonSerialize() {
         return ["op" => "vardef", "name" => $this->name];
     }
 }
 
 class VarUse_Fexpr extends Fexpr {
+    /** @var VarDef_Fexpr */
     private $vardef;
     function __construct(VarDef_Fexpr $vardef) {
         parent::__construct("varuse");
@@ -929,12 +956,18 @@ class VarUse_Fexpr extends Fexpr {
 }
 
 class FormulaCompiler {
+    /** @var Conf */
     public $conf;
+    /** @var Contact */
     public $user;
+    /** @var Tagger */
     public $tagger;
     private $gvar;
+    /** @var list<string> */
     private $g0stmt;
+    /** @var list<string> */
     public $gstmt;
+    /** @var list<string> */
     public $lstmt;
     public $index_type;
     public $indexed;
@@ -942,17 +975,21 @@ class FormulaCompiler {
     private $_maxlprefix;
     private $_lflags;
     public $indent = 2;
-    public $queryOptions = array();
+    public $queryOptions = [];
     public $tagrefs = null;
     private $_stack;
+    /** @var ?FormulaCompiler */
     public $term_compiler;
+    /** @var ?list<Formula> */
     public $term_list;
     public $term_error = false;
 
     const LFLAG_RROW = 1;
     const LFLAG_RROW_VSB = 2;
-    const LFLAG_CID = 4;
-    const LFLAG_PREFERENCES = 8;
+    const LFLAG_RROW_VSBS = 4;
+    const LFLAG_ANYCID = 8;
+    const LFLAG_CID = 16;
+    const LFLAG_PREFERENCES = 32;
 
     function __construct(Contact $user) {
         $this->conf = $user->conf;
@@ -988,8 +1025,8 @@ class FormulaCompiler {
         }
     }
     function define_gvar($name, $expr) {
-        if (preg_match(',\A\$?(.*[^A-Ya-z0-9_].*)\z,', $name, $m)) {
-            $name = '$' . preg_replace_callback(',[^A-Ya-z0-9_],', function ($m) { return "Z" . dechex(ord($m[0])); }, $m[1]);
+        if (preg_match('/\A\$?(\d.*|.*[^A-Ya-z0-9_].*)\z/', $name, $m)) {
+            $name = '$' . preg_replace_callback('/\A\d|[^A-Ya-z0-9_]/', function ($m) { return "Z" . dechex(ord($m[0])); }, $m[1]);
         } else {
             $name = $name[0] === "$" ? $name : '$' . $name;
         }
@@ -1006,12 +1043,12 @@ class FormulaCompiler {
         }
         return '$pc';
     }
-    function _add_vsreviews() {
-        if ($this->check_gvar('$vsreviews')) {
+    function _add_vreviews() {
+        if ($this->check_gvar('$vreviews')) {
             $this->queryOptions["reviewSignatures"] = true;
-            $this->gstmt[] = "\$vsreviews = " . $this->_prow() . "->viewable_submitted_reviews_by_user(\$contact);";
+            $this->gstmt[] = "\$vreviews = " . $this->_prow() . "->viewable_reviews_as_display(\$contact);";
         }
-        return '$vsreviews';
+        return '$vreviews';
     }
     function _add_preferences() {
         $this->queryOptions["allReviewerPreference"] = true;
@@ -1041,13 +1078,34 @@ class FormulaCompiler {
         }
         return '$tags';
     }
-    function _add_now() {
-        if ($this->check_gvar('$now')) {
-            $this->gstmt[] = "global \$Now;";
+    function _add_tag_pc() {
+        if ($this->check_gvar('$tag_pc')) {
+            $tags = $this->_add_tags();
+            $pc = $this->_add_pc();
+            $this->gstmt[] = "\$tag_pc = [];";
+            $this->gstmt[] = "if ({$tags} !== \"\") {";
+            $this->gstmt[] = "  preg_match_all(\"/(?<= )\d+/\", {$tags}, \$m);";
+            $this->gstmt[] = "  foreach (\$m[0] as \$c) {";
+            $this->gstmt[] = "    if ((\$p = {$pc}[(int) \$c] ?? null))";
+            $this->gstmt[] = "      \$tag_pc[\$p->contactId] = \$p;";
+            $this->gstmt[] = "  }";
+            $this->gstmt[] = "}";
         }
-        return '$Now';
+        return '$tag_pc';
+    }
+    function _add_option_value(PaperOption $o) {
+        $n = '$ov_' . ($o->id < 0 ? "m" . -$o->id : $o->id);
+        if ($this->check_gvar($n)) {
+            $this->queryOptions["options"] = true;
+            $this->gstmt[] = "$n = " . $this->_prow() . "->option({$o->id});";
+        }
+        return $n;
+    }
+    function _add_now() {
+        return 'Conf::$now';
     }
 
+    /** @return string */
     function loop_cid($aggregate = false) {
         $this->indexed = true;
         if ($this->index_type === Fexpr::IDX_NONE) {
@@ -1055,12 +1113,11 @@ class FormulaCompiler {
         } else if ($this->index_type === Fexpr::IDX_MY) {
             return (string) $this->user->contactId;
         } else {
-            if (!$aggregate) {
-                $this->_lflags |= self::LFLAG_CID;
-            }
+            $this->_lflags |= self::LFLAG_ANYCID | ($aggregate ? 0 : self::LFLAG_CID);
             return '~i~';
         }
     }
+
     function _prow() {
         if ($this->term_compiler) {
             $this->term_error = true;
@@ -1070,24 +1127,25 @@ class FormulaCompiler {
     function _rrow() {
         $this->indexed = true;
         if ($this->index_type === Fexpr::IDX_NONE) {
-            return $this->define_gvar("rrow", $this->_prow() . "->review_of_user(\$rrow_cid)");
+            return $this->define_gvar("rrow", $this->_prow() . "->review_by_user(\$rrow_cid)");
         } else if ($this->index_type === Fexpr::IDX_MY) {
-            return $this->define_gvar("myrrow", $this->_prow() . "->review_of_user(" . $this->user->contactId . ")");
+            return $this->define_gvar("myrrow", $this->_prow() . "->review_by_user(" . $this->user->contactId . ")");
         } else {
-            $this->_add_vsreviews();
-            $this->_lflags |= self::LFLAG_RROW | self::LFLAG_CID;
+            $this->_lflags |= self::LFLAG_RROW;
             return "\$rrow_{$this->_lprefix}";
         }
     }
-    function _rrow_view_score_bound() {
+    function _rrow_view_score_bound($submitted = false) {
         $rrow = $this->_rrow();
+        $sfx = $submitted ? "s" : "";
+        $clause = $submitted ? " && {$rrow}->reviewSubmitted" : "";
         if ($this->index_type === Fexpr::IDX_NONE) {
-            return $this->define_gvar("rrow_vsb", "({$rrow} ? \$contact->view_score_bound(\$prow, {$rrow}) : " . VIEWSCORE_EMPTYBOUND . ")");
+            return $this->define_gvar("rrow_vsb{$sfx}", "({$rrow}{$clause} ? \$contact->view_score_bound(\$prow, {$rrow}) : " . VIEWSCORE_EMPTYBOUND . ")");
         } else if ($this->index_type === Fexpr::IDX_MY) {
-            return $this->define_gvar("myrrow_vsb", "({$rrow} ? \$contact->view_score_bound(\$prow, {$rrow}) : " . VIEWSCORE_EMPTYBOUND . ")");
+            return $this->define_gvar("myrrow_vsb{$sfx}", "({$rrow}{$clause} ? \$contact->view_score_bound(\$prow, {$rrow}) : " . VIEWSCORE_EMPTYBOUND . ")");
         } else {
-            $this->_lflags |= self::LFLAG_RROW_VSB | self::LFLAG_CID;
-            return "\$rrow_vsb_{$this->_lprefix}";
+            $this->_lflags |= $submitted ? self::LFLAG_RROW_VSBS : self::LFLAG_RROW_VSB;
+            return "\$rrow_vsb{$sfx}_{$this->_lprefix}";
         }
     }
     function _ensure_rrow_score($fid) {
@@ -1139,21 +1197,18 @@ class FormulaCompiler {
 
     function loop_variable($index_types) {
         $g = array();
-        assert($index_types === ($index_types & (Fexpr::IDX_REVIEW | Fexpr::IDX_PC)));
-        if ($index_types & Fexpr::IDX_PC) {
-            $g[] = $this->_add_pc();
-        }
-        if ($index_types & Fexpr::IDX_REVIEW) {
-            $g[] = $this->_add_vsreviews();
-        }
-        if (count($g) > 1) {
-            return join(" + ", $g);
-        } else if (!empty($g)) {
-            return $g[0];
+        if ($index_types === Fexpr::IDX_TAGPC) {
+            return $this->_add_tag_pc();
+        } else if ($index_types === Fexpr::IDX_REVIEW) {
+            return $this->_add_vreviews();
+        } else if ($index_types === Fexpr::IDX_PC) {
+            return $this->_add_pc();
         } else {
+            assert($index_types === 0);
             return $this->define_gvar("trivial_loop", "[0]");
         }
     }
+
     function _compile_loop($initial_value, $combiner, Aggregate_Fexpr $e) {
         $t_result = $this->_addltemp($initial_value, true);
         $combiner = str_replace("~r~", $t_result, $combiner);
@@ -1184,6 +1239,10 @@ class FormulaCompiler {
         }
 
         if ($this->_lflags) {
+            if ($this->_lflags & self::LFLAG_RROW_VSBS) {
+                $result = $this->_lflags & self::LFLAG_RROW_VSB ? "\$rrow_vsb_{$p}" : "\$contact->view_score_bound(\$prow, \$rrow_{$p})";
+                array_unshift($this->lstmt, "\$rrow_vsbs_{$p} = \$rrow_{$p} && \$rrow_{$p}->reviewSubmitted ? {$result} : " . VIEWSCORE_EMPTYBOUND . ";");
+            }
             if ($this->_lflags & self::LFLAG_RROW_VSB) {
                 array_unshift($this->lstmt, "\$rrow_vsb_{$p} = \$rrow_{$p} ? \$contact->view_score_bound(\$prow, \$rrow_{$p}) : " . VIEWSCORE_EMPTYBOUND . ";");
             }
@@ -1191,9 +1250,13 @@ class FormulaCompiler {
                 if ($this->index_type === Fexpr::IDX_REVIEW) {
                     $v = "\$v$p";
                 } else {
-                    $v = "(\$vsreviews[\$i$p] ?? null)";
+                    $v = "\$prow->viewable_review_by_user(\$i$p, \$contact)";
                 }
                 array_unshift($this->lstmt, "\$rrow_{$p} = $v;");
+            }
+            if (($this->_lflags & self::LFLAG_ANYCID)
+                && $this->index_type === Fexpr::IDX_REVIEW) {
+                array_unshift($this->lstmt, "\$i{$p} = \$contact->can_view_review_identity(\$prow, \$v{$p}) ? \$v{$p}->contactId : null;");
             }
             if ($this->_lflags & self::LFLAG_PREFERENCES) {
                 $loopstmt[] = "\$preferences_{$p} = \$prow->viewable_preferences(\$contact"
@@ -1206,8 +1269,12 @@ class FormulaCompiler {
             $loop = "foreach (\$extractor_results as \$v$p) " . $this->_join_lstmt(true);
         } else {
             $g = $this->loop_variable($this->index_type);
-            $loop = "foreach ($g as \$i$p => \$v$p) "
-                . str_replace("~i~", "\$i$p", $this->_join_lstmt(true));
+            if ($this->index_type === Fexpr::IDX_REVIEW) {
+                $loop = "foreach ($g as \$v$p) ";
+            } else {
+                $loop = "foreach ($g as \$i$p => \$v$p) ";
+            }
+            $loop .= str_replace("~i~", "\$i$p", $this->_join_lstmt(true));
             $loop = str_replace("({$g}[\$i$p] ?? null)", "\$v$p", $loop);
         }
         $loopstmt[] = $loop;
@@ -1217,6 +1284,7 @@ class FormulaCompiler {
         return $t_result;
     }
 
+    /** @return string */
     function _compile_my(Fexpr $e) {
         $p = $this->_push();
         $this->index_type = Fexpr::IDX_MY;
@@ -1227,6 +1295,7 @@ class FormulaCompiler {
         return $t;
     }
 
+    /** @return string */
     function statement_text() {
         return join("\n  ", $this->g0stmt)
             . (empty($this->g0stmt) || empty($this->gstmt) ? "" : "\n  ")
@@ -1242,11 +1311,14 @@ class FormulaParse {
     public $index_type;
     public $format = Fexpr::FERROR;
     public $tagrefs;
+    /** @var list<MessageItem> */
     public $lerrors;
 }
 
-class Formula implements Abbreviator, JsonSerializable {
+class Formula implements JsonSerializable {
+    /** @var Conf */
     public $conf;
+    /** @var ?Contact */
     public $user;
 
     public $formulaId;
@@ -1255,14 +1327,18 @@ class Formula implements Abbreviator, JsonSerializable {
     public $createdBy = 0;
     public $timeModified = 0;
 
+    /** @var bool */
     private $_allow_indexed;
     private $_abbreviation;
 
+    /** @var int */
     private $_depth = 0;
     private $_macro;
     private $_bind;
+    /** @var list<MessageItem> */
     private $_lerrors;
 
+    /** @var ?FormulaParse */
     private $_parse;
     private $_format;
 
@@ -1271,7 +1347,8 @@ class Formula implements Abbreviator, JsonSerializable {
 
     const BINARY_OPERATOR_REGEX = '/\A(?:[-\+\/%^]|\*\*?|\&\&?|\|\|?|==?|!=|<[<=]?|>[>=]?|≤|≥|≠)/';
 
-    const DEBUG = 0;
+    /** @var bool */
+    const DEBUG = false;
 
     static public $opprec = array(
         "**" => 13,
@@ -1301,10 +1378,9 @@ class Formula implements Abbreviator, JsonSerializable {
     );
 
     const ALLOW_INDEXED = 1;
+    /** @param ?string $expr
+     * @param int $flags */
     function __construct($expr = null, $flags = 0) {
-        if ($flags === true) {
-            $flags = self::ALLOW_INDEXED; // XXX backward compat
-        }
         assert(is_int($flags));
         if ($expr !== null) {
             $this->expression = $expr;
@@ -1317,11 +1393,10 @@ class Formula implements Abbreviator, JsonSerializable {
         $this->formulaId = (int) $this->formulaId;
     }
 
-    /** @return ?Formula */
+    /** @param Dbl_Result $result
+     * @return ?Formula */
     static function fetch(Conf $conf, $result) {
-        $formula = $result ? $result->fetch_object("Formula") : null;
-        '@phan-var ?Formula $formula';
-        if ($formula) {
+        if (($formula = $result->fetch_object("Formula"))) {
             $formula->conf = $conf;
             if (!is_int($formula->formulaId)) {
                 $formula->merge();
@@ -1335,15 +1410,16 @@ class Formula implements Abbreviator, JsonSerializable {
     }
 
 
-    function abbreviations_for($name, $data) {
-        return $this->abbreviation();
+    function assign_search_keyword(AbbreviationMatcher $am) {
+        assert($this->_abbreviation === null);
+        $e = new AbbreviationEntry($this->name, $this, Conf::MFLAG_FORMULA);
+        $this->_abbreviation = $am->ensure_entry_keyword($e, AbbreviationMatcher::KW_CAMEL);
     }
 
     function abbreviation() {
         if ($this->_abbreviation === null) {
-            $aclass = new AbbreviationClass;
-            $aclass->force = true;
-            $this->_abbreviation = $this->conf->abbrev_matcher()->unique_abbreviation($this->name, $this, $aclass);
+            $this->conf->abbrev_matcher();
+            assert($this->_abbreviation !== null);
         }
         return $this->_abbreviation;
     }
@@ -1358,16 +1434,21 @@ class Formula implements Abbreviator, JsonSerializable {
         $this->_parse = null;
     }
 
+    /** @return MessageItem */
     function lerror($pos1, $pos2, $message_html) {
         $len = strlen($this->expression);
-        $this->_lerrors[] = [$len + $pos1, $len + $pos2, $message_html];
-        return false;
+        $mi = new MessageItem(null, $message_html, MessageSet::ERROR);
+        $mi->pos1 = $len + $pos1;
+        $mi->pos2 = $len + $pos2;
+        $this->_lerrors[] = $mi;
+        return $mi;
     }
 
     function fexpr_lerror(Fexpr $expr, $message_html) {
         return $this->lerror($expr->pos1, $expr->pos2, $message_html);
     }
 
+    /** @return FormulaParse */
     private function parse(Contact $user) {
         assert(!$this->conf || $this->conf === $user->conf);
         assert($this->_depth === 0);
@@ -1429,21 +1510,25 @@ class Formula implements Abbreviator, JsonSerializable {
         return $fp;
     }
 
+    /** @return bool */
     function check(Contact $user = null) {
-        if ($this->_parse === null || ($user && $user !== $this->user)) {
-            $this->_parse = $this->parse($user ?? $this->user);
+        $user = $user ?? $this->user;
+        assert($user !== null);
+        if ($this->_parse === null || $user !== $this->user) {
+            $this->_parse = $this->parse($user);
             $this->_format = $this->_parse->format;
         }
         return $this->_format !== Fexpr::FERROR;
     }
 
+    /** @return string */
     function error_html() {
         if ($this->check()) {
             return "";
         } else {
             $x = [];
-            foreach ($this->_parse->lerrors as $e) {
-                $x[] = Ht::contextual_diagnostic($this->expression, $e[0], $e[1], $e[2]);
+            foreach ($this->_parse->lerrors as $mi) {
+                $x[] = Ht::contextual_diagnostic($this->expression, $mi->pos1, $mi->pos2, $mi->message);
             }
             return "<pre>" . join("", $x) . "</pre>";
         }
@@ -1453,7 +1538,7 @@ class Formula implements Abbreviator, JsonSerializable {
         $pos = 0;
         $len = strlen($t);
         while ($pos !== $len && strpos($span, $t[$pos]) === false) {
-            $x = SearchSplitter::span_balanced_parens($t, $pos, function ($ch) use ($span) {
+            $x = SearchSplitter::span_balanced_parens($t, $pos, function ($ch, $pos) use ($span) {
                 return strpos($span, $ch) !== false;
             });
             $pos = max($pos + 1, $x);
@@ -1535,8 +1620,6 @@ class Formula implements Abbreviator, JsonSerializable {
             return [$t, "", $t];
     }
 
-    const ARGUMENT_REGEX = '((?:"[^"]*"|[-#a-zA-Z0-9_.@!*?~]+|:(?="|[-#a-zA-Z0-9_.@+!*\/?~]+(?![()])))+)';
-
     private function _parse_function(&$t, $name, $kwdef) {
         $ff = new FormulaCall($this, $kwdef, $name);
         $args = $kwdef->args ?? false;
@@ -1544,12 +1627,12 @@ class Formula implements Abbreviator, JsonSerializable {
         $ff->pos1 = $pos1 = -strlen($t);
         $t = substr($t, strlen($name));
 
-        if ($kwdef->parse_modifier_callback ?? false) {
+        if ($kwdef->parse_modifier_function ?? false) {
             $xt = $name === "#" ? "#" . $t : $t;
             while (preg_match('/\A([.#:](?:"[^"]*(?:"|\z)|[-a-zA-Z0-9_.@!*?~:\/#]+))(.*)/s', $xt, $m)
                    && ($args !== false || !preg_match('/\A\s*\(/s', $m[2]))) {
                 $ff->pos2 = -strlen($m[2]);
-                if (call_user_func($kwdef->parse_modifier_callback, $ff, $m[1], $m[2], $this)) {
+                if (call_user_func($kwdef->parse_modifier_function, $ff, $m[1], $m[2], $this)) {
                     $t = $xt = $m[2];
                 } else {
                     break;
@@ -1573,14 +1656,14 @@ class Formula implements Abbreviator, JsonSerializable {
         }
         $ff->pos2 = -strlen($t);
 
-        if (isset($kwdef->callback)) {
-            if ($kwdef->callback[0] === "+") {
-                $class = substr($kwdef->callback, 1);
+        if (isset($kwdef->function)) {
+            if ($kwdef->function[0] === "+") {
+                $class = substr($kwdef->function, 1);
                 /** @phan-suppress-next-line PhanTypeExpectedObjectOrClassName */
                 $e = new $class($ff, $this);
             } else {
                 $before = count($this->_lerrors);
-                $e = call_user_func($kwdef->callback, $ff, $this);
+                $e = call_user_func($kwdef->function, $ff, $this);
                 if (!$e && count($this->_lerrors) === $before) {
                     $this->lerror($ff->pos1, $ff->pos2, "Parse error.");
                 }
@@ -1635,7 +1718,7 @@ class Formula implements Abbreviator, JsonSerializable {
 
     private function _reviewer_base($t) {
         $t = strtolower($t);
-        if (preg_match('/\A(?:(?:re|rev|review)(?:|type)|rtype)\z/i', $t)) {
+        if (preg_match('/\A(?:r|re|rev|review)type\z/i', $t)) {
             return new Revtype_Fexpr;
         } else if (preg_match('/\A(?:|r|re|rev|review)round\z/i', $t)) {
             return new ReviewRound_Fexpr;
@@ -1680,8 +1763,8 @@ class Formula implements Abbreviator, JsonSerializable {
         if ($rsm->review_type()) {
             $es[] = new Equality_Fexpr("==", new RevType_Fexpr, new Constant_Fexpr($rsm->review_type(), Fexpr::FREVTYPE));
         }
-        if ($rsm->round) {
-            $es[] = new In_Fexpr(new ReviewRound_Fexpr, $rsm->round);
+        if ($rsm->round_list !== null) {
+            $es[] = new In_Fexpr(new ReviewRound_Fexpr, $rsm->round_list);
         }
 
         $e1 = empty($es) ? null : $es[0];
@@ -1696,46 +1779,45 @@ class Formula implements Abbreviator, JsonSerializable {
         }
     }
 
-    private function _parse_option($pos1, $pos2, $text) {
-        $os = Option_SearchTerm::analyze($this->conf, $text);
-        foreach ($os->warnings as $w) {
-            $this->lerror($pos1, $pos2, $w);
+    private function _parse_one_option($pos1, &$t, PaperOption $opt) {
+        $fc = new FormulaCall($this, null, $opt->search_keyword());
+        $fc->pos1 = $pos1;
+        $fc->pos2 = -strlen($t);
+        $nerrors = count($this->_lerrors);
+        if (($fex = $opt->parse_fexpr($fc, $t))) {
+            return $fex;
+        } else if (count($this->_lerrors) === $nerrors) {
+            $fc->lerror("This submission field can’t be used in formulas.");
+            return Constant_Fexpr::cerror($fc->pos1, $fc->pos2);
         }
-        $e = null;
-        foreach ($os->os as $o) {
-            $ex = new Option_Fexpr($o->option);
-            if ($o->kind) {
-                $this->lerror($pos1, $pos2, "Option can’t be used in formulas.");
-            } else if ($o->value === null) {
-                $ex = $o->compar === "=" ? $ex : new Not_Fexpr($ex);
-            } else if (is_array($o->value) && $o->compar === "!=") {
-                $ex = new Not_Fexpr(new In_Fexpr($ex, $o->value));
-            } else if (is_array($o->value)) {
-                $ex = new In_Fexpr($ex, $o->value);
+    }
+
+    private function _parse_option($pos1, &$t) {
+        if (!preg_match('/\A[A-Za-z0-9_.@]+/', $t, $m)) {
+            $this->lerror($pos1, $pos1, "Submission field missing.");
+            return Constant_Fexpr::cerror($pos1, $pos1);
+        }
+
+        $oname = $m[0];
+        $t = substr($t, strlen($m[0]));
+        $opt = $this->conf->abbrev_matcher()->find1($oname, Conf::MFLAG_OPTION);
+        if (!$opt) {
+            if (($os2 = $this->conf->abbrev_matcher()->find_all($oname, Conf::MFLAG_OPTION))) {
+                $ts = array_map(function ($o) { return "“" . htmlspecialchars($o->search_keyword()) . "”"; }, $os2);
+                $this->lerror($pos1, -strlen($t), "“" . htmlspecialchars($oname) . "” matches more than one submission field. Try " . commajoin($ts, " or ") . ".");
             } else {
-                $op = self::$_oprewrite[$o->compar] ?? $o->compar;
-                assert(in_array($op, ["==", "!=", "<", ">", "<=", ">="]));
-                $ex2 = new Constant_Fexpr($o->value, $o->option);
-                if ($op === "==" || $op === "!=") {
-                    $ex = new Equality_Fexpr($op, $ex, $ex2);
-                } else {
-                    $ex = new Inequality_Fexpr($op, $ex, $ex2);
-                }
+                $this->lerror($pos1, -strlen($t), "“" . htmlspecialchars($oname) . "” matches no submission fields.");
             }
-            $e = $e ? new Or_Fexpr($e, $ex) : $ex;
+            return Constant_Fexpr::cerror($pos1, -strlen($t));
         }
-        if (!$e) {
-            $e = Constant_Fexpr::cnull();
-        } else if ($os->negated) {
-            $e = new Not_Fexpr($e);
-        }
-        return $e;
+
+        return $this->_parse_one_option($pos1, $t, $opt);
     }
 
     private function _parse_field($pos1, &$t, $f) {
         $pos2 = -strlen($t);
         if ($f instanceof PaperOption) {
-            return $this->_parse_option($pos1, $pos2, $f->search_keyword());
+            return $this->_parse_one_option($pos1, $t, $f);
         } else if ($f instanceof ReviewField) {
             if ($f->has_options) {
                 return $this->_reviewer_decoration($t, new Score_Fexpr($f));
@@ -1807,9 +1889,8 @@ class Formula implements Abbreviator, JsonSerializable {
         } else if ($t[0] === "o"
                    && preg_match('/\Aopt(?:ion)?:\s*(.*)\z/s', $t, $m)) {
             $pos1 = -strlen($m[1]);
-            $rest = self::_pop_argument($m[1]);
-            $t = $rest[2];
-            $e = $this->_parse_option($pos1, -strlen($t), $rest[1]);
+            $t = $m[1];
+            $e = $this->_parse_option($pos1, $t);
         } else if ($t[0] === "d"
                    && preg_match('/\A(?:dec|decision):\s*([-a-zA-Z0-9_.#@*]+)(.*)\z/si', $t, $m)) {
             $me = PaperSearch::decision_matchexpr($this->conf, $m[1], false);
@@ -1914,7 +1995,7 @@ class Formula implements Abbreviator, JsonSerializable {
                    && preg_match('/\A([A-Za-z][A-Za-z0-9_.@:]*)/is', $t, $m)) {
             $e = $this->_parse_function($t, $m[1], (object) [
                 "name" => $m[1], "args" => true, "optional" => true,
-                "callback" => "Constant_Fexpr::make_error_call"
+                "function" => "Constant_Fexpr::make_error_call"
             ]);
         }
 
@@ -1981,7 +2062,7 @@ class Formula implements Abbreviator, JsonSerializable {
             } else if ($opx === "**") {
                 $e = new Pow_Fexpr($e, $e2);
             } else {
-                assert(false);
+                throw new Exception("Unknown operator $opx");
             }
             $e->set_landmark($pos1, -strlen($t));
         }
@@ -2018,7 +2099,8 @@ class Formula implements Abbreviator, JsonSerializable {
                                          $sortable) {
         $t = "";
         if ($user) {
-            $t .= "assert(\$contact->contactId == $user->contactId);\n  ";
+            $t .= "assert(\$contact->contactXid === {$user->contactXid});\n  ";
+            // $t .= "if (\$contact->contactXid !== {$user->contactXid}) { error_log(debug_string_backtrace()); }\n  ";
         }
         $t .= $state->statement_text();
         if ($expr !== null) {
@@ -2037,6 +2119,8 @@ class Formula implements Abbreviator, JsonSerializable {
         return $t;
     }
 
+    /** @param int $sortable
+     * @return callable(PaperInfo,?int,Contact):mixed */
     private function _compile_function($sortable) {
         if ($this->check()) {
             $state = new FormulaCompiler($this->user);
@@ -2051,27 +2135,42 @@ class Formula implements Abbreviator, JsonSerializable {
         return eval("return function ($args) {\n  $t};");
     }
 
+    /** @return callable(PaperInfo,?int,Contact):mixed */
     function compile_function() {
         return $this->_compile_function(0);
     }
 
+    /** @return callable(PaperInfo,?int,Contact):mixed */
     function compile_sortable_function() {
         return $this->_compile_function(1);
     }
 
+    /** @return callable(PaperInfo,?int,Contact):mixed */
     function compile_json_function() {
         return $this->_compile_function(2);
     }
 
     static function compile_indexes_function(Contact $user, $index_types) {
-        $state = new FormulaCompiler($user);
-        $g = $state->loop_variable($index_types);
-        $t = "assert(\$contact->contactId == $user->contactId);\n  "
-            . join("\n  ", $state->gstmt)
-            . "\n  return array_keys($g);\n";
-        $args = '$prow, $contact';
-        self::DEBUG && Conf::msg_debugt("function ($args) {\n  $t}\n");
-        return eval("return function ($args) {\n  $t};");
+        if ($index_types !== 0) {
+            $state = new FormulaCompiler($user);
+            $g = $state->loop_variable($index_types);
+            $t = "assert(\$contact->contactXid === {$user->contactXid});\n  "
+                . join("\n  ", $state->gstmt) . "\n";
+            if ($index_types === Fexpr::IDX_REVIEW) {
+                $t .= "  \$cids = [];\n"
+                    . "  foreach ($g as \$rrow) {\n"
+                    . "    \$cids[] = \$rrow->contactId;\n"
+                    . "  }\n"
+                    . "  return \$cids;\n";
+            } else {
+                $t .= "  return array_keys($g);\n";
+            }
+            $args = '$prow, $contact';
+            self::DEBUG && Conf::msg_debugt("function ($args) {\n  $t}\n");
+            return eval("return function ($args) {\n  $t};");
+        } else {
+            return null;
+        }
     }
 
     function support_combiner() {
@@ -2231,12 +2330,9 @@ class Formula implements Abbreviator, JsonSerializable {
         }
     }
 
-    function view_score(Contact $user) {
-        if ($this->check($this->user ?? $user)) {
-            return $this->_parse->fexpr->view_score($user);
-        } else {
-            return VIEWSCORE_PC;
-        }
+    function viewable_by(Contact $user) {
+        return $this->check($this->user ?? $user)
+            && $this->_parse->fexpr->viewable_by($user);
     }
 
     function column_header() {
@@ -2261,17 +2357,24 @@ class Formula implements Abbreviator, JsonSerializable {
     }
 
 
-    function is_sum() {
-        return $this->check() && $this->_parse->fexpr->op === "sum";
+    /** @return bool */
+    function is_sumlike() {
+        return $this->check()
+            && ($this->_parse->fexpr->op === "sum"
+                || $this->_parse->fexpr->op === "count");
     }
 
+    /** @return bool */
     function indexed() {
         return $this->check() && $this->_parse->indexed;
     }
+
+    /** @return int */
     function index_type() {
         return $this->check() ? $this->_parse->index_type : 0;
     }
 
+    /** @return array<string,string> */
     function jsonSerialize() {
         $j = [];
         if ($this->formulaId) {

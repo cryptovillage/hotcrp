@@ -1,10 +1,7 @@
 <?php
-$ConfSitePATH = preg_replace(',/batch/[^/]+,', '', __FILE__);
-require_once("$ConfSitePATH/src/init.php");
-require_once("$ConfSitePATH/lib/getopt.php");
-require_once("$ConfSitePATH/lib/unicodehelper.php");
+require_once(preg_replace('/\/batch\/[^\/]+/', '/src/siteloader.php', __FILE__));
 
-$arg = getopt_rest($argv, "hn:f:Vuto:",
+$arg = Getopt::rest($argv, "hn:f:Vuto:",
     ["help", "name:", "file:", "verbose", "unparse", "time", "output:"]);
 if (isset($arg["h"]) || isset($arg["help"])) {
     fwrite(STDOUT, "Usage: php batch/updateutf8trans.php CODEPOINT STRING...\n");
@@ -13,6 +10,7 @@ if (isset($arg["h"]) || isset($arg["help"])) {
     exit(0);
 }
 
+require_once(SiteLoader::$root . "/lib/unicodehelper.php");
 
 function quote_key($k) {
     if (strlen($k) == 2) {
@@ -55,19 +53,19 @@ class Batch_UpdateUTF8Trans {
         if ($sin === ""
             || ord(substr($sin, 0, 1)) < 0xC0
             || ord(substr($sin, 0, 1)) >= 0xF0) {
-            fwrite(STDERR, "input argument $sxin->$sout is bad\n");
+            fwrite(STDERR, "input argument {$sxin}->$sout is bad\n");
         } else if (strlen($sout) > ($l > 2 ? self::OUTL3 : self::OUTL2)) {
-            fwrite(STDERR, "output argument $sxin->$sout too long\n");
+            fwrite(STDERR, "output argument {$sxin}->$sout too long\n");
         } else if (($sout === "" && !isset($this->trans[$l][$sin]))
                    || (isset($this->trans[$l][$sin]) && $this->trans[$l][$sin] === $soutch)) {
             /* skip */
         } else if (!$override && isset($this->trans[$l][$sin])) {
-            fwrite(STDERR, "ignore $sin $sxin->$sout, have $sxin->" . sprintf("U+%04X", UnicodeHelper::utf8_ord($this->trans[$l][$sin])) . "\n");
+            fwrite(STDERR, "ignore $sin {$sxin}->$sout, have {$sxin}->" . sprintf("U+%04X", UnicodeHelper::utf8_ord($this->trans[$l][$sin])) . "\n");
         } else if ($sout === "") {
-            fwrite(STDERR, "change $sin $sxin->\n");
+            fwrite(STDERR, "change $sin {$sxin}->\n");
             unset($this->trans[strlen($sin)][$sin]);
         } else {
-            fwrite(STDERR, "change $sin $sxin->$sout\n");
+            fwrite(STDERR, "change $sin {$sxin}->$sout\n");
             $this->trans[strlen($sin)][$sin] = $soutch;
         }
     }
@@ -102,7 +100,7 @@ class Batch_UpdateUTF8Trans {
             if (str_starts_with($textlet, "\xEF\xBB\xBF")) {
                 $textlet = substr($textlet, 3);
             }
-            $filename = get($arg, "o", get($arg, "output"));
+            $filename = $arg["o"] ?? $arg["output"] ?? null;
             if ($filename === "-") {
                 fwrite(STDOUT, $textlet);
             } else {
@@ -199,7 +197,6 @@ class Batch_UpdateUTF8Trans {
     }
 
     function run($arg) {
-        global $ConfSitePATH;
         $verbose = isset($arg["V"]) || isset($arg["verbose"]);
         $unparse = isset($arg["u"]) || isset($arg["unparse"]);
         if (isset($arg["t"]) || isset($arg["time"])) {
@@ -228,22 +225,22 @@ class Batch_UpdateUTF8Trans {
         ksort($this->trans[2], SORT_STRING);
         ksort($this->trans[3], SORT_STRING);
 
-        $unicode_helper = file_get_contents("$ConfSitePATH/lib/unicodehelper.php");
-        fwrite(STDOUT, substr($unicode_helper, 0, strpos($unicode_helper, "define(")));
+        $unicode_helper = file_get_contents(SiteLoader::find("lib/unicodehelper.php"));
+        fwrite(STDOUT, substr($unicode_helper, 0, strpos($unicode_helper, "const ")));
 
         $m = $n = "";
         foreach ($this->trans[2] as $k => $v) {
             $m .= quote_key($k);
             $n .= addcslashes(substr($v . "   ", 0, self::OUTL2), "\\\"");
         }
-        fwrite(STDOUT, "define(\"UTF8_ALPHA_TRANS_2\", \"$m\");\n\ndefine(\"UTF8_ALPHA_TRANS_2_OUT\", \"$n\");\n\n");
+        fwrite(STDOUT, "const UTF8_ALPHA_TRANS_2 = \"$m\";\n\nconst UTF8_ALPHA_TRANS_2_OUT = \"$n\";\n\n");
 
         $m = $n = "";
         foreach ($this->trans[3] as $k => $v) {
             $m .= quote_key($k);
             $n .= addcslashes(substr($v . "   ", 0, self::OUTL3), "\\\"");
         }
-        fwrite(STDOUT, "define(\"UTF8_ALPHA_TRANS_3\", \"$m\");\n\ndefine(\"UTF8_ALPHA_TRANS_3_OUT\", \"$n\");\n\n");
+        fwrite(STDOUT, "const UTF8_ALPHA_TRANS_3 = \"$m\";\n\nconst UTF8_ALPHA_TRANS_3_OUT = \"$n\";\n\n");
 
         return 0;
     }

@@ -1,26 +1,49 @@
 <?php
 // base.php -- HotCRP base helper functions
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 /** @phan-file-suppress PhanRedefineFunction */
 
 // type helpers
 
-/** @param mixed $x */
+/** @param mixed $x
+ * @return bool */
 function is_number($x) {
     return is_int($x) || is_float($x);
 }
 
-/** @param mixed $x */
+/** @param mixed $x
+ * @return bool */
 function is_associative_array($x) {
-    // this method is suprisingly fast
+    // this method is surprisingly fast
     return is_array($x) && array_values($x) !== $x;
 }
 
-/** @param mixed $x */
+/** @param mixed $x
+ * @return bool */
+function is_list($x) {
+    return is_array($x) && array_values($x) === $x;
+}
+
+/** @param mixed $x
+ * @return bool */
 function is_int_list($x) {
-    if (is_array($x) && !is_associative_array($x)) {
+    if (is_array($x) && array_values($x) === $x) {
         foreach ($x as $i) {
             if (!is_int($i))
+                return false;
+        }
+        return true;
+    } else {
+        return false;
+    }
+}
+
+/** @param mixed $x
+ * @return bool */
+function is_string_list($x) {
+    if (is_array($x) && array_values($x) === $x) {
+        foreach ($x as $i) {
+            if (!is_string($i))
                 return false;
         }
         return true;
@@ -33,23 +56,17 @@ function is_int_list($x) {
 // string helpers
 
 /** @param string $haystack
- * @param string $needle */
-function str_starts_with($haystack, $needle) {
+ * @param string $needle
+ * @return bool */
+function stri_starts_with($haystack, $needle) {
     $nl = strlen($needle);
     $hl = strlen($haystack);
-    return $nl === 0 || ($hl >= $nl && substr_compare($haystack, $needle, 0, $nl) === 0);
+    return $nl === 0 || ($hl >= $nl && substr_compare($haystack, $needle, 0, $nl, true) === 0);
 }
 
 /** @param string $haystack
- * @param string $needle */
-function str_ends_with($haystack, $needle) {
-    $nl = strlen($needle);
-    $hl = strlen($haystack);
-    return $nl === 0 || ($hl >= $nl && substr_compare($haystack, $needle, -$nl) === 0);
-}
-
-/** @param string $haystack
- * @param string $needle */
+ * @param string $needle
+ * @return bool */
 function stri_ends_with($haystack, $needle) {
     $nl = strlen($needle);
     $hl = strlen($haystack);
@@ -57,7 +74,8 @@ function stri_ends_with($haystack, $needle) {
 }
 
 /** @param string $pattern
- * @param string $subject */
+ * @param string $subject
+ * @return int|false */
 function preg_matchpos($pattern, $subject) {
     if (preg_match($pattern, $subject, $m, PREG_OFFSET_CAPTURE)) {
         return $m[0][1];
@@ -66,7 +84,8 @@ function preg_matchpos($pattern, $subject) {
     }
 }
 
-/** @param string $text */
+/** @param string $text
+ * @return string */
 function cleannl($text) {
     if (substr($text, 0, 3) === "\xEF\xBB\xBF") {
         $text = substr($text, 3);
@@ -96,12 +115,14 @@ function space_join(/* $str_or_array, ... */) {
     return $t;
 }
 
-/** @param string $str */
+/** @param string $str
+ * @return bool */
 function is_usascii($str) {
     return !preg_match('/[\x80-\xFF]/', $str);
 }
 
-/** @param string $str */
+/** @param string $str
+ * @return bool */
 function is_valid_utf8($str) {
     return !!preg_match('//u', $str);
 }
@@ -156,55 +177,34 @@ function simplify_whitespace($str) {
 /** @param string $prefix
  * @param string $text
  * @param int|string $indent
- * @param int $totWidth */
-function prefix_word_wrap($prefix, $text, $indent = 18, $totWidth = 75) {
+ * @param ?int $width
+ * @param bool $flowed
+ * @return string */
+function prefix_word_wrap($prefix, $text, $indent = 18, $width = 75, $flowed = false) {
+    assert($prefix !== false); // XXX backward compat
     if (is_int($indent)) {
         $indentlen = $indent;
         $indent = str_repeat(" ", $indent);
     } else {
         $indentlen = strlen($indent);
     }
+    $width = $width ?? 75;
 
-    $out = "";
-    if ($prefix !== false) {
-        while ($text !== "" && ctype_space($text[0])) {
-            $out .= $text[0];
-            $text = substr($text, 1);
+    $prefixlen = strlen($prefix);
+    $out = $prefixlen > $indentlen ? "$prefix\n" : $prefix;
+    $wx = $width - min($prefixlen, $indentlen);
+
+    while (($line = UnicodeHelper::utf8_line_break($text, $wx, $flowed)) !== false) {
+        if (strlen($out) === $prefixlen) {
+            $out .= $line . "\n";
+            $wx = $width - $indentlen;
+        } else {
+            $out .= $indent . preg_replace('/\A\pZ+/u', '', $line) . "\n";
         }
-    } else if (($line = UnicodeHelper::utf8_line_break($text, $totWidth)) !== false) {
-        $out .= $line . "\n";
-    }
-
-    while (($line = UnicodeHelper::utf8_line_break($text, $totWidth - $indentlen)) !== false) {
-        $out .= $indent . preg_replace('/^\pZ+/u', '', $line) . "\n";
-    }
-
-    if ($prefix === false) {
-        /* skip */;
-    } else if (strlen($prefix) <= $indentlen) {
-        $prefix = str_pad($prefix, $indentlen, " ", STR_PAD_LEFT);
-        $out = $prefix . substr($out, $indentlen);
-    } else {
-        $out = $prefix . "\n" . $out;
     }
 
     if (!str_ends_with($out, "\n")) {
         $out .= "\n";
-    }
-    return $out;
-}
-
-/** @param string $text
- * @param int $totWidth
- * @param bool $multi_center */
-function center_word_wrap($text, $totWidth = 75, $multi_center = false) {
-    if (strlen($text) <= $totWidth && !preg_match('/[\200-\377]/', $text)) {
-        return str_pad($text, (int) (($totWidth + strlen($text)) / 2), " ", STR_PAD_LEFT) . "\n";
-    }
-    $out = "";
-    while (($line = UnicodeHelper::utf8_line_break($text, $totWidth)) !== false) {
-        $linelen = UnicodeHelper::utf8_glyphlen($line);
-        $out .= str_pad($line, (int) (($totWidth + $linelen) / 2), " ", STR_PAD_LEFT) . "\n";
     }
     return $out;
 }
@@ -222,10 +222,6 @@ function friendly_boolean($x) {
     } else {
         return null;
     }
-}
-
-interface Abbreviator {
-    public function abbreviations_for($name, $data);
 }
 
 
@@ -269,30 +265,34 @@ function rfc2822_words_quote($words) {
 
 // encoders and decoders
 
-/** @param string $text */
+/** @param string $text
+ * @return string */
 function html_id_encode($text) {
-    $x = preg_split('_([^-a-zA-Z0-9])_', $text, -1, PREG_SPLIT_DELIM_CAPTURE);
+    $x = preg_split('/([^-a-zA-Z0-9])/', $text, -1, PREG_SPLIT_DELIM_CAPTURE);
     for ($i = 1; $i < count($x); $i += 2) {
         $x[$i] = "_" . dechex(ord($x[$i]));
     }
     return join("", $x);
 }
 
-/** @param string $text */
+/** @param string $text
+ * @return string */
 function html_id_decode($text) {
-    $x = preg_split(',(_[0-9A-Fa-f][0-9A-Fa-f]),', $text, -1, PREG_SPLIT_DELIM_CAPTURE);
+    $x = preg_split('/(_[0-9A-Fa-f][0-9A-Fa-f])/', $text, -1, PREG_SPLIT_DELIM_CAPTURE);
     for ($i = 1; $i < count($x); $i += 2) {
         $x[$i] = chr(hexdec(substr($x[$i], 1)));
     }
     return join("", $x);
 }
 
-/** @param string $text */
+/** @param string $text
+ * @return string */
 function base64url_encode($text) {
     return rtrim(strtr(base64_encode($text), '+/', '-_'), '=');
 }
 
-/** @param string $text */
+/** @param string $text
+ * @return string */
 function base64url_decode($text) {
     return base64_decode(strtr($text, '-_', '+/'));
 }
@@ -320,93 +320,17 @@ function json_encode_db($x, $flags = 0) {
 
 /** @param object|array|null $var
  * @param string|int $idx
- * @return mixed */
+ * @return mixed
+ * @deprecated */
 function get($var, $idx, $default = null) {
     if (is_array($var)) {
         return array_key_exists($idx, $var) ? $var[$idx] : $default;
     } else if (is_object($var)) {
         return property_exists($var, $idx) ? $var->$idx : $default;
-    } else if ($var === null) {
-        return $default;
     } else {
-        error_log("inappropriate get: " . var_export($var, true) . ": " . json_encode(debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS)));
+        assert($var === null);
         return $default;
     }
-}
-
-/** @param object|array|null $var
- * @param string|int $idx
- * @return string */
-function get_s($var, $idx, $default = null) {
-    return (string) get($var, $idx, $default);
-}
-
-/** @param object|array|null $var
- * @param string|int $idx
- * @return int */
-function get_i($var, $idx, $default = null) {
-    return (int) get($var, $idx, $default);
-}
-
-/** @param object|array|null $var
- * @param string|int $idx
- * @return float */
-function get_f($var, $idx, $default = null) {
-    return (float) get($var, $idx, $default);
-}
-
-function uploaded_file_error($finfo) {
-    $e = $finfo["error"];
-    $name = get($finfo, "name") ? "<span class=\"lineno\">" . htmlspecialchars($finfo["name"]) . ":</span> " : "";
-    if ($e == UPLOAD_ERR_INI_SIZE || $e == UPLOAD_ERR_FORM_SIZE) {
-        return $name . "Uploaded file too big. The maximum upload size is " . ini_get("upload_max_filesize") . "B.";
-    } else if ($e == UPLOAD_ERR_PARTIAL) {
-        return $name . "Upload process interrupted.";
-    } else if ($e != UPLOAD_ERR_NO_FILE) {
-        return $name . "Unknown upload error.";
-    } else {
-        return false;
-    }
-}
-
-function make_qreq() : Qrequest {
-    $qreq = new Qrequest($_SERVER["REQUEST_METHOD"]);
-    $qreq->set_page_path(Navigation::page(), Navigation::path());
-    foreach ($_GET as $k => $v) {
-        $qreq->set_req($k, $v);
-    }
-    foreach ($_POST as $k => $v) {
-        $qreq->set_req($k, $v);
-    }
-    if (empty($_POST)) {
-        $qreq->set_post_empty();
-    }
-
-    // $_FILES requires special processing since we want error messages.
-    $errors = [];
-    foreach ($_FILES as $nx => $fix) {
-        if (is_array($fix["error"])) {
-            $fis = [];
-            foreach (array_keys($fix["error"]) as $i) {
-                $fis[$i ? "$nx.$i" : $nx] = ["name" => $fix["name"][$i], "type" => $fix["type"][$i], "size" => $fix["size"][$i], "tmp_name" => $fix["tmp_name"][$i], "error" => $fix["error"][$i]];
-            }
-        } else {
-            $fis = [$nx => $fix];
-        }
-        foreach ($fis as $n => $fi) {
-            if ($fi["error"] == UPLOAD_ERR_OK) {
-                if (is_uploaded_file($fi["tmp_name"]))
-                    $qreq->set_file($n, $fi);
-            } else if (($err = uploaded_file_error($fi))) {
-                $errors[] = $err;
-            }
-        }
-    }
-    if (!empty($errors) && Conf::$g) {
-        Conf::msg_error("<div class=\"parseerr\"><p>" . join("</p>\n<p>", $errors) . "</p></div>");
-    }
-
-    return $qreq;
 }
 
 /** @param mixed $a */
@@ -473,10 +397,10 @@ function caller_landmark($position = 1, $skipfunction_re = null) {
     $trace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
     $fname = null;
     for (++$position; isset($trace[$position]); ++$position) {
-        $fname = get_s($trace[$position], "class");
+        $fname = $trace[$position]["class"] ?? "";
         $fname .= ($fname ? "::" : "") . $trace[$position]["function"];
         if ((!$skipfunction_re || !preg_match($skipfunction_re, $fname))
-            && ($fname !== "call_user_func" || get($trace[$position - 1], "file"))) {
+            && ($fname !== "call_user_func" || ($trace[$position - 1]["file"] ?? false))) {
             break;
         }
     }
@@ -494,6 +418,26 @@ function assert_callback() {
     trigger_error("Assertion backtrace: " . json_encode(array_slice(debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS), 2)), E_USER_WARNING);
 }
 //assert_options(ASSERT_CALLBACK, "assert_callback");
+
+function debug_string_backtrace() {
+    $s = preg_replace_callback('/^\#(\d+)/m', function ($m) {
+        return "#" . ($m[1] - 1);
+    }, (new Exception)->getTraceAsString());
+    if (SiteLoader::$root) {
+        $s = str_replace(SiteLoader::$root, "[" . (Conf::$main ? Conf::$main->dbname : "HotCRP") . "]", $s);
+    }
+    return substr($s, strpos($s, "\n") + 1);
+}
+
+
+// zlib helper
+
+if (!function_exists("zlib_get_coding_type")) {
+    /** @phan-suppress-next-line PhanRedefineFunctionInternal */
+    function zlib_get_coding_type() {
+        return false;
+    }
+}
 
 
 // pcntl helpers
@@ -517,8 +461,8 @@ if (PHP_VERSION_ID >= 70300) {
     }
 } else {
     function hotcrp_setcookie($name, $value = "", $options = []) {
-        return setcookie($name, $value, get($options, "expires", 0),
-                         get($options, "path", ""), get($options, "domain", ""),
-                         get($options, "secure", false), get($options, "httponly", false));
+        return setcookie($name, $value, $options["expires"] ?? 0,
+                         $options["path"] ?? "", $options["domain"] ?? "",
+                         $options["secure"] ?? false, $options["httponly"] ?? false);
     }
 }

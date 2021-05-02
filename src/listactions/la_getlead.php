@@ -10,18 +10,18 @@ class GetLead_ListAction extends ListAction {
     function allow(Contact $user, Qrequest $qreq) {
         return $user->isPC;
     }
-    function run(Contact $user, $qreq, $ssel) {
+    function run(Contact $user, Qrequest $qreq, SearchSelection $ssel) {
         $key = $this->type . "ContactId";
         $can_view = "can_view_" . $this->type;
         $texts = [];
         foreach ($ssel->paper_set($user) as $row) {
             if ($row->$key && $user->$can_view($row, true)) {
                 $name = $user->name_object_for($row->$key);
-                $texts[$row->paperId][] = [$row->paperId, $row->title, $name->firstName, $name->lastName, $name->email];
+                $texts[] = [$row->paperId, $row->title, $name->firstName, $name->lastName, $name->email];
             }
         }
         return $user->conf->make_csvg($this->type . "s")
             ->select(["paper", "title", "first", "last", "{$this->type}email"])
-            ->add($texts);
+            ->append($texts);
     }
 }

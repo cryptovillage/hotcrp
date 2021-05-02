@@ -1,6 +1,6 @@
 <?php
 // api_alltags.php -- HotCRP tag completion API call
-// Copyright (c) 2008-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2008-2021 Eddie Kohler; see LICENSE.
 
 class AllTags_API {
     static function run(Contact $user) {
@@ -18,15 +18,20 @@ class AllTags_API {
         }
     }
 
+    /** @param string $tag
+     * @return ?string */
     static private function strip($tag, Contact $user, PaperInfo $prow = null) {
         $twiddle = strpos($tag, "~");
         if ($twiddle === false
-            || ($twiddle === 0 && $tag[1] === "~" && $user->allow_administer($prow))) {
+            || ($twiddle === 0
+                && $tag[1] === "~"
+                && ($prow ? $user->allow_administer($prow) : $user->privChair))) {
             return $tag;
-        } else if ($twiddle > 0 && substr($tag, 0, $twiddle) == $user->contactId) {
+        } else if ($twiddle > 0
+                   && substr($tag, 0, $twiddle) == $user->contactId) {
             return substr($tag, $twiddle);
         } else {
-            return false;
+            return null;
         }
     }
 
@@ -51,14 +56,14 @@ class AllTags_API {
             }
         }
         Dbl::free($result);
-        return ["ok" => true, "tags" => $dt->sort_array($tags)];
+        return self::finish_alltags_api($tags, $dt, $user);
     }
 
     static private function hard_alltags_api(Contact $user) {
         $tags = [];
         foreach ($user->paper_set(["minimal" => true, "finalized" => true, "tags" => "require"]) as $prow) {
             if ($user->can_view_paper($prow)) {
-                foreach (TagInfo::split_unpack($prow->all_tags_text()) as $ti) {
+                foreach (Tagger::split_unpack($prow->all_tags_text()) as $ti) {
                     $lt = strtolower($ti[0]);
                     if (!isset($tags[$lt])
                         && ($tag = self::strip($ti[0], $user, $prow))
@@ -68,6 +73,35 @@ class AllTags_API {
                 }
             }
         }
-        return ["ok" => true, "tags" => $user->conf->tags()->sort_array(array_values($tags))];
+        return self::finish_alltags_api(array_values($tags), $user->conf->tags(), $user);
+    }
+
+    static private function finish_alltags_api($tags, TagMap $dt, Contact $user) {
+        $tags = $dt->sort_array($tags);
+        $j = ["ok" => true, "tags" => $tags];
+        if ($dt->has_automatic
+            || ($dt->has_sitewide && $user->privChair)
+            || ($dt->has_readonly && !$user->privChair)) {
+            $readonly = $sitewide = [];
+            foreach ($tags as $tag) {
+                if (($tag[0] !== "~" || $tag[1] === "~")
+                    && ($ti = $dt->check($tag))) {
+                    if ($ti->automatic
+                        || ($ti->readonly && !$user->privChair)) {
+                        $readonly[strtolower($tag)] = true;
+                    }
+                    if ($ti->sitewide && $user->privChair) {
+                        $sitewide[strtolower($tag)] = true;
+                    }
+                }
+            }
+            if (!empty($readonly)) {
+                $j["readonly_tagmap"] = $readonly;
+            }
+            if (!empty($sitewide)) {
+                $j["sitewide_tagmap"] = $sitewide;
+            }
+        }
+        return $j;
     }
 }

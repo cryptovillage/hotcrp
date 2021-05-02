@@ -1,6 +1,6 @@
 <?php
 // pc_desirability.php -- HotCRP helper classes for paper list content
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class Desirability_PaperColumn extends PaperColumn {
     function __construct(Conf $conf, $cj) {
@@ -13,10 +13,8 @@ class Desirability_PaperColumn extends PaperColumn {
             $pl->qopts["allReviewerPreference"] = true;
         return true;
     }
-    function compare(PaperInfo $a, PaperInfo $b, ListSorter $sorter) {
-        $ad = $a->desirability();
-        $bd = $b->desirability();
-        return $bd < $ad ? -1 : ($bd > $ad ? 1 : 0);
+    function compare(PaperInfo $a, PaperInfo $b, PaperList $pl) {
+        return $b->desirability() <=> $a->desirability();
     }
     function content(PaperList $pl, PaperInfo $row) {
         return str_replace("-", "−" /* U+2122 */, (string) $row->desirability());

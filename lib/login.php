@@ -1,9 +1,10 @@
 <?php
 // login.php -- HotCRP login helpers
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class LoginHelper {
-    const DEBUG = 0;
+    /** @var bool */
+    const DEBUG = false;
 
     static function check_http_auth(Contact $user, Qrequest $qreq) {
         $conf = $user->conf;
@@ -52,6 +53,7 @@ class LoginHelper {
         }
     }
 
+    /** @return array|Contact */
     static private function user_lookup(Conf $conf, Qrequest $qreq) {
         // Look up the account information
         // to determine if the user is registered
@@ -66,12 +68,12 @@ class LoginHelper {
             }
         }
         return $conf->user_by_email($qreq->email)
-            ? : new Contact(["email" => $qreq->email], $conf);
+            ?? new Contact(["email" => $qreq->email], $conf);
     }
 
     static function login_info(Conf $conf, Qrequest $qreq) {
         assert(!$conf->external_login());
-        assert($qreq->post_ok());
+        assert($qreq->valid_post());
 
         $user = self::user_lookup($conf, $qreq);
         if (is_array($user)) {
@@ -212,7 +214,7 @@ class LoginHelper {
 
     static function new_account_info(Conf $conf, Qrequest $qreq) {
         assert($conf->allow_user_self_register());
-        assert($qreq->post_ok());
+        assert($qreq->valid_post());
 
         $user = self::user_lookup($conf, $qreq);
         if (is_array($user)) {
@@ -233,7 +235,7 @@ class LoginHelper {
             }
             $info = self::forgot_password_info($conf, $qreq, true);
             if ($info["ok"] && $info["mailtemplate"] === "@resetpassword") {
-                $info["mailtemplate"] = "@newaccount";
+                $info["mailtemplate"] = "@newaccount.selfregister";
                 if (self::check_setup_phase($user)) {
                     $info["firstuser"] = true;
                 }
@@ -255,7 +257,7 @@ class LoginHelper {
 
         // ignore reset request from disabled user
         $cdbu = $user->contactdb_user();
-        if ($user->password_unset() && !$create) {
+        if (!$user->has_account_here() && !$cdbu && !$create) {
             return ["ok" => false, "email" => true, "unset" => true];
         } else if (!$user->can_reset_password()) {
             return ["ok" => false, "email" => true, "nologin" => true];
@@ -314,9 +316,9 @@ class LoginHelper {
             $e = null;
         } else if (isset($info["unset"])) {
             if ($conf->allow_user_self_register()) {
-                $e = "No account for %2[email]\$H. Check the email address or create a new account <a href=\"%2[newaccount]\$H\">here</a>.";
+                $e = "User %2[email]\$H does not have a password yet. Check the email address or <a href=\"%2[newaccount]\$H\">create that account</a>.";
             } else {
-                $e = "No account for %2[email]\$H. Check the email address.";
+                $e = "User %2[email]\$H does not have a password. Check the email address.";
             }
         } else if (isset($info["disabled"])) {
             $e = "Your account on this site is disabled. Contact the site administrator for more information.";

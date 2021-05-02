@@ -3,33 +3,33 @@
 // Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
 
 require_once("src/initweb.php");
-require_once("src/papersearch.php");
-if (!$Me->is_manager())
+if (!$Me->is_manager()) {
     $Me->escape();
+}
 $Me->add_overrides(Contact::OVERRIDE_CONFLICT);
 
 $Conf->header("Assignments", "assignpc", ["subtitle" => "Conflicts"]);
-echo '<div class="psmode">',
+echo '<div class="mb-5 clearfix">',
     '<div class="papmode"><a href="', hoturl("autoassign"), '">Automatic</a></div>',
     '<div class="papmode"><a href="', hoturl("manualassign"), '">Manual</a></div>',
     '<div class="papmode active"><a href="', hoturl("conflictassign"), '">Conflicts</a></div>',
     '<div class="papmode"><a href="', hoturl("bulkassign"), '">Bulk update</a></div>',
-    '</div><hr class="c" />';
+    '</div>';
 
-echo '<div class="w-text">';
+echo '<div class="w-text mt-5 mb-5">';
 
 if ($Qreq->neg) {
+    echo '<p>This page lists conflicts declared by authors, but not justified by fuzzy matching between authors and PC members’ affiliations and collaborator lists.</p>';
+    echo '<p><a href="', $Conf->hoturl("conflictassign"), '">Check for missing conflicts</a></p>';
 } else {
-    echo '<p>This table lists unconfirmed potential conflicts indicated using reviewer preferences, or detected by fuzzy matching between PC affiliations and collaborator lists and authors. Confirm any true conflicts using the checkboxes.</p>';
+    echo '<p>This page shows potential missing conflicts detected by fuzzy matching between authors and PC members’ affiliations and collaborator lists. Confirm any true conflicts using the checkboxes.</p>';
+    echo '<p><a href="', $Conf->hoturl("conflictassign", "neg=1"), '">Check for inappropriate conflicts</a></p>';
 }
 
 echo "</div>\n";
 
 
-$search = new PaperSearch($Me, [
-    "t" => "alladmin", "q" => "",
-    "pageurl" => $Conf->hoturl_site_relative_raw("conflictassign", ["neg" => $Qreq->neg ? 1 : null])
-]);
+$search = (new PaperSearch($Me, ["t" => "alladmin", "q" => ""]))->set_urlbase("conflictassign", ["neg" => $Qreq->neg ? 1 : null]);
 $rowset = $Conf->paper_set(["allConflictType" => 1, "allReviewerPreference" => 1, "tags" => 1, "paperId" => $search->paper_ids()], $Me);
 
 if ($Qreq->neg) {
@@ -50,7 +50,7 @@ if ($Qreq->neg) {
                 || $row->potential_conflict($user));
     };
 }
-$args = ["display" => "show:authors show:aufull", "rowset" => $rowset];
+$args = ["rowset" => $rowset];
 
 $any = false;
 foreach ($Conf->full_pc_members() as $pc) {
@@ -58,8 +58,8 @@ foreach ($Conf->full_pc_members() as $pc) {
     $paperlist->set_reviewer_user($pc);
     $paperlist->set_row_filter($filter);
     $paperlist->set_table_id_class(null, "pltable-fullw");
-    $tr = $paperlist->table_render(["nofooter" => true]);
-    if ($paperlist->count > 0) {
+    $tr = $paperlist->table_render(["nofooter" => true, "fullheader" => true]);
+    if (!$tr->is_empty()) {
         if (!$any) {
             echo Ht::form(hoturl("conflictassign")),
                 $tr->table_start,
@@ -73,7 +73,8 @@ foreach ($Conf->full_pc_members() as $pc) {
         if ($pc->affiliation) {
             $t .= " <span class=\"auaff\">(" . htmlspecialchars($pc->affiliation) . ")</span>";
         }
-        echo $tr->heading_row($t, ["no_titlecol" => true]), $tr->body_rows();
+        echo $tr->heading_row($t, ["no_titlecol" => true]);
+        $tr->echo_tbody_rows();
         $any = true;
     }
 }

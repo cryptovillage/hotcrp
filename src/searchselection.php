@@ -1,6 +1,6 @@
 <?php
 // searchselection.php -- HotCRP helper class for paper selections
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class SearchSelection {
     /** @var list<int> */
@@ -21,6 +21,9 @@ class SearchSelection {
         }
     }
 
+    /** @param Qrequest $qreq
+     * @param ?string $key
+     * @return SearchSelection */
     static function make($qreq, Contact $user = null, $key = null) {
         $ps = null;
         if ($key !== null) {
@@ -72,7 +75,7 @@ class SearchSelection {
         return $this->selmap;
     }
 
-    /** @return PaperInfoSet */
+    /** @return PaperInfoSet|Iterable<PaperInfo> */
     function paper_set(Contact $user, $options = []) {
         $options["paperId"] = $this->sel;
         $pset = $user->paper_set($options);
@@ -95,6 +98,9 @@ class SearchSelection {
         $this->selmap = null;
     }
 
+    /** @param int|PaperInfo $a
+     * @param int|PaperInfo $b
+     * @return int */
     function order_compare($a, $b) {
         if ($a instanceof PaperInfo) {
             $a = $a->paperId;

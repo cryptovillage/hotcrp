@@ -1,16 +1,33 @@
 [
 	{
-		"name": "newaccount",
+		"name": "newaccount.selfregister",
 		"subject": "[%CONFSHORTNAME%] New account",
 		"body": [
 			"Greetings,\n\n",
-			"An account has been created for you at the %CONFNAME% submission site.\n\n",
+			"We received a request to create an account for you on the %CONFNAME% submission site. If you made this request, please use this link to set a password:\n\n",
+			"%PASSWORDLINK%\n\n",
+			"If you did not make this request, it’s safe to ignore this email.\n\n",
+			"The link will work for 3 days. Should it expire, obtain a new link using \"Forgot my password\".\n\n",
+			"        Site: %URL%/\n",
+			"       Email: %EMAIL%\n\n",
+			"If you already have an account under a different email address, you may merge this new account into that one. Go to your profile page and select \"Merge with another account\".\n\n",
+			"Contact %ADMIN% with any questions or concerns.\n\n",
+			"%SIGNATURE%\n"
+		]
+	},
+
+	{
+		"name": "newaccount.other",
+		"subject": "[%CONFSHORTNAME%] Account activated",
+		"body": [
+			"Greetings,\n\n",
+			"A system administrator has activated an account for you on the %CONFNAME% submission site.\n\n",
 			"        Site: %URL%/\n",
 			"       Email: %EMAIL%\n\n",
 			"%IF(NEEDPASSWORD)%",
 			"You will need a password to sign in. Use this link to set one up:\n\n",
-			"%RESETPASSWORDLINK%\n\n",
-			"Should the link expire, obtain a new link using \"Forgot my password\".\n\n",
+			"%PASSWORDLINK%\n\n",
+			"Should the link expire, obtain a new one using \"Forgot my password\".\n\n",
 			"%ENDIF%",
 			"If you already have an account under a different email address, you may merge this new account into that one. Go to your profile page and select \"Merge with another account\".\n\n",
 			"Contact %ADMIN% with any questions or concerns.\n\n",
@@ -23,15 +40,15 @@
 		"subject": "[%CONFSHORTNAME%] Contact for #%NUMBER% %TITLEHINT%",
 		"body": [
 			"Greetings,\n\n",
-			"An account has been created for you at the %CONFNAME% submission site. You are now a contact for submission #%NUMBER%.%IF(ADMINUPDATE)% An administrator performed this update.%ENDIF%\n\n",
+			"An account has been created for you on the %CONFNAME% submission site. You are now a contact for submission #%NUMBER%.%IF(ADMINUPDATE)% An administrator performed this update.%ENDIF%\n\n",
 			"        Site: %URL%/\n",
 			"       Email: %EMAIL%\n",
 			"       Title: %TITLE%\n",
 			" %_(Authors, 11)%: %OPT(AUTHORS)%\n\n",
 			"%IF(NEEDPASSWORD)%",
 			"You will need a password to sign in. Use this link to set one up:\n\n",
-			"%RESETPASSWORDLINK%\n\n",
-			"Should the link expire, obtain a new link using \"Forgot my password\".\n\n",
+			"%PASSWORDLINK%\n\n",
+			"Should the link expire, obtain a new one using \"Forgot my password\".\n\n",
 			"%ENDIF%",
 			"If you already have an account under a different email address, you may merge this new account into that one. Go to your profile page and select \"Merge with another account\".\n\n",
 			"Contact %ADMIN% with any questions or concerns.\n\n",
@@ -44,13 +61,13 @@
 		"subject": "[%CONFSHORTNAME%] Welcome to the program committee",
 		"body": [
 			"Greetings,\n\n",
-			"You have been added to the program committee at the %CONFNAME% submission site.\n\n",
+			"You have been added to the program committee on the %CONFNAME% submission site.\n\n",
 			"        Site: %URL%/\n",
 			"       Email: %EMAIL%\n\n",
 			"%IF(NEEDPASSWORD)%",
 			"You will need a password to sign in. Use this link to set one up:\n\n",
-			"%RESETPASSWORDLINK%\n\n",
-			"Should the link expire, obtain a new link using \"Forgot my password\".\n\n",
+			"%PASSWORDLINK%\n\n",
+			"Should the link expire, obtain a new one using \"Forgot my password\".\n\n",
 			"%ENDIF%",
 			"If you already have an account under a different email address, you may merge this new account into that one. Go to your profile page and select \"Merge with another account\".\n\n",
 			"Contact %ADMIN% with any questions or concerns.\n\n",
@@ -68,8 +85,8 @@
 			"       Email: %EMAIL%\n\n",
 			"%IF(NEEDPASSWORD)%",
 			"You will need a password to sign in. Use this link to set one up:\n\n",
-			"%RESETPASSWORDLINK%\n\n",
-			"Should the link expire, obtain a new link using \"Forgot my password\".\n\n",
+			"%PASSWORDLINK%\n\n",
+			"Should the link expire, obtain a new one using \"Forgot my password\".\n\n",
 			"%ENDIF%",
 			"If you already have an account under a different email address, you may merge this new account into that one. Go to your profile page and select \"Merge with another account\".\n\n",
 			"Contact %ADMIN% with any questions or concerns.\n\n",
@@ -85,6 +102,15 @@
 			"Here is your account information for the %CONFNAME% submission site.\n\n",
 			"        Site: %URL%/\n",
 			"       Email: %EMAIL%\n\n",
+			"%IF(PASSWORDLINK)%",
+			"%IF(NEEDPASSWORD)%",
+			"You will need a password to sign in. Use this link to set one up:\n\n",
+			"%ELSE%",
+			"If you have forgotten your password, you may use this link to set up a new one:\n\n",
+			"%ENDIF%",
+			"%PASSWORDLINK%\n\n",
+			"Should the link expire, obtain a new one using \"Forgot my password\".\n\n",
+			"%ENDIF%",
 			"Contact %ADMIN% with any questions or concerns.\n\n",
 			"%SIGNATURE%\n"
 		]
@@ -95,9 +121,10 @@
 		"subject": "[%CONFSHORTNAME%] Password reset request",
 		"body": [
 			"Dear %NAME%,\n\n",
-			"We received a request to reset the password for your account on the %CONFNAME% submission site. If you made this request, please use the following link to create a new password. The link will work for 3 days.\n\n",
-			"%RESETPASSWORDLINK%\n\n",
+			"We received a request to reset the password for your account on the %CONFNAME% submission site. If you made this request, please use this link to create a new password:\n\n",
+			"%PASSWORDLINK%\n\n",
 			"If you did not make this request, it's safe to ignore this email.\n\n",
+			"The link will work for 3 days. Should it expire, obtain a new link using \"Forgot my password\".\n\n",
 			"Contact %ADMIN% with any questions or concerns.\n\n",
 			"%SIGNATURE%\n"
 		]
@@ -108,7 +135,7 @@
 		"subject": "[%CONFSHORTNAME%] Password reset request",
 		"body": [
 			"Dear %NAME%,\n\n",
-			"Your password cannot be reset at the %CONFNAME% submission site because your account there is disabled.\n\n",
+			"Your password on the %CONFNAME% submission site cannot be reset because your account there is disabled.\n\n",
 			"Contact %ADMIN% with any questions or concerns.\n\n",
 			"%SIGNATURE%\n"
 		]
@@ -132,7 +159,7 @@
 		"subject": "[%CONFSHORTNAME%] Merged account",
 		"body": [
 			"Dear %NAME%,\n\n",
-			"Your account at the %CONFSHORTNAME% submission site has been merged with the account of %OTHERCONTACT%. From now on, you should log in using the %OTHEREMAIL% account.\n\n",
+			"Your account on the %CONFSHORTNAME% submission site has been merged with the account of %OTHERCONTACT%. From now on, you should log in using the %OTHEREMAIL% account.\n\n",
 			"Contact %ADMIN% with any questions or concerns.\n\n",
 			"%SIGNATURE%\n"
 		]
@@ -143,10 +170,10 @@
 		"name": "registerpaper",
 		"subject": "[%CONFSHORTNAME%] Registered #%NUMBER% %TITLEHINT%",
 		"body": [
-			"Submission #%PAPER% has been registered at the %CONFNAME% site.\n\n",
+			"Submission #%PAPER% has been registered on the %CONFNAME% site.\n\n",
 			"       Title: %TITLE%\n",
 			" %_(Authors, 11)%: %OPT(AUTHORS)%\n",
-			"        Site: %URL(paper, p=%NUMBER%&%AUTHORVIEWCAPABILITY%)%\n\n",
+			"        Site: %URL(paper, p=%NUMBER%, %AUTHORVIEWCAPABILITY%)%\n\n",
 			"%NOTES%%IF(REASON)%An administrator provided the following reason for this registration: %REASON%\n\n",
 			"%ELSEIF(ADMINUPDATE)%An administrator performed this registration.\n\n",
 			"%ENDIF%Contact %ADMIN% with any questions or concerns.\n\n",
@@ -158,10 +185,10 @@
 		"name": "updatepaper",
 		"subject": "[%CONFSHORTNAME%] Updated #%NUMBER% %TITLEHINT%",
 		"body": [
-			"Submission #%PAPER% has been updated at the %CONFNAME% site.\n\n",
+			"Submission #%PAPER% has been updated on the %CONFNAME% site.\n\n",
 			"       Title: %TITLE%\n",
 			" %_(Authors, 11)%: %OPT(AUTHORS)%\n",
-			"        Site: %URL(paper, p=%NUMBER%&%AUTHORVIEWCAPABILITY%)%\n\n",
+			"        Site: %URL(paper, p=%NUMBER%, %AUTHORVIEWCAPABILITY%)%\n\n",
 			"%NOTES%%IF(REASON)%An administrator provided the following reason for this update: %REASON%\n\n",
 			"%ELSEIF(ADMINUPDATE)%An administrator performed this update.\n\n",
 			"%ENDIF%Contact %ADMIN% with any questions or concerns.\n\n",
@@ -173,10 +200,10 @@
 		"name": "submitpaper",
 		"subject": "[%CONFSHORTNAME%] Submitted #%NUMBER% %TITLEHINT%",
 		"body": [
-			"Submission #%PAPER% has been submitted for review at the %CONFNAME% site.\n\n",
+			"Submission #%PAPER% has been submitted for review on the %CONFNAME% site.\n\n",
 			"       Title: %TITLE%\n",
 			" %_(Authors, 11)%: %OPT(AUTHORS)%\n",
-			"        Site: %URL(paper, p=%NUMBER%&%AUTHORVIEWCAPABILITY%)%\n\n",
+			"        Site: %URL(paper, p=%NUMBER%, %AUTHORVIEWCAPABILITY%)%\n\n",
 			"%NOTES%%IF(REASON)%An administrator provided the following reason for this update: %REASON%\n\n",
 			"%ELSEIF(ADMINUPDATE)%An administrator performed this update.\n\n",
 			"%ENDIF%Contact %ADMIN% with any questions or concerns.\n\n",
@@ -188,10 +215,10 @@
 		"name": "submitfinalpaper",
 		"subject": "[%CONFSHORTNAME%] Updated accepted #%NUMBER% %TITLEHINT%",
 		"body": [
-			"Accepted submission #%PAPER% has been updated at the %CONFNAME% submission site.\n\n",
+			"Accepted submission #%PAPER% has been updated on the %CONFNAME% submission site.\n\n",
 			"       Title: %TITLE%\n",
 			" %_(Authors, 11)%: %OPT(AUTHORS)%\n",
-			"        Site: %URL(paper, p=%NUMBER%&%AUTHORVIEWCAPABILITY%)%\n\n",
+			"        Site: %URL(paper, p=%NUMBER%, %AUTHORVIEWCAPABILITY%)%\n\n",
 			"%NOTES%%IF(REASON)%An administrator provided the following reason for this update: %REASON%\n\n",
 			"%ELSEIF(ADMINUPDATE)%An administrator performed this update.\n\n",
 			"%ENDIF%Contact %ADMIN% with any questions or concerns.\n\n",
@@ -285,8 +312,8 @@
 			"     Decline: %URL(review, p=%NUMBER%&cap=%REVIEWACCEPTOR%&decline=1)%\n\n",
 			"%IF(NEEDPASSWORD)%",
 			"You haven't used the site as %EMAIL% before, so you may need to create a password to sign in. Use this link to set one up:\n\n",
-			"%RESETPASSWORDLINK%\n\n",
-			"Should the link expire, obtain a new link using \"Forgot my password\".\n\n",
+			"%PASSWORDLINK%\n\n",
+			"Should the link expire, obtain a new one using \"Forgot my password\".\n\n",
 			"%ENDIF%",
 			"Thank you for your help -- we appreciate that reviewing is hard work.\n\n",
 			"Contact %ADMIN% with any questions or concerns.\n\n",
@@ -336,7 +363,7 @@
 	},
 
 	{
-		"name": "refusereviewrequest",
+		"name": "declinereviewrequest",
 		"subject": "[%CONFSHORTNAME%] Review request for submission #%NUMBER% declined",
 		"body": [
 			"Dear %NAME%,\n\n",
@@ -418,7 +445,7 @@
 		"subject": "[%CONFSHORTNAME%] Submitted %REVIEWNAME(SUBJECT)% %TITLEHINT%",
 		"body": [
 			"Greetings,\n\n",
-			"%REVIEWNAME% for %CONFNAME% submission #%NUMBER% has been submitted. The review is available at the submission site.\n\n",
+			"%REVIEWNAME% for %CONFNAME% submission #%NUMBER% has been submitted. The review is available on the submission site.\n\n",
 			"        Site: %URL(paper, p=%NUMBER%)%\n",
 			"       Title: %TITLE%\n",
 			" %_(Authors, 11)%: %OPT(AUTHORS)%\n",
@@ -435,7 +462,7 @@
 		"subject": "[%CONFSHORTNAME%] Updated %REVIEWNAME(SUBJECT)% %TITLEHINT%",
 		"body": [
 			"Greetings,\n\n",
-			"%REVIEWNAME% for %CONFNAME% submission #%NUMBER% has been updated. The review is available at the submission site.\n\n",
+			"%REVIEWNAME% for %CONFNAME% submission #%NUMBER% has been updated. The review is available on the submission site.\n\n",
 			"        Site: %URL(paper, p=%NUMBER%)%\n",
 			"       Title: %TITLE%\n",
 			" %_(Authors, 11)%: %OPT(AUTHORS)%\n",

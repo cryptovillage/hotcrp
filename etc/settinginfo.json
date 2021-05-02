@@ -1,26 +1,24 @@
 [
     {
-        "name": "opt.shortName", "group": "basics",
-        "json_name": "conference_abbreviation",
+        "name": "conference_abbreviation", "storage": "opt.shortName", "group": "basics",
         "title": "Conference abbreviation",
         "type": "simplestring", "size": 20, "autogrow": true,
         "require": "src/settings/s_basics.php",
         "validator_class": "Basics_SettingParser"
     },
     {
-        "name": "opt.longName", "group": "basics",
-        "json_name": "conference_name",
-        "title": "Conference name",
-        "type": "simplestring", "size": 70, "placeholder": "(same as abbreviation)",
+        "name": "conference_name", "storage": "opt.longName", "group": "basics",
+        "title": "Conference name", "placeholder": "(same as abbreviation)",
+        "type": "simplestring", "size": 70,
         "validator_class": "Basics_SettingParser"
     },
     {
         "name": "au_seerev", "group": "decisions",
-        "json_name": "review_visibility_author",
+        "json_name": "author_view_review",
         "title": "Authors can see reviews",
         "type": "radio",
-        "values": [0, 1, 2, 3], "default_value": 0,
-        "json_values": ["no", "unless-incomplete", "yes", "by-tag"]
+        "values": [0, 2, 3], "default_value": 0,
+        "json_values": ["no", "yes", "by-tag"]
     },
     {
         "name": "cmt_always", "group": "reviews",
@@ -41,7 +39,7 @@
         "type": "checkbox"
     },
     {
-        "name": "decisions", "group": "decisions", "anchorid": "decision-types",
+        "name": "decisions", "group": "decisions", "hashid": "decision-types",
         "parser_class": "Decisions_SettingParser"
     },
     {
@@ -80,22 +78,22 @@
         "json_values": ["no", "blind", "yes"]
     },
     {
-        "name": "final_done", "group": "decisons",
+        "name": "final_done", "group": "final",
         "title": "Final version upload hard deadline",
         "type": "date"
     },
     {
-        "name": "final_grace", "group": "decisons",
+        "name": "final_grace", "group": "final",
         "title": "Final version upload grace period",
         "type": "grace"
     },
     {
-        "name": "final_open", "group": "decisons",
+        "name": "final_open", "group": "final",
         "title": "Collect final versions setting",
         "type": "checkbox"
     },
     {
-        "name": "final_soft", "group": "decisons",
+        "name": "final_soft", "group": "final",
         "title": "Final version upload deadline",
         "type": "date", "date_backup": "final_done"
     },
@@ -114,97 +112,95 @@
         "type": "string"
     },
     {
-        "name": "msg.clickthrough_review", "group": "messages",
+        "name": "review_terms", "group": "messages",
         "title": "Clickthrough review terms",
-        "type": "htmlstring", "size": 10,
-        "ifnonempty": "opt.clickthrough_review", "message_default": "msg.clickthrough_review"
+        "type": "htmlstring", "size": 10, "storage": "msg.clickthrough_review",
+        "ifnonempty": "review_terms_exist"
     },
     {
-        "name": "msg.clickthrough_submit", "group": "messages",
+        "name": "submission_terms", "group": "messages",
         "title": "Clickthrough submission terms",
-        "type": "htmlstring", "size": 10,
-        "ifnonempty": "opt.clickthrough_submit", "message_default": "msg.clickthrough_submit"
+        "type": "htmlstring", "size": 10, "storage": "msg.clickthrough_submit",
+        "ifnonempty": "submission_terms_exist"
     },
     {
-        "name": "msg.conflictdef", "group": "messages",
+        "name": "conflict_description", "group": "messages",
         "title": "Definition of conflict of interest",
-        "type": "htmlstring", "size": 5, "message_default": "msg.conflictdef"
+        "type": "htmlstring", "size": 5, "storage": "msg.conflictdef"
     },
     {
-        "name": "msg.finalsubmit", "group": "decisions",
-        "title": "Final paper submission message",
-        "type": "htmlstring", "message_default": "msg.finalsubmit"
+        "name": "final_edit_message", "group": "final",
+        "title": "Final version edit message",
+        "type": "htmlstring", "storage": "msg.finalsubmit"
     },
     {
-        "name": "msg.home", "group": "messages",
+        "name": "home_message", "group": "messages",
         "title": "Home page message",
-        "type": "htmlstring", "message_default": "msg.home"
+        "type": "htmlstring", "storage": "msg.home"
     },
     {
-        "name": "msg.resp_instrux", "group": "responses",
+        "name": "resp_instrux", "group": "responses",
         "title": "Authors’ response instructions",
-        "type": "htmlstring", "size": 3, "message_default": "msg.resp_instrux",
+        "type": "htmlstring", "size": 3, "storage": "msg.resp_instrux",
         "message_context_setting": "+resp_words",
         "extensible": true
     },
     {
-        "name": "msg.revprefdescription", "group": "messages",
+        "name": "preference_instructions", "group": "messages",
         "title": "Review preference instructions",
-        "type": "htmlstring", "size": 20,
-        "message_default": "msg.revprefdescription",
+        "type": "htmlstring", "size": 20, "storage": "msg.revprefdescription",
         "message_context_setting": "has_topics"
     },
     {
-        "name": "msg.submit", "group": "messages",
-        "title": "Paper submission message",
-        "type": "htmlstring", "size": 5, "message_default": "msg.submit"
+        "name": "submission_edit_message", "group": "messages",
+        "title": "Submission edit message",
+        "type": "htmlstring", "size": 5, "storage": "msg.submit"
     },
     {
         "name": "next_optionid", "group": "subform",
         "internal": true
     },
     {
-        "name": "opt.clickthrough_review",
+        "name": "review_terms_exist",
         "internal": true, "storage": "ova.clickthrough_review"
     },
     {
-        "name": "opt.clickthrough_submit",
+        "name": "submission_terms_exist",
         "internal": true, "storage": "ova.clickthrough_submit"
     },
     {
-        "name": "opt.conferenceSite", "group": "basics",
-        "title": "Conference URL",
+        "name": "conference_url", "group": "basics",
+        "title": "Conference URL", "storage": "opt.conferenceSite",
         "type": "urlstring", "optional": true, "size": 70, "placeholder": "N/A"
     },
     {
-        "name": "opt.contactEmail", "group": "basics",
-        "title": "Email of site contact",
+        "name": "site_contact_email", "group": "basics",
+        "title": "Email of site contact", "storage": "opt.contactEmail",
         "type": "emailstring", "optional": true, "size": 40, "invalid_value": "you@example.com",
         "validator_class": "Basics_SettingParser"
     },
     {
-        "name": "opt.contactName", "group": "basics",
-        "title": "Name of site contact",
+        "name": "site_contact_name", "group": "basics",
+        "title": "Name of site contact", "storage": "opt.contactName",
         "type": "simplestring", "size": 50, "invalid_value": "Your Name"
     },
     {
-        "name": "opt.emailCc", "group": "basics",
-        "title": "Default Cc for reviewer email",
+        "name": "email_default_cc", "group": "basics",
+        "title": "Default Cc for mail tool", "storage": "opt.emailCc",
         "type": "emailheader", "size": 80, "placeholder": "(none)"
     },
     {
-        "name": "opt.emailReplyTo", "group": "basics",
-        "title": "Reply-To field for email",
+        "name": "email_default_reply_to", "group": "basics",
+        "title": "Default Reply-To for mail tool", "storage": "opt.emailReplyTo",
         "type": "emailheader", "size": 80, "placeholder": "(none)"
     },
     {
-        "name": "opt.timezone",
-        "internal": true
-    },
-    {
-        "name": "options", "group": "subform", "anchorid": false,
+        "name": "options", "group": "subform", "hashid": false,
         "parser_class": "Options_SettingParser",
-        "type": "string", "extensible": false
+        "type": "string", "extensible": false, "storage": "dat.options"
+    },
+    {
+        "name": "options:version", "internal": true, "storage": "val.options"
     },
     {
         "name": "outcome_map", "group": "decisions",
@@ -222,7 +218,7 @@
     },
     {
         "name": "pc_seeallrev", "group": "rev",
-        "title": "PC can see all reviews",
+        "title": "PC can see all review contents",
         "type": "radio",
         "values": [0, 1, 3, 4], "default_value": 0,
         "json_values": ["no", "yes", "unless-incomplete-assigned", "if-all-assignments-complete"]
@@ -260,42 +256,42 @@
         "require": "src/settings/s_reviews.php", "position": 1
     },
     {
-        "name": "resp_active", "group": "decisions",
+        "name": "resp_active", "group": "responses",
         "title": "Collect authors’ responses",
         "type": "checkbox"
     },
     {
-        "name": "resp_done", "group": "decisions",
+        "name": "resp_done", "group": "responses",
         "title": "Response hard deadline",
         "type": "date", "extensible": true
     },
     {
-        "name": "resp_grace", "group": "decisions",
+        "name": "resp_grace", "group": "responses",
         "title": "Response grace period",
         "type": "grace", "extensible": true
     },
     {
-        "name": "resp_open", "group": "decisions",
+        "name": "resp_open", "group": "responses",
         "title": "Response start time",
         "type": "date", "extensible": true
     },
     {
-        "name": "resp_rounds", "anchorid": false, "group": "decisions",
+        "name": "resp_rounds", "hashid": false, "group": "responses",
         "parser_class": "Responses_SettingParser",
         "type": "string"
     },
     {
-        "name": "resp_roundname", "group": "decisions",
+        "name": "resp_roundname", "group": "responses",
         "title": "Response name",
         "type": "tag", "size": 20, "internal": true, "extensible": true
     },
     {
-        "name": "resp_search", "group": "decisions",
+        "name": "resp_search", "group": "responses",
         "title": "Response search",
         "type": "string", "size": 40, "placeholder": "(All)", "extensible": true
     },
     {
-        "name": "resp_words", "group": "decisions",
+        "name": "resp_words", "group": "responses",
         "title": "Response word limit",
         "type": "zint", "size": 5, "placeholder": "none", "default_value": 500,
         "extensible": true
@@ -327,9 +323,48 @@
         "require": "src/settings/s_reviews.php", "position": 1
     },
     {
-        "name": "review_form", "group": "reviewform", "anchorid": false,
+        "name": "review_form", "group": "reviewform", "hashid": false,
         "parser_class": "ReviewForm_SettingParser",
         "type": "string"
+    },
+    {
+        "name": "rf_name", "group": "reviewform", "internal": true,
+        "extensible": "word", "title": "Field name"
+    },
+    {
+        "name": "rf_description", "group": "reviewform", "internal": true,
+        "extensible": "word",
+        "title": "Field description", "title_pattern": "${req.rf_name_$} description"
+    },
+    {
+        "name": "rf_options", "group": "reviewform", "internal": true,
+        "extensible": "word",
+        "title": "Field choices", "title_pattern": "${req.rf_name_$} choices"
+    },
+    {
+        "name": "rf_colors", "group": "reviewform", "internal": true,
+        "extensible": "word",
+        "title": "Field colors", "title_pattern": "${req.rf_name_$} colors"
+    },
+    {
+        "name": "rf_required", "group": "reviewform", "internal": true,
+        "extensible": "word",
+        "title": "Field requirement", "title_pattern": "${req.rf_name_$} requirement"
+    },
+    {
+        "name": "rf_visibility", "group": "reviewform", "internal": true,
+        "extensible": "word",
+        "title": "Field visibility", "title_pattern": "${req.rf_name_$} visibility"
+    },
+    {
+        "name": "rf_ec", "group": "reviewform", "internal": true,
+        "extensible": "word",
+        "title": "Field presence", "title_pattern": "${req.rf_name_$} presence"
+    },
+    {
+        "name": "rf_ecs", "group": "reviewform", "internal": true,
+        "extensible": "word",
+        "title": "Field presence condition", "title_pattern": "${req.rf_name_$} presence condition"
     },
     {
         "name": "roundname", "group": "reviews",
@@ -361,7 +396,7 @@
         "storage": "dat.sub_banal", "extensible": true
     },
     {
-        "name": "sub_banal_opt", "group": "subform",
+        "name": "sub_banal_opt",
         "internal": true, "type": "string",
         "storage": "opt.sub_banal", "extensible": true
     },
@@ -407,6 +442,14 @@
         "type": "checkbox",
         "storage": false, "extensible": true
     },
+    {   "name": "sub_banal_m1", "group": "final", "extensible": "override"   },
+    {   "name": "sub_banal_bodyfontsize_m1", "group": "final", "extensible": "override"   },
+    {   "name": "sub_banal_bodylineheight_m1", "group": "final", "extensible": "override"   },
+    {   "name": "sub_banal_columns_m1", "group": "final", "extensible": "override"   },
+    {   "name": "sub_banal_pagelimit_m1", "group": "final", "extensible": "override"   },
+    {   "name": "sub_banal_papersize_m1", "group": "final", "extensible": "override"   },
+    {   "name": "sub_banal_textblock_m1", "group": "final", "extensible": "override"   },
+    {   "name": "sub_banal_unlimitedref_m1", "group": "final", "extensible": "override"   },
     {
         "name": "sub_blind", "group": "submissions",
         "title": "Submission anonymity",
@@ -416,7 +459,7 @@
     },
     {
         "name": "sub_collab", "group": "subform",
-        "title": "Collect other collaborators",
+        "title": "Collect other conflicts and collaborators",
         "type": "checkbox"
     },
     {
@@ -501,8 +544,8 @@
         "type": "taglist", "parser_class": "Tags_SettingParser", "size": 50, "autogrow": true
     },
     {
-        "name": "tag_color", "group": "tags", "anchorid": "colors-and-styles",
-        "title": "Tag colors",
+        "name": "tag_color", "group": "tags", "hashid": "colors-and-styles",
+        "title": "Tag colors", "title_pattern": "${capsuffix} tag colors",
         "type": "taglist", "parser_class": "Tags_SettingParser", "size": 40, "autogrow": true,
         "extensible": "word"
     },
@@ -540,5 +583,13 @@
         "name": "tracks", "group": "tracks",
         "parser_class": "Tracks_SettingParser",
         "type": "string"
-    }
+    },
+    {   "name": "paperacc", "group": "none"   },
+    {   "name": "paperlead", "group": "none"   },
+    {   "name": "tracker", "group": "none"   },
+    {   "name": "allowPaperOption", "group": "none"   },
+    {   "name": "pcrev_assigntime", "group": "none"   },
+    {   "name": "pcrev_informtime", "group": "none"   },
+    {   "name": "has_colontag", "group": "none"   },
+    {   "name": "no_papersub", "group": "none"   }
 ]

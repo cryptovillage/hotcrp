@@ -8,8 +8,9 @@ foreach (["c" => "count", "V" => "verbose", "m" => "match",
     if (isset($arg[$s]) && !isset($arg[$l]))
         $arg[$l] = $arg[$s];
 }
-if (isset($arg["silent"]))
+if (isset($arg["silent"])) {
     $arg["quiet"] = false;
+}
 if (isset($arg["h"]) || isset($arg["help"])) {
     fwrite(STDOUT, "Usage: php batch/cleandocstore.php [-c COUNT] [-V] [-m MATCH]\n"
                  . "           [-d|--dry-run] [-o OUTPUTDIR]\n");
@@ -20,8 +21,7 @@ if (isset($arg["count"]) && !ctype_digit($arg["count"])) {
     exit(1);
 }
 
-$ConfSitePATH = preg_replace(',/batch/[^/]+,', '', __FILE__);
-require_once("$ConfSitePATH/src/init.php");
+require_once(preg_replace('/\/batch\/[^\/]+/', '/src/init.php', __FILE__));
 
 $dp = $Conf->docstore();
 if (!$dp) {
@@ -34,7 +34,7 @@ $usage_directory = $m[1];
 $count = isset($arg["count"]) ? intval($arg["count"]) : 10;
 $verbose = isset($arg["verbose"]);
 
-$dmatcher = new DocumentHashMatcher(get($arg, "match"));
+$dmatcher = new DocumentHashMatcher($arg["match"] ?? null);
 $dmatcher->set_extension(".pdf");
 $fparts = new DocumentFileTree($dp, $dmatcher);
 $cf = new CheckFormat($Conf);

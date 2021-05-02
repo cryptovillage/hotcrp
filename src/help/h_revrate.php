@@ -3,7 +3,7 @@
 // Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
 
 class RevRate_HelpTopic {
-    static function render($hth) {
+    static function render(HelpRenderer $hth) {
         $what = "PC members";
         if ($hth->conf->setting("rev_ratings") == REV_RATINGS_PC_EXTERNAL)
             $what = "PC members and external reviewers";
@@ -22,12 +22,10 @@ their reviews.</p>
 <li><strong>Needs work</strong>: The review needs revision. If possible,
   indicate why using a more-specific rating.</li>
 <li><strong>Too short</strong>: The review is incomplete or too terse.</li>
-<li><strong>Too vague</strong>: The review’s arguments are weak, mushy, or
-  otherwise technically unconvincing.</li>
+<li><strong>Too vague</strong>: The review has weak or unconvincing arguments or gives little useful direction.</li>
 <li><strong>Too narrow</strong>: The review’s perspective seems limited; for
   instance, it might overly privilege the reviewer’s own work.</li>
-<li><strong>Not constructive</strong>: The review’s tone is unnecessarily
-  aggressive or gives little useful direction.</li>
+<li><strong>Disrespectful</strong>: The review’s tone is unnecessarily aggressive or exhibits bias.</li>
 <li><strong>Not correct</strong>: The review misunderstands the paper.</li>
 </ul>
 
@@ -36,9 +34,9 @@ their reviews.</p>
   never shows review ratings to authors.</p>
 
 <p>To find which of your reviews might need work, simply ",
-$hth->search_link("search for “rate:bad”", "rate:bad"), ".
+$hth->search_link("search for “rate:bad:me”", "rate:bad:me"), ".
 To find all reviews with positive ratings, ",
-$hth->search_link("search for “re:any&nbsp;rate:good”", "re:any rate:good"), ".
+$hth->search_link("search for “rate:good”", "rate:good"), ".
 You may also search for reviews with specific ratings; for instance, ",
 $hth->search_link("search for “rate:short”", "rate:short"), ".</p>";
 

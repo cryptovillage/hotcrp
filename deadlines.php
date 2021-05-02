@@ -1,6 +1,6 @@
 <?php
 // deadlines.php -- HotCRP deadline reporting page
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 require_once("src/initweb.php");
 
@@ -16,7 +16,7 @@ if ($Me->contactId && $Me->is_disabled()) {
 $Conf->header("Deadlines", "deadlines");
 
 if ($Viewer->privChair) {
-    echo "<p>As PC chair, you can <a href='", hoturl("settings"), "'>change the deadlines</a>.</p>\n";
+    echo "<p>As PC chair, you can <a href=\"", $Conf->hoturl("settings"), "\">change the deadlines</a>.</p>\n";
 }
 
 echo "<dl>\n";
@@ -24,7 +24,8 @@ echo "<dl>\n";
 
 function printDeadline($time, $phrase, $description) {
     global $Conf;
-    echo "<dt><strong>", $phrase, "</strong>: ", $Conf->unparse_time_long($time, "span") , "</dt>\n",
+    echo "<dt><strong>", $phrase, "</strong>: ", $Conf->unparse_time_long($time),
+        $Conf->unparse_usertime_span($time), "</dt>\n",
         "<dd>", $description, ($description ? "<br />" : ""), "</dd>";
 }
 
@@ -49,7 +50,7 @@ if ($dl->sub->sub ?? false) {
 if ($dl->resps ?? false) {
     foreach ($dl->resps as $rname => $dlr) {
         if (($dlr->open ?? false)
-            && $dlr->open <= $Now
+            && $dlr->open <= Conf::$now
             && ($dlr->done ?? false)) {
             if ($rname == 1) {
                 printDeadline($dlr->done, $Conf->_("Response deadline"),
@@ -75,14 +76,14 @@ if (($dl->rev ?? false) && ($dl->rev->open ?? false)) {
         if ($Viewer->isPC) {
             $ps = +$Conf->setting("pcrev_soft$isuf");
             $ph = +$Conf->setting("pcrev_hard$isuf");
-            if ($ph && ($ph < $Now || $ps < $Now)) {
+            if ($ph && ($ph < Conf::$now || $ps < Conf::$now)) {
                 $thisdl[] = "PH" . $ph;
             } else if ($ps) {
                 $thisdl[] = "PS" . $ps;
             }
         }
         if ($es != $ps || $eh != $ph) {
-            if ($eh && ($eh < $Now || $es < $Now)) {
+            if ($eh && ($eh < Conf::$now || $es < Conf::$now)) {
                 $thisdl[] = "EH" . $eh;
             } else if ($es) {
                 $thisdl[] = "ES" . $es;
@@ -108,7 +109,8 @@ if (($dl->rev ?? false) && ($dl->rev->open ?? false)) {
             $roundname = "";
         }
         foreach (explode(" ", $dltext) as $dldesc) {
-            list($dt, $dv) = array(substr($dldesc, 0, 2), +substr($dldesc, 2));
+            $dt = substr($dldesc, 0, 2);
+            $dv = (int) substr($dldesc, 2);
             if ($dt === "PS") {
                 printDeadline($dv, $Conf->_("%s review deadline", $roundname),
                               $Conf->_("%s reviews are requested by this deadline.", $roundname));

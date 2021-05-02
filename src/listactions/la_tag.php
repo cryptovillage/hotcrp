@@ -1,6 +1,6 @@
 <?php
 // listactions/la_tag.php -- HotCRP helper classes for list actions
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class Tag_ListAction extends ListAction {
     static function render(PaperList $pl, Qrequest $qreq) {
@@ -38,9 +38,9 @@ class Tag_ListAction extends ListAction {
             ["linelink-class" => "has-fold foldc fold99c ui-unfold js-tag-list-action", "content" => $t]];
     }
     function allow(Contact $user, Qrequest $qreq) {
-        return $user->can_change_some_tag();
+        return $user->can_edit_some_tag();
     }
-    function run(Contact $user, $qreq, $ssel) {
+    function run(Contact $user, Qrequest $qreq, SearchSelection $ssel) {
         $papers = $ssel->selection();
 
         $act = $qreq->tagfn;
@@ -60,7 +60,7 @@ class Tag_ListAction extends ListAction {
         $x = array("action,paper,tag\n");
         if ($act === "s" || $act === "so" || $act === "sos" || $act === "sor") {
             foreach ($tags as $t) {
-                $x[] = "cleartag,all," . TagInfo::base($t) . "\n";
+                $x[] = "cleartag,all," . Tagger::base($t) . "\n";
             }
         }
         if ($act === "s" || $act === "a") {
@@ -91,8 +91,8 @@ class Tag_ListAction extends ListAction {
             $tagger = new Tagger($user);
             if ($tagger->check($tagreq, Tagger::NOPRIVATE | Tagger::NOVALUE)
                 && $tagger->check($source_tag, Tagger::NOPRIVATE | Tagger::NOCHAIR | Tagger::NOVALUE)) {
-                $r = new PaperRank($source_tag, $tagreq, $papers, $qreq->tagcr_gapless,
-                                   "Search", "search");
+                $r = new PaperRank($user->conf, $source_tag, $tagreq, $papers,
+                                   $qreq->tagcr_gapless, "Search", "search");
                 $r->run($qreq->tagcr_method);
                 $assignset->set_overrides(Contact::OVERRIDE_CONFLICT | Contact::OVERRIDE_TAG_CHECKS);
                 $assignset->parse($r->unparse_assignment());
@@ -100,7 +100,7 @@ class Tag_ListAction extends ListAction {
                     $qreq->q = "order:$tagreq";
                 }
             } else {
-                $assignset->error_here($tagger->error_html);
+                $assignset->error($tagger->error_html());
             }
         }
         if (($errors = $assignset->messages_div_html())) {
@@ -113,15 +113,14 @@ class Tag_ListAction extends ListAction {
         }
         $success = $assignset->execute();
 
-        assert(!$user->conf->headerPrinted);
-        if (!$user->conf->headerPrinted && $qreq->ajax) {
+        if ($qreq->ajax) {
             json_exit(["ok" => $success]);
-        } else if (!$user->conf->headerPrinted && $success) {
+        } else if ($success) {
             if (!$errors) {
                 $user->conf->confirmMsg("Tags saved.");
             }
             $args = ["atab" => "tag"] + $qreq->subset_as_array(["tag", "tagfn", "tagcr_method", "tagcr_source", "tagcr_gapless"]);
-            $user->conf->self_redirect($qreq, $args);
+            $user->conf->redirect_self($qreq, $args);
         }
     }
 }

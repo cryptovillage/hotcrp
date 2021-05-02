@@ -3,18 +3,20 @@
 // Copyright (c) 2008-2020 Eddie Kohler; see LICENSE.
 
 class Mail_API {
-    static function mailtext(Contact $user, Qrequest $qreq, $prow) {
+    static function mailtext(Contact $user, Qrequest $qreq, PaperInfo $prow = null) {
         if (!$user->isPC
-            || ($prow && !$user->can_view_paper($prow)))
+            || ($prow && !$user->can_view_paper($prow))) {
             return new JsonResult(403, "Permission error.");
+        }
 
         $recipient = [];
         foreach (["first" => "firstName", "last" => "lastName",
                   "affiliation" => "affiliation", "email" => "email"] as $r => $k) {
-            if (isset($qreq[$k]))
+            if (isset($qreq[$k])) {
                 $recipient[$k] = $qreq[$k];
-            else if (isset($qreq[$r]))
+            } else if (isset($qreq[$r])) {
                 $recipient[$k] = $qreq[$r];
+            }
         }
         $recipient = new Contact($recipient, $user->conf);
 
@@ -28,7 +30,7 @@ class Mail_API {
         if (isset($qreq->r)
             && ctype_digit($qreq->r)
             && $prow
-            && ($rrow = $prow->review_of_id($qreq->r))
+            && ($rrow = $prow->review_by_id($qreq->r))
             && $user->can_view_review($prow, $rrow)) {
             $mailinfo["rrow"] = $rrow;
         }
@@ -43,7 +45,7 @@ class Mail_API {
         } else if (isset($qreq->template)) {
             $mt = $user->conf->mail_template($qreq->template);
             if (!$mt
-                || (!$user->privChair && !get($mt, "allow_pc"))) {
+                || (!$user->privChair && !($mt->allow_pc ?? false))) {
                 return new JsonResult(404, "No such template.");
             }
             $j["subject"] = $mailer->expand($mt->subject, "subject");

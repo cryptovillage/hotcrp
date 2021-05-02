@@ -1,7 +1,8 @@
 <?php
 // helpers.php -- HotCRP non-class helper functions
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
+/** @return array */
 function mkarray($value) {
     if (is_array($value)) {
         return $value;
@@ -13,16 +14,21 @@ function mkarray($value) {
 
 // string helpers
 
+/** @param null|int|string $value
+ * @return int */
 function cvtint($value, $default = -1) {
     $v = trim((string) $value);
     if (is_numeric($v)) {
         $ival = intval($v);
-        if ($ival == floatval($v))
+        if ($ival == floatval($v)) {
             return $ival;
+        }
     }
     return $default;
 }
 
+/** @param null|int|float|string $value
+ * @return int|float */
 function cvtnum($value, $default = -1) {
     $v = trim((string) $value);
     if (is_numeric($v)) {
@@ -34,23 +40,27 @@ function cvtnum($value, $default = -1) {
 
 // web helpers
 
+/** @param int|float $n
+ * @return string */
 function unparse_number_pm_html($n) {
     if ($n < 0) {
         return "−" . (-$n); // U+2212 MINUS
     } else if ($n > 0) {
         return "+" . $n;
     } else {
-        return 0;
+        return "0";
     }
 }
 
+/** @param int|float $n
+ * @return string */
 function unparse_number_pm_text($n) {
     if ($n < 0) {
         return "-" . (-$n);
     } else if ($n > 0) {
         return "+" . $n;
     } else {
-        return 0;
+        return "0";
     }
 }
 
@@ -63,18 +73,19 @@ function hoturl_add_raw($url, $component) {
 }
 
 function hoturl($page, $param = null) {
-    global $Conf;
-    return $Conf->hoturl($page, $param);
+    return Conf::$main->hoturl($page, $param);
 }
 
+/** @deprecated */
 function hoturl_post($page, $param = null) {
-    global $Conf;
-    return $Conf->hoturl($page, $param, Conf::HOTURL_POST);
+    return Conf::$main->hoturl($page, $param, Conf::HOTURL_POST);
 }
 
 
-class JsonResult {
+class JsonResult implements JsonSerializable {
+    /** @var ?int */
     public $status;
+    /** @var array<string,mixed> */
     public $content;
 
     function __construct($values = null) {
@@ -97,73 +108,105 @@ class JsonResult {
             assert($this->status && $this->status > 299);
             $this->content = ["ok" => false, "error" => $values];
         } else {
+            assert(is_associative_array($values));
             $this->content = $values;
         }
     }
+    /** @return JsonResult */
     static function make($jr, $arg2 = null) {
-        if (is_int($jr)) {
-            $jr = new JsonResult($jr, $arg2);
-        } else if (!is_object($jr) || !($jr instanceof JsonResult)) {
-            $jr = new JsonResult($jr);
+        if ($jr instanceof JsonResult) {
+            return $jr;
+        } else if (is_int($jr)) {
+            return new JsonResult($jr, $arg2);
+        } else {
+            return new JsonResult($jr);
         }
-        return $jr;
     }
-    function export_errors() {
+    function export_errors(Conf $conf = null) {
         if (isset($this->content["error"])) {
-            Conf::msg_error($this->content["error"]);
+            Conf::msg_on($conf, $this->content["error"], 2);
         }
-        if (isset($this->content["errf"])) {
-            foreach ($this->content["errf"] as $f => $x) {
-                Ht::error_at((string) $f);
+    }
+    function export_messages(Conf $conf) {
+        $this->export_errors();
+        foreach ($this->content["message_list"] ?? [] as $mx) {
+            $ma = (array) $mx;
+            if (is_string($ma["message"] ?? null) && $ma["message"] !== "") {
+                Conf::msg_on($conf, $ma["message"], $ma["status"]);
+            }
+            if (is_string($ma["field"] ?? null)) {
+                Ht::message_set()->msg_at($ma["field"], $ma["message"] ?? null, $ma["status"]);
             }
         }
+    }
+    /** @param bool $validated */
+    function emit($validated) {
+        if ($this->status) {
+            if (!isset($this->content["ok"])) {
+                $this->content["ok"] = $this->status <= 299;
+            }
+            if (!isset($this->content["status"])) {
+                $this->content["status"] = $this->status;
+            }
+        } else if (isset($this->content["status"])) {
+            $this->status = $this->content["status"];
+        }
+        if ($validated) {
+            // Don’t set status on unvalidated requests, since that can leak
+            // information (e.g. via <link prefetch onerror>).
+            if ($this->status) {
+                http_response_code($this->status);
+            }
+            header("Access-Control-Allow-Origin: *");
+        }
+        header("Content-Type: application/json; charset=utf-8");
+        echo json_encode_browser($this->content);
+    }
+    function jsonSerialize() {
+        return $this->content;
     }
 }
 
 class JsonResultException extends Exception {
+    /** @var JsonResult */
     public $result;
-    static public $capturing = false;
+    /** @var int */
+    static public $capturing = 0;
+    /** @param JsonResult $j */
     function __construct($j) {
         $this->result = $j;
+    }
+}
+
+class Redirection extends Exception {
+    /** @var string */
+    public $url;
+    /** @param string $url */
+    function __construct($url) {
+        parent::__construct("Redirect to $url");
+        $this->url = $url;
     }
 }
 
 function json_exit($json, $arg2 = null) {
     global $Qreq;
     $json = JsonResult::make($json, $arg2);
-    if (JsonResultException::$capturing) {
+    if (JsonResultException::$capturing > 0) {
         throw new JsonResultException($json);
     } else {
-        if ($json->status && !isset($json->content["ok"])) {
-            $json->content["ok"] = $json->status <= 299;
-        }
-        if ($json->status && !isset($json->content["status"])) {
-            $json->content["status"] = $json->status;
-        }
-        if ($Qreq->post && !$Qreq->post_ok()) {
-            $json->content["postvalue"] = post_value(true);
-        }
-        if ($Qreq && $Qreq->post_ok()) {
-            // Don’t set status on unvalidated requests, since that can leak
-            // information (e.g. via <link prefetch onerror>).
-            if ($json->status) {
-                http_response_code($json->status);
-            }
-            header("Access-Control-Allow-Origin: *");
-        }
-        header("Content-Type: application/json; charset=utf-8");
-        echo json_encode_browser($json->content);
+        $json->emit($Qreq && $Qreq->valid_token());
         exit;
     }
 }
 
+/** @deprecated */
 function csv_exit(CsvGenerator $csv) {
-    $csv->download_headers();
-    $csv->download();
+    $csv->emit();
     exit;
 }
 
 function foldupbutton($foldnum = 0, $content = "", $js = null) {
+    $js = $js ?? [];
     if ($foldnum) {
         $js["data-fold-target"] = $foldnum;
     }
@@ -171,25 +214,35 @@ function foldupbutton($foldnum = 0, $content = "", $js = null) {
     return Ht::link(expander(null, $foldnum) . $content, "#", $js);
 }
 
-function expander($open, $foldnum = null) {
+/** @param ?bool $open
+ * @param ?int $foldnum
+ * @param ?string $open_tooltip
+ * @return string */
+function expander($open, $foldnum = null, $open_tooltip = null) {
     $f = $foldnum !== null;
     $foldnum = ($foldnum !== 0 ? $foldnum : "");
     $t = '<span class="expander">';
-    if ($open === null || !$open) {
+    if ($open !== true) {
         $t .= '<span class="in0' . ($f ? " fx$foldnum" : "") . '">' . Icons::ui_triangle(2) . '</span>';
     }
-    if ($open === null || $open) {
-        $t .= '<span class="in1' . ($f ? " fn$foldnum" : "") . '">' . Icons::ui_triangle(1) . '</span>';
+    if ($open !== false) {
+        $t .= '<span class="in1' . ($f ? " fn$foldnum" : "");
+        if ($open_tooltip) {
+            $t .= ' need-tooltip" data-tooltip="' . htmlspecialchars($open_tooltip) . '" data-tooltip-anchor="e';
+        }
+        $t .= '">' . Icons::ui_triangle(1) . '</span>';
     }
     return $t . '</span>';
 }
 
-function actas_link($cid, $contact = null) {
-    global $Conf;
-    $contact = !$contact && is_object($cid) ? $cid : $contact;
-    $cid = is_object($contact) ? $contact->email : $cid;
-    return '<a href="' . $Conf->selfurl(null, ["actas" => $cid])
-        . '" tabindex="-1">' . Ht::img("viewas.png", "[Act as]", array("title" => "Act as " . Text::name_text($contact))) . '</a>';
+
+/** @param Contact|Author|ReviewInfo|CommentInfo $userlike
+ * @return string */
+function actas_link($userlike) {
+    global $Qreq;
+    return '<a href="' . Conf::$main->selfurl($Qreq, ["actas" => $userlike->email])
+        . '" tabindex="-1">' . Ht::img("viewas.png", "[Act as]", ["title" => "Act as " . Text::nameo($userlike, NAME_P)])
+        . '</a>';
 }
 
 
@@ -213,16 +266,16 @@ function _one_quicklink($id, $baseUrl, $urlrest, $listtype, $isprev) {
 }
 
 function goPaperForm($baseUrl = null, $args = array()) {
-    global $Conf, $Me;
+    global $Me;
     if ($Me->is_empty()) {
         return "";
     }
-    $list = $Conf->active_list();
-    $x = Ht::form($Conf->hoturl($baseUrl ? : "paper"), ["method" => "get", "class" => "gopaper"]);
+    $list = Conf::$main->active_list();
+    $x = Ht::form(Conf::$main->hoturl($baseUrl ? : "paper"), ["method" => "get", "class" => "gopaper"]);
     if ($baseUrl == "profile") {
-        $x .= Ht::entry("u", "", array("id" => "quicklink-search", "size" => 15, "placeholder" => "User search", "aria-label" => "User search", "class" => "usersearch need-autogrow"));
+        $x .= Ht::entry("u", "", ["id" => "quicklink-search", "size" => 15, "placeholder" => "User search", "aria-label" => "User search", "class" => "usersearch need-autogrow", "spellcheck" => false]);
     } else {
-        $x .= Ht::entry("p", "", array("id" => "quicklink-search", "size" => 10, "placeholder" => "(All)", "aria-label" => "Search", "class" => "papersearch need-suggest need-autogrow"));
+        $x .= Ht::entry("q", "", ["id" => "quicklink-search", "size" => 10, "placeholder" => "(All)", "aria-label" => "Search", "class" => "papersearch need-suggest need-autogrow", "spellcheck" => false]);
     }
     foreach ($args as $k => $v) {
         $x .= Ht::hidden($k, $v);
@@ -303,6 +356,7 @@ function numrangejoin($range) {
             } else if ($first === $last) {
                 $a[] = $first;
             } else {
+                /** @phan-suppress-next-line PhanTypeMismatchArgumentInternalReal */
                 $a[] = $first . "–" . substr($last, $plen);
             }
         }
@@ -337,16 +391,17 @@ function pluralx($n, $what) {
 }
 
 function pluralize($what) {
-    if ($what == "this") {
+    if ($what === "this") {
         return "these";
-    } else if ($what == "has") {
+    } else if ($what === "has") {
         return "have";
-    } else if ($what == "is") {
+    } else if ($what === "is") {
         return "are";
-    } else if (str_ends_with($what, ")") && preg_match('/\A(.*?)(\s*\([^)]*\))\z/', $what, $m)) {
+    } else if (str_ends_with($what, ")")
+               && preg_match('/\A(.*?)(\s*\([^)]*\))\z/', $what, $m)) {
         return pluralize($m[1]) . $m[2];
     } else if (preg_match('/\A.*?(?:s|sh|ch|[bcdfgjklmnpqrstvxz]y)\z/', $what)) {
-        if (substr($what, -1) == "y") {
+        if (substr($what, -1) === "y") {
             return substr($what, 0, -1) . "ies";
         } else {
             return $what . "es";
@@ -374,14 +429,14 @@ function ordinal($n) {
 function tabLength($text, $all) {
     $len = 0;
     for ($i = 0; $i < strlen($text); ++$i) {
-        if ($text[$i] == ' ') {
-            $len++;
-        } else if ($text[$i] == '\t') {
+        if ($text[$i] === ' ') {
+            ++$len;
+        } else if ($text[$i] === '\t') {
             $len += 8 - ($len % 8);
         } else if (!$all) {
             break;
         } else {
-            $len++;
+            ++$len;
         }
     }
     return $len;
@@ -395,191 +450,46 @@ function ini_get_bytes($varname, $value = null) {
     return (int) ceil(floatval($val) * (1 << (+strpos(".kmg", $last) * 10)));
 }
 
-function filter_whynot($whyNot, $keys) {
-    $revWhyNot = [];
-    foreach ($whyNot as $k => $v) {
-        if ($k === "fail" || $k === "paperId" || $k === "conf" || in_array($k, $keys))
-            $revWhyNot[$k] = $v;
+/** @param int|float $n
+ * @return string */
+function unparse_byte_size($n) {
+    if ($n > 999949999) {
+        return (round($n / 10000000) / 100) . "GB";
+    } else if ($n > 999499) {
+        return (round($n / 100000) / 10) . "MB";
+    } else if ($n > 9949) {
+        return round($n / 1000) . "kB";
+    } else if ($n > 0) {
+        return (max(round($n / 100), 1) / 10) . "kB";
+    } else {
+        return "0B";
     }
-    return $revWhyNot;
 }
 
-/** @param array{conf:Conf,paperId?:int,reviewId?:int,option?:PaperOption} $whyNot */
+/** @param int|float $n
+ * @return string */
+function unparse_byte_size_binary($n) {
+    if ($n > 1073689395) {
+        return (round($n / 10737418.24) / 100) . "GiB";
+    } else if ($n > 1048063) {
+        return (round($n / 104857.6) / 10) . "MiB";
+    } else if ($n > 10188) {
+        return round($n / 1024) . "KiB";
+    } else if ($n > 0) {
+        return (max(round($n / 102.4), 1) / 10) . "KiB";
+    } else {
+        return "0B";
+    }
+}
+
+/** @param PermissionProblem $whyNot
+ * @deprecated */
 function whyNotText($whyNot, $text_only = false) {
-    global $Conf, $Now;
-    if (is_string($whyNot)) {
-        $whyNot = array($whyNot => 1);
-    }
-    $conf = $whyNot["conf"] ?? $Conf;
-    $paperId = $whyNot["paperId"] ?? -1;
-    $reviewId = $whyNot["reviewId"] ?? -1;
-    $option = $whyNot["option"] ?? null;
-    $ms = [];
-    $quote = $text_only ? function ($x) { return $x; } : "htmlspecialchars";
-    if (isset($whyNot["invalidId"])) {
-        $x = $whyNot["invalidId"] . "Id";
-        if (isset($whyNot[$x])) {
-            $ms[] = $conf->_("Invalid " . $whyNot["invalidId"] . " number “%s”.", $quote($whyNot[$x]));
-        } else {
-            $ms[] = $conf->_("Invalid " . $whyNot["invalidId"] . " number.");
-        }
-    }
-    if (isset($whyNot["noPaper"])) {
-        $ms[] = $conf->_("Submission #%d does not exist.", $paperId);
-    }
-    if (isset($whyNot["dbError"])) {
-        $ms[] = $whyNot["dbError"];
-    }
-    if (isset($whyNot["administer"])) {
-        $ms[] = $conf->_("You can’t administer submission #%d.", $paperId);
-    }
-    if (isset($whyNot["permission"])) {
-        if ($whyNot["permission"] === "view_option") {
-            $ms[] = $conf->_c("eperm", "Permission error.", $whyNot["permission"], $paperId, $quote($option->title()));
-        } else {
-            $ms[] = $conf->_c("eperm", "Permission error.", $whyNot["permission"], $paperId);
-        }
-    }
-    if (isset($whyNot["optionNotAccepted"])) {
-        $ms[] = $conf->_("The %2\$s field is reserved for accepted submissions.", $paperId, $quote($option->title()));
-    }
-    if (isset($whyNot["documentNotFound"])) {
-        $ms[] = $conf->_("No such document “%s”.", $quote($whyNot["documentNotFound"]));
-    }
-    if (isset($whyNot["signin"])) {
-        $ms[] = $conf->_c("eperm", "You have been signed out.", $whyNot["signin"], $paperId);
-    }
-    if (isset($whyNot["withdrawn"])) {
-        $ms[] = $conf->_("Submission #%d has been withdrawn.", $paperId);
-    }
-    if (isset($whyNot["notWithdrawn"])) {
-        $ms[] = $conf->_("Submission #%d is not withdrawn.", $paperId);
-    }
-    if (isset($whyNot["notSubmitted"])) {
-        $ms[] = $conf->_("Submission #%d is only a draft.", $paperId);
-    }
-    if (isset($whyNot["rejected"])) {
-        $ms[] = $conf->_("Submission #%d was not accepted for publication.", $paperId);
-    }
-    if (isset($whyNot["reviewsSeen"])) {
-        $ms[] = $conf->_("You can’t withdraw a submission after seeing its reviews.", $paperId);
-    }
-    if (isset($whyNot["decided"])) {
-        $ms[] = $conf->_("The review process for submission #%d has completed.", $paperId);
-    }
-    if (isset($whyNot["updateSubmitted"])) {
-        $ms[] = $conf->_("Submission #%d can no longer be updated.", $paperId);
-    }
-    if (isset($whyNot["notUploaded"])) {
-        $ms[] = $conf->_("A PDF upload is required to submit.");
-    }
-    if (isset($whyNot["reviewNotSubmitted"])) {
-        $ms[] = $conf->_("This review is not yet ready for others to see.");
-    }
-    if (isset($whyNot["reviewNotComplete"])) {
-        $ms[] = $conf->_("Your own review for #%d is not complete, so you can’t view other people’s reviews.", $paperId);
-    }
-    if (isset($whyNot["responseNotReady"])) {
-        $ms[] = $conf->_("The authors’ response is not yet ready for reviewers to view.");
-    }
-    if (isset($whyNot["reviewsOutstanding"])) {
-        $ms[] = $conf->_("You will get access to the reviews once you complete your assigned reviews. If you can’t complete your reviews, please let the organizers know via the “Refuse review” links.");
-        if (!$text_only) {
-            $ms[] = $conf->_("<a href=\"%s\">List assigned reviews</a>", $conf->hoturl("search", "q=&amp;t=r"));
-        }
-    }
-    if (isset($whyNot["reviewNotAssigned"])) {
-        $ms[] = $conf->_("You are not assigned to review submission #%d.", $paperId);
-    }
-    if (isset($whyNot["deadline"])) {
-        $dname = $whyNot["deadline"];
-        if ($dname[0] === "s") {
-            $open_dname = "sub_open";
-        } else if ($dname[0] === "p" || $dname[0] === "e") {
-            $open_dname = "rev_open";
-        } else {
-            $open_dname = false;
-        }
-        $start = $open_dname ? $conf->setting($open_dname, -1) : 1;
-        if ($dname === "extrev_chairreq") {
-            $end_dname = $conf->review_deadline(get($whyNot, "reviewRound"), false, true);
-        } else {
-            $end_dname = $dname;
-        }
-        $end = $conf->setting($end_dname, -1);
-        if ($dname == "au_seerev") {
-            if ($conf->au_seerev == Conf::AUSEEREV_UNLESSINCOMPLETE) {
-                $ms[] = $conf->_("You will get access to the reviews for this submission when you have completed your own reviews.");
-                if (!$text_only) {
-                    $ms[] = $conf->_("<a href=\"%s\">List your incomplete reviews</a>", $conf->hoturl("search", "t=rout&amp;q="));
-                }
-            } else {
-                $ms[] = $conf->_c("etime", "Action not available.", $dname, $paperId);
-            }
-        } else if ($start <= 0 || $start == $end) {
-            $ms[] = $conf->_c("etime", "Action not available.", $open_dname, $paperId);
-        } else if ($start > 0 && $Now < $start) {
-            $ms[] = $conf->_c("etime", "Action not available until %3\$s.", $open_dname, $paperId, $conf->unparse_time($start));
-        } else if ($end > 0 && $Now > $end) {
-            $ms[] = $conf->_c("etime", "Deadline passed.", $dname, $paperId, $conf->unparse_time($end));
-        } else {
-            $ms[] = $conf->_c("etime", "Action not available.", $dname, $paperId);
-        }
-    }
-    if (isset($whyNot["override"])) {
-        $ms[] = $conf->_("“Override deadlines” can override this restriction.");
-    }
-    if (isset($whyNot["blindSubmission"])) {
-        $ms[] = $conf->_("Submission to this conference is blind.");
-    }
-    if (isset($whyNot["author"])) {
-        $ms[] = $conf->_("You aren’t a contact for #%d.", $paperId);
-    }
-    if (isset($whyNot["conflict"])) {
-        $ms[] = $conf->_("You have a conflict with #%d.", $paperId);
-    }
-    if (isset($whyNot["externalReviewer"])) {
-        $ms[] = $conf->_("External reviewers cannot view other reviews.");
-    }
-    if (isset($whyNot["differentReviewer"])) {
-        $ms[] = $conf->_("You didn’t write this review, so you can’t change it.");
-    }
-    if (isset($whyNot["unacceptableReviewer"])) {
-        $ms[] = $conf->_("That user can’t be assigned to review #%d.", $paperId);
-    }
-    if (isset($whyNot["clickthrough"])) {
-        $ms[] = $conf->_("You can’t do that until you agree to the terms.");
-    }
-    if (isset($whyNot["otherTwiddleTag"])) {
-        $ms[] = $conf->_("Tag “#%s” doesn’t belong to you.", $quote($whyNot["tag"]));
-    }
-    if (isset($whyNot["chairTag"])) {
-        $ms[] = $conf->_("Tag “#%s” can only be changed by administrators.", $quote($whyNot["tag"]));
-    }
-    if (isset($whyNot["voteTag"])) {
-        $ms[] = $conf->_("The voting tag “#%s” shouldn’t be changed directly. To vote for this paper, change the “#~%1\$s” tag.", $quote($whyNot["tag"]));
-    }
-    if (isset($whyNot["voteTagNegative"])) {
-        $ms[] = $conf->_("Negative votes aren’t allowed.");
-    }
-    if (isset($whyNot["autosearchTag"])) {
-        $ms[] = $conf->_("Tag “#%s” cannot be changed since the system sets it automatically.", $quote($whyNot["tag"]));
-    }
-    if (empty($ms) && isset($whyNot["fail"])) {
-        $ms[] = $conf->_c("eperm", "Permission error.", "unknown", $paperId);
-    }
-    // finish it off
-    if (isset($whyNot["forceShow"]) && !$text_only) {
-        $ms[] = $conf->_("<a class=\"nw\" href=\"%s\">Override conflict</a>", $conf->selfurl(null, ["forceShow" => 1]));
-    }
-    if (!empty($ms) && isset($whyNot["listViewable"]) && !$text_only) {
-        $ms[] = $conf->_("<a href=\"%s\">List the submissions you can view</a>", $conf->hoturl("search", "q="));
-    }
-    return join(" ", $ms);
+    return $whyNot->unparse($text_only ? 0 : 5);
 }
 
 function actionBar($mode = null, $qreq = null) {
-    global $Me, $Conf;
+    global $Me;
     if ($Me->is_disabled()) {
         return "";
     }
@@ -606,7 +516,7 @@ function actionBar($mode = null, $qreq = null) {
 
     // quicklinks
     $x = "";
-    if (($list = $Conf->active_list())) {
+    if (($list = Conf::$main->active_list())) {
         $x .= '<td class="vbar quicklinks">';
         if (($prev = $list->neighbor_id(-1)) !== false)
             $x .= _one_quicklink($prev, $goBase, $xmode, $listtype, true) . " ";
@@ -632,13 +542,16 @@ function actionBar($mode = null, $qreq = null) {
         $x .= '<td class="vbar gopaper">' . goPaperForm($goBase, $xmode) . '</td>';
     }
 
-    return $x ? '<table class="vbar"><tr>' . $x . '</tr></table>' : '';
+    return '<table class="vbar"><tr>' . $x . '</tr></table>';
 }
 
-function parseReviewOrdinal($t) {
+/** @param string $t
+ * @return int */
+function parse_latin_ordinal($t) {
     $t = strtoupper($t);
-    if (!ctype_alpha($t))
+    if (!ctype_alpha($t)) {
         return -1;
+    }
     $l = strlen($t) - 1;
     $ord = 0;
     $base = 1;
@@ -653,44 +566,43 @@ function parseReviewOrdinal($t) {
     return $ord;
 }
 
-/** @param null|ReviewInfo|int $ord
+/** @param int $n
  * @return string */
+function unparse_latin_ordinal($n) {
+    assert($n >= 1);
+    if ($n <= 26) {
+        return chr($n + 64);
+    } else {
+        $t = "";
+        while (true) {
+            $t = chr((($n - 1) % 26) + 65) . $t;
+            if ($n <= 26) {
+                return $t;
+            }
+            $n = intval(($n - 1) / 26);
+        }
+    }
+}
+
+/** @param null|ReviewInfo|int $ord
+ * @return string
+ * @deprecated */
 function unparseReviewOrdinal($ord) {
     if (!$ord) {
         return ".";
     } else if (is_object($ord)) {
         if ($ord->reviewOrdinal) {
-            return $ord->paperId . unparseReviewOrdinal($ord->reviewOrdinal);
+            return $ord->paperId . unparse_latin_ordinal($ord->reviewOrdinal);
         } else {
             return (string) $ord->reviewId;
         }
-    } else if ($ord <= 26) {
-        return chr($ord + 64);
     } else {
-        $t = "";
-        while (true) {
-            $t = chr((($ord - 1) % 26) + 65) . $t;
-            if ($ord <= 26) {
-                return $t;
-            }
-            $ord = intval(($ord - 1) / 26);
-        }
+        return unparse_latin_ordinal($ord);
     }
 }
 
-function downloadText($text, $filename, $inline = false) {
-    global $Conf;
-    $csvg = new CsvGenerator(CsvGenerator::TYPE_TAB);
-    $csvg->set_filename($Conf->download_prefix . $filename . $csvg->extension());
-    $csvg->set_inline($inline);
-    $csvg->download_headers();
-    if ($text !== false) {
-        $csvg->add_string($text);
-        $csvg->download();
-        exit;
-    }
-}
-
+/** @param ?int $expertise
+ * @return string */
 function unparse_expertise($expertise) {
     if ($expertise === null) {
         return "";
@@ -699,30 +611,25 @@ function unparse_expertise($expertise) {
     }
 }
 
-function unparse_preference($preference, $expertise = null) {
-    if (is_object($preference)) {
-        list($preference, $expertise) = [$preference->reviewerPreference ?? null,
-                                         $preference->reviewerExpertise ?? null];
-    } else if (is_array($preference)) {
-        list($preference, $expertise) = $preference;
+/** @param array{int,?int} $preference
+ * @return string */
+function unparse_preference($preference) {
+    assert(is_array($preference)); // XXX remove
+    $pv = $preference[0];
+    $ev = $preference[1];
+    if ($pv === null || $pv === false) {
+        $pv = "0";
     }
-    if ($preference === null || $preference === false) {
-        $preference = "0";
-    }
-    return $preference . unparse_expertise($expertise);
+    return $pv . unparse_expertise($ev);
 }
 
+/** @param array{int,?int} $preference
+ * @return string */
 function unparse_preference_span($preference, $always = false) {
-    if (is_object($preference)) {
-        $preference = [$preference->reviewerPreference ?? null,
-                       $preference->reviewerExpertise ?? null,
-                       $preference->topicInterestScore ?? null];
-    } else if (!is_array($preference)) {
-        $preference = [$preference, null, null];
-    }
+    assert(is_array($preference)); // XXX remove
     $pv = (int) $preference[0];
     $ev = $preference[1];
-    $tv = (int) get($preference, 2);
+    $tv = (int) ($preference[2] ?? null);
     if ($pv > 0 || (!$pv && $tv > 0)) {
         $type = 1;
     } else if ($pv < 0 || $tv < 0) {
@@ -862,4 +769,64 @@ function decode_token($x, $format = "") {
     } else {
         return $t;
     }
+}
+
+/** @param string $bytes
+ * @return string */
+function base48_encode($bytes) {
+    $convtab = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUV";
+    $bi = 0;
+    $blen = strlen($bytes);
+    $have = $w = 0;
+    $t = "";
+    while ($bi !== $blen || $have > 0) {
+        while ($have < 11 && $bi !== $blen) {
+            $w |= ord($bytes[$bi]) << $have;
+            $have += 8;
+            ++$bi;
+        }
+        $x = $w & 0x7FF;
+        $t .= $convtab[$x % 48];
+        if ($have > 5) {
+            $t .= $convtab[(int) ($x / 48)];
+        }
+        $w >>= 11;
+        $have -= 11;
+    }
+    return $t;
+}
+
+/** @param string $text
+ * @return string|false */
+function base48_decode($text) {
+    $ti = 0;
+    $tlen = strlen($text);
+    $have = $w = 0;
+    $b = "";
+    while ($ti !== $tlen) {
+        $chunk = $idx = 0;
+        while ($ti !== $tlen && $idx !== 2) {
+            $ch = ord($text[$ti]);
+            if ($ch >= 97 && $ch <= 122) {
+                $n = $ch - 97;
+            } else if ($ch >= 65 && $ch <= 86) {
+                $n = $ch - 39;
+            } else {
+                return false;
+            }
+            ++$ti;
+            $chunk += $idx ? $n * 48 : $n;
+            ++$idx;
+        }
+        if ($idx !== 0) {
+            $w |= $chunk << $have;
+            $have += $idx === 1 ? 5 : 11;
+        }
+        while ($have >= 8) {
+            $b .= chr($w & 255);
+            $w >>= 8;
+            $have -= 8;
+        }
+    }
+    return $b;
 }

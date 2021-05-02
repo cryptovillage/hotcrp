@@ -14,6 +14,9 @@
     "for": {
         "stop": true
     },
+    "in": {
+        "stop": true
+    },
     "of": {
         "stop": true
     },
@@ -209,6 +212,9 @@
     "computing": {
         "weak": true
     },
+    "conservancy": {
+        "weak": true
+    },
     "consulting": {
         "weak": true
     },
@@ -222,6 +228,9 @@
         "weak": true
     },
     "dept": {
+        "weak": true
+    },
+    "development": {
         "weak": true
     },
     "east": {
@@ -330,6 +339,9 @@
     "org": {
         "weak": true
     },
+    "paris": {
+        "weak": true
+    },
     "phd": {
         "weak": true
     },
@@ -352,6 +364,9 @@
         "weak": true
     },
     "science": {
+        "weak": true
+    },
+    "sciences": {
         "weak": true
     },
     "security": {
@@ -401,8 +416,11 @@
     "telekom": {
         "weak": true
     },
+    "tokyo": {
+        "weak": true
+    },
     "univ": {
-        "stop": true
+        "weak": true
     },
     "universidad": {
         "weak": true
@@ -426,12 +444,15 @@
         "weak": true, "alternate": ["university"]
     },
     "university": {
-        "weak": true, "alternate": ["u"]
+        "weak": true, "alternate": ["u", "univ", "universite"]
     },
     "west": {
         "weak": true
     },
 
+    "africa": {
+        "weak": true
+    },
     "america": {
         "weak": true
     },
@@ -452,6 +473,9 @@
     },
     "australian": {
         "alternate": [{"word": "anu", "if": "national university"}]
+    },
+    "bangalore": {
+        "weak": true
     },
     "barbara": {
         "alternate": [{"word": "ucsb", "if": "university california santa"}],
@@ -556,6 +580,9 @@
     "fernuniversitat": {
         "nameish": false
     },
+    "florida": {
+        "sync": ["state", "central", "international"]
+    },
     "france": {
         "weak": true
     },
@@ -583,17 +610,20 @@
     "hewlett": {
         "alternate": [{"word": "hp", "if": "packard"}]
     },
-    "hong": {
-        "weak": true
-    },
     "hkust": {
         "alternate": ["hong kong university science technology"]
+    },
+    "hong": {
+        "weak": true
     },
     "hp": {
         "alternate": ["hewlett packard"]
     },
     "huawei": {
         "nameish": false
+    },
+    "hyderabad": {
+        "weak": true
     },
     "ibm": {
         "nameish": false
@@ -675,6 +705,13 @@
     "london": {
         "weak": true,
         "alternate": [{"word": "ucl", "if": "university college"}]
+    },
+    "louisiana": {
+        "alternate": [{"word": "lsu", "if": "university state"}],
+        "sync": "state"
+    },
+    "lsu": {
+        "alternate": ["louisiana state university"]
     },
     "maryland": {
         "sync": ["loyola"]
@@ -768,9 +805,12 @@
     "suny": {
         "nameish": false
     },
+    "technical": {
+        "weak": true
+    },
     "technische": {
         "weak": true,
-        "alternate": [{"word": "tu", "if": "universitat"}]
+        "alternate": [{"word": "tu", "if": "universitat"}, "technical"]
     },
     "technion": {
         "nameish": false
@@ -881,10 +921,12 @@
         ]
     },
     "washington": {
-        "weak": true, "nameish": true,
+        "weak": true,
+        "nameish": true,
         "alternate": [
             {"word": "uw", "if": "university"}
-        ]
+        ],
+        "sync": ["george", "lee"]
     },
     "wisconsin": {
         "alternate": [

@@ -29,7 +29,7 @@ $config = [
     // If true, missing properties will be created when
     // they are first seen. If false, we'll report an
     // error message.
-    "allow_missing_properties" => true,
+    "allow_missing_properties" => false,
 
     // Allow null to be cast as any type and for any
     // type to be cast to null.
@@ -38,9 +38,15 @@ $config = [
     // Backwards Compatibility Checking
     "backward_compatibility_checks" => false,
 
+    //"redundant_condition_detection" => true,
+    //"dead_code_detection" => true,
+
     // Only emit critical issues to start with
     // (0 is low severity, 5 is normal severity, 10 is critical)
     "minimum_severity" => 0,
+
+    "enable_internal_return_type_plugins" => true,
+    //"enable_extended_internal_return_type_plugins" => true,
 
     // A list of directories that should be parsed for class and
     // method information. After excluding the directories
@@ -53,7 +59,8 @@ $config = [
         Config::projectPath("lib"),
         Config::projectPath("src"),
         Config::projectPath("batch"),
-        Config::projectPath("test")
+        Config::projectPath("test"),
+        Config::projectPath(".phan/stubs")
     ],
 
     "file_list" => [
@@ -97,8 +104,6 @@ $config = [
         "Conf" => '\Conf',
         "Me" => '\Contact',
         "Qreq" => '\Qrequest',
-        "Now" => 'int',
-        "ConfSitePATH" => '?string',
         "prow" => '?PaperInfo',
         "paperTable" => 'PaperTable',
         "Admin" => '\Contact' // test
@@ -107,6 +112,10 @@ $config = [
     "suppress_issue_types" => [
         "PhanUnusedPublicMethodParameter",
         "PhanParamReqAfterOpt"
+    ],
+
+    "plugins" => [
+        //".phan/plugins/RedundantDblResultPlugin.php"
     ]
 ];
 

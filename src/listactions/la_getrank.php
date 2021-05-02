@@ -6,7 +6,7 @@ class GetRank_ListAction extends ListAction {
     function allow(Contact $user, Qrequest $qreq) {
         return $user->conf->setting("tag_rank") && $user->is_reviewer();
     }
-    function run(Contact $user, $qreq, $ssel) {
+    function run(Contact $user, Qrequest $qreq, SearchSelection $ssel) {
         $settingrank = $user->conf->setting("tag_rank") && $qreq->tag == "~" . $user->conf->setting_data("tag_rank");
         if (!$user->isPC && !($user->is_reviewer() && $settingrank)) {
             return self::EPERM;
@@ -18,28 +18,28 @@ class GetRank_ListAction extends ListAction {
             $pset->sort_by(function ($p1, $p2) use ($tag) {
                 $tv1 = $p1->tag_value($tag);
                 $tv2 = $p2->tag_value($tag);
-                if ($tv1 === false && $tv2 === false) {
+                if ($tv1 === null && $tv2 === null) {
                     return $p1->paperId - $p2->paperId;
-                } else if ($tv1 === false || $tv2 === false) {
-                    return $tv1 === false ? 1 : -1;
+                } else if ($tv1 === null || $tv2 === null) {
+                    return $tv1 === null ? 1 : -1;
                 } else if ($tv1 != $tv2) {
                     return $tv1 < $tv2 ? -1 : 1;
                 } else {
                     return $p1->paperId - $p2->paperId;
                 }
             });
-            $lastIndex = false;
+            $lastIndex = null;
             foreach ($pset as $prow) {
-                if ($user->can_change_tag($prow, $tag, null, 1)) {
+                if ($user->can_edit_tag($prow, $tag, null, 1)) {
                     $csvt = CsvGenerator::quote($prow->title);
                     $tv = $prow->tag_value($tag);
                     $tail = ",$prow->paperId,$csvt\n";
-                    if ($tv === false || $lastIndex === false) {
+                    if ($tv === null || $lastIndex === null) {
                         $delta = $tv;
                     } else {
                         $delta = $tv - $lastIndex;
                     }
-                    if ($tv === false) {
+                    if ($tv === null) {
                         $null .= "X" . $tail;
                     } else if ($delta == 1) {
                         $real .= $tail;
@@ -53,7 +53,9 @@ class GetRank_ListAction extends ListAction {
                     $lastIndex = $tv;
                 }
             }
-            $text = "action,paper,title
+            return $user->conf->make_csvg("rank", CsvGenerator::TYPE_STRING)
+                ->set_inline(false)
+                ->add_string("action,paper,title
 tag," . CsvGenerator::quote(trim($qreq->tag)) . "
 
 # Edit the rank order by rearranging the following lines.
@@ -65,11 +67,10 @@ tag," . CsvGenerator::quote(trim($qreq->tag)) . "
 # same rank as the preceding paper. Lines starting with \">>\", \">>>\",
 # and so forth indicate rank gaps between papers. When you are done,
 # upload the file here:\n"
-                . "# " . $user->conf->hoturl_absolute("offline", null, Conf::HOTURL_RAW) . "\n\n"
-                . $real . ($real === "" ? "" : "\n") . $null;
-            downloadText($text, "rank");
+                    . "# " . $user->conf->hoturl_absolute("offline", null, Conf::HOTURL_RAW) . "\n\n"
+                    . $real . ($real === "" ? "" : "\n") . $null);
         } else {
-            Conf::msg_error($tagger->error_html);
+            Conf::msg_error($tagger->error_html());
         }
     }
 }

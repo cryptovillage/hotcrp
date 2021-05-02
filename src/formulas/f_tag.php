@@ -1,6 +1,6 @@
 <?php
 // formulas/f_tag.php -- HotCRP helper class for formula expressions
-// Copyright (c) 2009-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2009-2021 Eddie Kohler; see LICENSE.
 
 class Tag_Fexpr extends Fexpr {
     private $tag;
@@ -32,7 +32,8 @@ class Tag_Fexpr extends Fexpr {
             $tsm->add_check_tag(str_starts_with($tag, "_~") ? substr($tag, 1) : $tag, true);
             return new Tag_Fexpr($tag, $tsm, $ff->kwdef->is_value);
         } else {
-            return $ff->lerror("Invalid tag.");
+            $ff->lerror("Invalid tag.");
+            return null;
         }
     }
     static function tag_value($tags, $search, $isvalue) {
@@ -61,8 +62,8 @@ class Tag_Fexpr extends Fexpr {
             return 0;
         }
     }
-    function view_score(Contact $user) {
-        return VIEWSCORE_PC;
+    function viewable_by(Contact $user) {
+        return $user->isPC;
     }
     function compile(FormulaCompiler $state) {
         $tags = $state->_add_tags();

@@ -1,6 +1,6 @@
 <?php
 // ht.php -- HotCRP HTML helper functions
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class Ht {
     public static $img_base = "";
@@ -16,29 +16,40 @@ class Ht {
     const ATTR_BOOL = 2;
     const ATTR_BOOLTEXT = 3;
     const ATTR_NOEMPTY = 4;
-    private static $_attr_type = array("accept-charset" => self::ATTR_SKIP,
-                                       "action" => self::ATTR_SKIP,
-                                       "autofocus" => self::ATTR_BOOL,
-                                       "checked" => self::ATTR_BOOL,
-                                       "class" => self::ATTR_NOEMPTY,
-                                       "data-default-checked" => self::ATTR_BOOLTEXT,
-                                       "disabled" => self::ATTR_BOOL,
-                                       "enctype" => self::ATTR_SKIP,
-                                       "formnovalidate" => self::ATTR_BOOL,
-                                       "method" => self::ATTR_SKIP,
-                                       "multiple" => self::ATTR_BOOL,
-                                       "novalidate" => self::ATTR_BOOL,
-                                       "optionstyles" => self::ATTR_SKIP,
-                                       "readonly" => self::ATTR_BOOL,
-                                       "required" => self::ATTR_BOOL,
-                                       "spellcheck" => self::ATTR_BOOLTEXT,
-                                       "type" => self::ATTR_SKIP);
+    const ATTR_SPACESEP = 16;
+    private static $_attr_type = [
+        "accept-charset" => self::ATTR_SKIP,
+        "action" => self::ATTR_SKIP,
+        "async" => self::ATTR_BOOL,
+        "autofocus" => self::ATTR_BOOL,
+        "checked" => self::ATTR_BOOL,
+        "class" => self::ATTR_NOEMPTY | self::ATTR_SPACESEP,
+        "data-default-checked" => self::ATTR_BOOLTEXT,
+        "defer" => self::ATTR_BOOL,
+        "disabled" => self::ATTR_BOOL,
+        "enctype" => self::ATTR_SKIP,
+        "formnovalidate" => self::ATTR_BOOL,
+        "method" => self::ATTR_SKIP,
+        "multiple" => self::ATTR_BOOL,
+        "novalidate" => self::ATTR_BOOL,
+        "optionstyles" => self::ATTR_SKIP,
+        "readonly" => self::ATTR_BOOL,
+        "required" => self::ATTR_BOOL,
+        "spellcheck" => self::ATTR_BOOLTEXT,
+        "type" => self::ATTR_SKIP
+    ];
 
+    /** @param ?array<string,mixed> $js
+     * @return string */
     static function extra($js) {
         $x = "";
         if ($js) {
             foreach ($js as $k => $v) {
-                $t = self::$_attr_type[$k] ?? null;
+                $tf = self::$_attr_type[$k] ?? 0;
+                $t = $tf & 15;
+                if (is_array($v) && ($tf & self::ATTR_SPACESEP) !== 0) {
+                    $v = join(" ", $v);
+                }
                 if ($v === null
                     || $t === self::ATTR_SKIP
                     || ($v === false && $t !== self::ATTR_BOOLTEXT)
@@ -56,18 +67,24 @@ class Ht {
         return $x;
     }
 
+    /** @param ?string $nonce */
     static function set_script_nonce($nonce) {
-        if ((string) $nonce === "") {
+        if ($nonce === null || $nonce === "") {
             self::$_script_open = '<script';
         } else {
             self::$_script_open = '<script nonce="' . htmlspecialchars($nonce) . '"';
         }
     }
 
+    /** @param string $script
+     * @return string */
     static function script($script) {
         return self::$_script_open . '>' . $script . '</script>';
     }
 
+    /** @param string $src
+     * @param ?array<string,mixed> $js
+     * @return string */
     static function script_file($src, $js = null) {
         if ($js
             && ($js["crossorigin"] ?? false)
@@ -77,11 +94,16 @@ class Ht {
         return self::$_script_open . ' src="' . htmlspecialchars($src) . '"' . self::extra($js) . '></script>';
     }
 
+    /** @param string $src
+     * @return string */
     static function stylesheet_file($src) {
         return "<link rel=\"stylesheet\" type=\"text/css\" href=\""
             . htmlspecialchars($src) . "\" />";
     }
 
+    /** @param string $action
+     * @param array<string,mixed> $extra
+     * @return string */
     static function form($action, $extra = []) {
         if (is_array($action)) {
             $extra = $action;
@@ -121,12 +143,19 @@ class Ht {
         return $x . ' accept-charset="UTF-8"' . self::extra($extra) . $suffix;
     }
 
+    /** @param string $name
+     * @param string|int $value
+     * @param ?array<string,mixed> $extra
+     * @return string */
     static function hidden($name, $value = "", $extra = null) {
         return '<input type="hidden" name="' . htmlspecialchars($name)
             . '" value="' . htmlspecialchars($value) . '"'
             . self::extra($extra) . ' />';
     }
 
+    /** @param string $name
+     * @param array $opt
+     * @return string */
     static function select($name, $opt, $selected = null, $js = null) {
         if (is_array($selected) && $js === null) {
             list($js, $selected) = array($selected, null);
@@ -203,6 +232,11 @@ class Ht {
         return $t . '>' . $x . $optgroup . "</select></span>";
     }
 
+    /** @param string $name
+     * @param string|int $value
+     * @param bool $checked
+     * @param ?array<string,mixed> $js
+     * @return string */
     static function checkbox($name, $value = 1, $checked = false, $js = null) {
         if (is_array($value)) {
             $js = $value;
@@ -229,11 +263,20 @@ class Ht {
         return $t . self::extra($js) . " />";
     }
 
+    /** @param string $name
+     * @param string|int $value
+     * @param bool $checked
+     * @param ?array<string,mixed> $js
+     * @return string */
     static function radio($name, $value = 1, $checked = false, $js = null) {
         $t = self::checkbox($name, $value, $checked, $js);
         return '<input type="radio"' . substr($t, 22);
     }
 
+    /** @param string $html
+     * @param ?string $id
+     * @param ?array<string,mixed> $js
+     * @return string */
     static function label($html, $id = null, $js = null) {
         if ($js && isset($js["for"])) {
             $id = $js["for"];
@@ -245,10 +288,13 @@ class Ht {
             . self::extra($js) . '>' . $html . "</label>";
     }
 
+    /** @param string $html
+     * @param ?array<string,mixed> $js
+     * @return string */
     static function button($html, $js = null) {
         if ($js === null && is_array($html)) {
             $js = $html;
-            $html = null;
+            $html = "";
         } else if ($js === null) {
             $js = array();
         }
@@ -259,6 +305,10 @@ class Ht {
         return "<button type=\"$type\"" . self::extra($js) . ">" . $html . "</button>";
     }
 
+    /** @param string $name
+     * @param null|string|array<string,mixed> $html
+     * @param ?array<string,mixed> $js
+     * @return string */
     static function submit($name, $html = null, $js = null) {
         if ($js === null && is_array($html)) {
             $js = $html;
@@ -269,12 +319,16 @@ class Ht {
         $js["type"] = "submit";
         if ($html === null) {
             $html = $name;
-        } else if ((string) $name !== "") {
+        } else if ($name !== null && $name !== "") {
             $js["name"] = $name;
         }
         return self::button($html, $js);
     }
 
+    /** @param string $name
+     * @param null|string|int $value
+     * @param ?array<string,mixed> $js
+     * @return string */
     static function hidden_default_submit($name, $value = null, $js = null) {
         if ($js === null && is_array($value)) {
             $js = $value;
@@ -282,7 +336,7 @@ class Ht {
         } else if ($js === null) {
             $js = array();
         }
-        $js["class"] = trim(get_s($js, "class") . " hidden");
+        $js["class"] = trim(($js["class"] ?? "") . " hidden");
         return self::submit($name, $value, $js);
     }
 
@@ -296,28 +350,40 @@ class Ht {
         }
     }
 
+    /** @param string $name
+     * @param string|int $value
+     * @param ?array<string,mixed> $js
+     * @return string */
     static function entry($name, $value, $js = null) {
-        $js = $js ? : array();
+        $js = $js ?? [];
         self::apply_placeholder($value, $js);
         $type = $js["type"] ?? "text";
         return '<input type="' . $type . '" name="' . $name . '" value="'
             . htmlspecialchars($value) . '"' . self::extra($js) . ' />';
     }
 
+    /** @param string $name
+     * @param string $value
+     * @param ?array<string,mixed> $js
+     * @return string */
     static function password($name, $value, $js = null) {
-        $js = $js ? $js : array();
+        $js = $js ?? [];
         $js["type"] = "password";
         return self::entry($name, $value, $js);
     }
 
+    /** @param string $name
+     * @param string $value
+     * @param ?array<string,mixed> $js
+     * @return string */
     static function textarea($name, $value, $js = null) {
-        $js = $js ? $js : array();
+        $js = $js ?? [];
         self::apply_placeholder($value, $js);
         return '<textarea name="' . $name . '"' . self::extra($js)
             . '>' . htmlspecialchars($value) . '</textarea>';
     }
 
-    static function actions($actions, $js = array(), $extra_text = "") {
+    static function actions($actions, $js = []) {
         if (empty($actions)) {
             return "";
         }
@@ -343,10 +409,11 @@ class Ht {
                 $t .= '</div>';
             }
         }
-        return $t . $extra_text . "</div>\n";
+        return $t . "</div>\n";
     }
 
-    /** @param string|list<string> $html */
+    /** @param string|list<string> $html
+     * @return string */
     static function pre($html) {
         if (is_array($html)) {
             $html = join("\n", $html);
@@ -354,7 +421,8 @@ class Ht {
         return "<pre>" . $html . "</pre>";
     }
 
-    /** @param string|list<string> $text */
+    /** @param string|list<string> $text
+     * @return string */
     static function pre_text($text) {
         if (is_array($text)
             && array_keys($text) === range(0, count($text) - 1)) {
@@ -379,6 +447,8 @@ class Ht {
         return "<pre style=\"white-space:pre-wrap\">" . htmlspecialchars(var_export($x, true)) . "</pre>";
     }
 
+    /** @param string $src
+     * @return string */
     static function img($src, $alt, $js = null) {
         if (is_string($js)) {
             $js = array("class" => $js);
@@ -420,21 +490,35 @@ class Ht {
                             '<a href="$1" rel="noreferrer">$1</a>$2', $html);
     }
 
-    static function format0($html_text) {
-        $html_text = self::link_urls(Text::single_line_paragraphs($html_text));
-        return preg_replace('/(?:\r\n?){2,}|\n{2,}/', "</p><p>", "<p>$html_text</p>");
+    /** @param string $text
+     * @return string */
+    static function format0($text) {
+        return self::format0_html(htmlspecialchars($text));
     }
 
+    /** @param string $html
+     * @return string */
+    static function format0_html($html) {
+        $html = self::link_urls(Text::single_line_paragraphs($html));
+        return preg_replace('/(?:\r\n?){2,}|\n{2,}/', "</p><p>", "<p>$html</p>");
+    }
+
+    /** @param string $uniqueid
+     * @return bool */
     static function check_stash($uniqueid) {
         return self::$_stash_map[$uniqueid] ?? false;
     }
 
+    /** @param string $uniqueid
+     * @return bool */
     static function mark_stash($uniqueid) {
         $marked = self::$_stash_map[$uniqueid] ?? false;
         self::$_stash_map[$uniqueid] = true;
         return !$marked;
     }
 
+    /** @param string $html
+     * @param ?string $uniqueid */
     static function stash_html($html, $uniqueid = null) {
         if ($html !== null && $html !== false && $html !== ""
             && (!$uniqueid || self::mark_stash($uniqueid))) {
@@ -446,6 +530,8 @@ class Ht {
         }
     }
 
+    /** @param string $js
+     * @param ?string $uniqueid */
     static function stash_script($js, $uniqueid = null) {
         if ($js !== null && $js !== false && $js !== ""
             && (!$uniqueid || self::mark_stash($uniqueid))) {
@@ -461,6 +547,7 @@ class Ht {
         }
     }
 
+    /** @return string */
     static function unstash() {
         $stash = self::$_stash;
         if (self::$_stash_inscript) {
@@ -471,12 +558,10 @@ class Ht {
         return $stash;
     }
 
+    /** @param string $js
+     * @return string */
     static function unstash_script($js) {
         self::stash_script($js);
-        return self::unstash();
-    }
-
-    static function take_stash() {
         return self::unstash();
     }
 
@@ -512,7 +597,15 @@ class Ht {
      * @param int|string $status */
     static function msg($msg, $status) {
         if (is_int($status)) {
-            $status = $status >= 2 ? "error" : ($status > 0 ? "warning" : "info");
+            if ($status >= 2) {
+                $status = "error";
+            } else if ($status > 0) {
+                $status = "warning";
+            } else if ($status === -3) {
+                $status = "confirm";
+            } else {
+                $status = "info";
+            }
         }
         if (substr($status, 0, 1) === "x") {
             $status = substr($status, 1);
@@ -520,56 +613,63 @@ class Ht {
         if ($status === "merror") {
             $status = "error";
         }
-        if (is_array($msg)) {
-            $msg = join("", array_map(function ($x) {
-                if (str_starts_with($x, "<p") || str_starts_with($x, "<div"))
-                    return $x;
-                else
-                    return "<p>{$x}</p>";
-            }, $msg));
-        } else if ($msg !== ""
-                   && !str_starts_with($msg, "<p")
-                   && !str_starts_with($msg, "<div")) {
-            $msg = "<p>{$msg}</p>";
+        $mx = "";
+        foreach (is_array($msg) ? $msg : [$msg] as $x) {
+            if ($x !== "") {
+                if ($x[0] === "<"
+                    && (str_starts_with($x, "<p")
+                        || str_starts_with($x, "<div")
+                        || str_starts_with($x, "<form"))) {
+                    $mx .= $x;
+                } else {
+                    $mx .= "<p>{$x}</p>";
+                }
+            }
         }
-        if ($msg === "") {
+        if ($mx !== "") {
+            return "<div class=\"msg msg-{$status}\">{$mx}</div>";
+        } else {
             return "";
         }
-        return '<div class="msg msg-' . $status . '">' . $msg . '</div>';
     }
 
 
     /** @param string $field */
-    static function control_class($field, $rest = "") {
+    static function control_class($field, $rest = "", $prefix = "has-") {
         if (self::$_msgset) {
-            return self::$_msgset->control_class($field, $rest);
+            return self::$_msgset->control_class($field, $rest, $prefix);
         } else {
             return $rest;
         }
     }
+    /** @return MessageSet */
+    static function message_set() {
+        self::$_msgset || (self::$_msgset = new MessageSet);
+        return self::$_msgset;
+    }
     /** @param string $field */
     static function error_at($field, $msg = "") {
-        self::$_msgset || (self::$_msgset = new MessageSet);
-        self::$_msgset->error_at($field, $msg);
+        self::message_set()->error_at($field, $msg);
     }
     /** @param string $field */
     static function warning_at($field, $msg = "") {
-        self::$_msgset || (self::$_msgset = new MessageSet);
-        self::$_msgset->warning_at($field, $msg);
+        self::message_set()->warning_at($field, $msg);
     }
     /** @param string $field */
     static function problem_status_at($field) {
         return self::$_msgset ? self::$_msgset->problem_status_at($field) : 0;
     }
-    /** @return iterable<array{?string,string,int}> */
+    /** @param string $field
+     * @return iterable<MessageItem> */
     static function message_list_at($field) {
         return self::$_msgset ? self::$_msgset->message_list_at($field) : [];
     }
-    /** @return string */
-    static function render_messages_at($field) {
+    /** @param string $field
+     * @return string */
+    static function feedback_at($field) {
         $t = "";
         foreach (self::message_list_at($field) as $mx) {
-            $t .= '<p class="' . MessageSet::status_class($mx[2], "f-h", "is-") . '">' . $mx[1] . '</p>';
+            $t .= '<p class="' . MessageSet::status_class($mx->status, "feedback", "is-") . '">' . $mx->message . '</p>';
         }
         return $t;
     }

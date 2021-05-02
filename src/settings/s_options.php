@@ -1,32 +1,36 @@
 <?php
 // src/settings/s_options.php -- HotCRP settings > submission form page
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class Options_SettingRenderer {
-    private $option_classes = [];
-    private $have_options = null;
-    static private function find_option_req(SettingValues $sv, PaperOption $o, $xpos) {
-        if ($o->id) {
-            for ($i = 1; $sv->has_reqv("optid_$i"); ++$i)
-                if ($sv->reqv("optid_$i") == $o->id)
-                    return $i;
+    /** @var array<int,bool> */
+    private $rendered_options = [];
+    /** @var int */
+    private $max_xpos = 0;
+    /** @var array<string,bool> */
+    private $properties = [];
+    /** @var ?array<int,int> */
+    private $have_options;
+
+    /** @param string $property
+     * @param bool $visible */
+    function mark_visible_property($property, $visible) {
+        if (!$visible || !isset($this->properties[$property])) {
+            $this->properties[$property] = $visible;
         }
-        return $xpos;
     }
-    function add_option_class($class) {
-        $this->option_classes[] = $class;
-    }
+
     static function render_type_property(SettingValues $sv, PaperOption $o, $xpos, $self, $gj) {
         $optvt = $o->type;
-        if ($optvt === "text" && $o->display_space > 3)
+        if ($o instanceof Text_PaperOption && $o->display_space > 3) {
             $optvt .= ":ds_" . $o->display_space;
-
-        $self->add_option_class("fold4" . ($o instanceof SelectorPaperOption ? "o" : "c"));
+        }
 
         $jtypes = $sv->conf->option_type_map();
         if (!isset($jtypes[$optvt])
-            && ($made_type = $sv->conf->option_type($optvt)))
+            && ($made_type = $sv->conf->option_type($optvt))) {
             $jtypes[$optvt] = $made_type;
+        }
         uasort($jtypes, "Conf::xt_position_compare");
 
         $otypes = [];
@@ -34,174 +38,325 @@ class Options_SettingRenderer {
             if (!isset($uf->display_if)
                 || $sv->conf->xt_check($uf->display_if, $uf, $sv->user)
                 || $uf->name === $optvt)
-                $otypes[$uf->name] = get($uf, "title", $uf->name);
+                $otypes[$uf->name] = $uf->title ?? $uf->name;
         }
 
-        $t = '<div class="' . $sv->control_class("optvt_$xpos", "entryi")
-            . '">' . $sv->label("optvt_$xpos", "Type")
-            . '<div class="entry">'
-            . Ht::select("optvt_$xpos", $otypes, $optvt, ["class" => "uich js-settings-option-type", "id" => "optvt_$xpos"])
-            . $sv->render_messages_at("optvt_$xpos")
-            . "</div></div>\n";
+        echo '<div class="', $sv->control_class("optvt_$xpos", "entryi"),
+            '">', $sv->label("optvt_$xpos", "Type"),
+            '<div class="entry">',
+            $sv->feedback_at("optvt_$xpos"),
+            Ht::select("optvt_$xpos", $otypes, $optvt, $sv->sjs("optvt_$xpos", ["class" => "uich js-settings-option-type", "id" => "optvt_$xpos"])),
+            "</div></div>\n";
 
-        $rows = 3;
-        $value = "";
-        if ($o instanceof SelectorPaperOption && count($o->selector_options())) {
-            $value = join("\n", $o->selector_options()) . "\n";
-            $rows = max(count($o->selector_options()), 3);
+        if ($o instanceof Selector_PaperOption) {
+            $k = "";
+            if (($options = $o->selector_options())) {
+                $options[] = "";
+            }
+            $rows = max(count($options), 3);
+            $value = join("\n", $options);
+        } else {
+            $k = " hidden";
+            $rows = 3;
+            $value = "";
         }
-        return $t . '<div class="' . $sv->control_class("optv_$xpos", "entryi fx4")
-            . '">' . $sv->label("optv_$xpos", "Choices")
-            . '<div class="entry">'
-            . Ht::textarea("optv_$xpos", $value, $sv->sjs("optv_$xpos", ["rows" => $rows, "cols" => 50, "id" => "optv_$xpos", "class" => "reviewtext need-autogrow need-tooltip", "data-tooltip-info" => "settings-option", "data-tooltip-type" => "focus"]))
-            . $sv->render_messages_at("optv_$xpos")
-            . "</div></div>\n";
+        echo '<div class="', $sv->control_class("optv_$xpos", "entryi has-optvt-condition$k"),
+            '" data-optvt-condition="selector radio">', $sv->label("optv_$xpos", "Choices"),
+            '<div class="entry">',
+            $sv->feedback_at("optv_$xpos"),
+            Ht::textarea("optv_$xpos", $value, $sv->sjs("optv_$xpos", ["rows" => $rows, "cols" => 50, "id" => "optv_$xpos", "class" => "w-entry-text need-autogrow need-tooltip", "data-tooltip-info" => "settings-option", "data-tooltip-type" => "focus"])),
+            "</div></div>\n";
     }
     static function render_description_property(SettingValues $sv, PaperOption $o, $xpos, $self, $gj) {
-        $self->add_option_class("fold3" . ((string) $o->description !== "" || !$o->id ? "o" : "c"));
-        return '<div class="' . $sv->control_class("optd_$xpos", "entryi fx3")
-            . '">' . $sv->label("optd_$xpos", "Description")
-            . '<div class="entry">'
-            . Ht::textarea("optd_$xpos", $o->description, ["rows" => 2, "cols" => 80, "id" => "optd_$xpos", "class" => "reviewtext settings-opt-description need-autogrow"])
-            . $sv->render_messages_at("optd_$xpos")
-            . '</div></div>';
+        $open = !$o->id || (string) $o->description !== "";
+        $self->mark_visible_property("description", $open);
+        echo '<div class="', $sv->control_class("optd_$xpos", "entryi is-property-description" . ($open ? "" : " hidden")),
+            '">', $sv->label("optd_$xpos", "Description"),
+            '<div class="entry">',
+            $sv->feedback_at("optd_$xpos"),
+            Ht::textarea("optd_$xpos", $o->description, $sv->sjs("optd_$xpos", ["rows" => 2, "cols" => 80, "id" => "optd_$xpos", "class" => "w-entry-text settings-opt-description need-autogrow"])),
+            '</div></div>';
     }
     static function render_presence_property(SettingValues $sv, PaperOption $o, $xpos, $self, $gj) {
-        $self->add_option_class("fold10" . ($o->final || !$o->id ? "o" : "c"));
-        return '<div class="' . $sv->control_class("optec_$xpos", "entryi fx10")
-            . '">' . $sv->label("optec_$xpos", "Condition")
-            . '<div class="entry">'
-            . '<span class="sep">'
-            . Ht::select("optec_$xpos", ["" => "Always shown", "final" => "Shown on final versions"], $o->final ? "final" : "", ["class" => "uich js-settings-option-condition settings-opt-presence", "id" => "optec_$xpos"])
-            . $sv->render_messages_at("optec_$xpos")
-            . "</span></div></div>";
+        $open = !$o->id || $o->final;
+        $self->mark_visible_property("editing", $open);
+        echo '<div class="', $sv->control_class("optec_$xpos", "entryi is-property-editing" . ($open ? "" : " hidden")),
+            '">', $sv->label("optec_$xpos", "Present on"),
+            '<div class="entry">',
+            $sv->feedback_at("optec_$xpos"),
+            Ht::select("optec_$xpos", ["all" => "All submissions", "final" => "Final versions only"], $o->final ? "final" : "all", $sv->sjs("optec_$xpos", ["id" => "optec_$xpos"])),
+            "</div></div>";
     }
     static function render_required_property(SettingValues $sv, PaperOption $o, $xpos, $self, $gj) {
-        $self->add_option_class("fold9" . ($o->required || !$o->id ? "o" : "c"));
-        return '<div class="' . $sv->control_class("optreq_$xpos", "entryi fx9")
-            . '">' . $sv->label("optreq_$xpos", "Required")
-            . '<div class="entry">'
-            . Ht::select("optreq_$xpos", ["" => "No", "1" => "Yes"], $o->required ? "1" : "", ["id" => "optreq_$xpos"])
-            . $sv->render_messages_at("optreq_$xpos")
-            . "</div></div>";
+        $open = !$o->id || $o->required;
+        $self->mark_visible_property("editing", $open);
+        echo '<div class="', $sv->control_class("optreq_$xpos", "entryi is-property-editing" . ($open ? "" : " hidden")),
+            '">', $sv->label("optreq_$xpos", "Required"),
+            '<div class="entry">',
+            $sv->feedback_at("optreq_$xpos"),
+            Ht::select("optreq_$xpos", ["0" => "No", "1" => "Yes"], $o->required ? "1" : "0", $sv->sjs("optreq_$xpos", ["id" => "optreq_$xpos"])),
+            "</div></div>";
     }
     static function render_visibility_property(SettingValues $sv, PaperOption $o, $xpos, $self, $gj) {
-        $self->add_option_class("fold6" . ($o->visibility !== "rev" || !$o->id ? "o" : "c"));
-        return '<div class="' . $sv->control_class("optp_$xpos", "entryi short fx6")
-            . '">' . $sv->label("optp_$xpos", "Visible to")
-            . '<div class="entry">'
-            . Ht::select("optp_$xpos", ["rev" => "PC and reviewers", "nonblind" => "PC and reviewers, if authors are visible", "admin" => "Administrators only"], $o->visibility, ["id" => "optp_$xpos", "class" => "settings-opt-visibility"])
-            . $sv->render_messages_at("optp_$xpos")
-            . '</div></div>';
+        $vis = $o->unparse_visibility();
+        $open = !$o->id || $vis !== "all";
+        $self->mark_visible_property("visibility", $open);
+        $options = ["all" => "PC and reviewers"];
+        $options["nonblind"] = "PC and reviewers, if authors are visible";
+        if ($vis === "conflict") {
+            $options["conflict"] = "PC and reviewers, if conflicts are visible";
+        }
+        $options["review"] = "Submitted reviewers and PC who can see reviews";
+        $options["admin"] = "Administrators only";
+        echo '<div class="', $sv->control_class("optp_$xpos", "entryi is-property-visibility" . ($open ? "" : " hidden") . " short"),
+            '">', $sv->label("optp_$xpos", "Visible to"),
+            '<div class="entry">',
+            $sv->feedback_at("optp_$xpos"),
+            Ht::select("optp_$xpos", $options, $vis, $sv->sjs("optp_$xpos", ["id" => "optp_$xpos", "class" => "settings-opt-visibility"])),
+            '</div></div>';
     }
     static function render_display_property(SettingValues $sv, PaperOption $o, $xpos, $self, $gj) {
-        $self->add_option_class("fold7" . ($o->display() !== PaperOption::DISP_PROMINENT || !$o->id ? "o" : "c"));
-        return '<div class="' . $sv->control_class("optdt_$xpos", "entryi short fx7")
-            . '">' . $sv->label("optdt_$xpos", "Display")
-            . '<div class="entry">'
-            . Ht::select("optdt_$xpos", ["prominent" => "Normal",
-                                         "topics" => "Grouped with topics",
-                                         "submission" => "Near submission"],
-                         $o->display_name(), ["id" => "optdt_$xpos", "class" => "settings-opt-display"])
-            . $sv->render_messages_at("optdt_$xpos")
-            . "</div></div>";
+        $open = !$o->id || $o->display() !== PaperOption::DISP_PROMINENT;
+        $self->mark_visible_property("display", $open);
+        echo '<div class="', $sv->control_class("optdt_$xpos", "entryi is-property-display" . ($open ? "" : " hidden") . " short"),
+            '">', $sv->label("optdt_$xpos", "Display"),
+            '<div class="entry">',
+            $sv->feedback_at("optdt_$xpos"),
+            Ht::select("optdt_$xpos", ["prominent" => "Normal",
+                                       "topics" => "Grouped with topics",
+                                       "submission" => "Near submission"],
+                       $o->display_name(),
+                       $sv->sjs("optdt_$xpos", ["id" => "optdt_$xpos", "class" => "settings-opt-display"])),
+            "</div></div>";
     }
-    private function render_option(SettingValues $sv, PaperOption $o = null, $xpos) {
-        if (!$o) {
-            $o = PaperOption::make((object) [
-                    "id" => 0,
-                    "name" => "Field name",
-                    "description" => "",
-                    "type" => "checkbox",
-                    "position" => count($sv->conf->paper_opts->nonfixed_option_list()) + 1,
-                    "display" => "prominent"
-                ], $sv->conf);
+
+    /** @return array<int,PaperOption> */
+    static function configurable_options(SettingValues $sv) {
+        $o = [];
+        foreach ($sv->conf->options() as $opt) {
+            if ($opt->configurable)
+                $o[$opt->id] = $opt;
+        }
+        return $o;
+    }
+    /** @return PaperOption */
+    static function make_placeholder_option(SettingValues $sv, $id) {
+        return PaperOption::make((object) [
+            "id" => $id,
+            "name" => "Field name",
+            "description" => "",
+            "type" => "checkbox",
+            "position" => 1000,
+            "display" => "prominent",
+            "json_key" => "__fake__"
+        ], $sv->conf);
+    }
+    /** @param string $expr
+     * @param string $field
+     * @param bool $is_error */
+    static function validate_condition(SettingValues $sv, $expr, $field, $is_error) {
+        $ps = new PaperSearch($sv->conf->root_user(), $expr);
+        $fake_prow = new PaperInfo(null, null, $sv->conf);
+        if ($ps->term()->script_expression($fake_prow) === null) {
+            $method = $is_error ? "error_at" : "warning_at";
+            $sv->$method($field, "Search too complex for field condition. (Not all search keywords are supported for field conditions.)");
+        }
+        if ($ps->has_problem()) {
+            $sv->warning_at($field, join("<br>", $ps->problem_texts()));
+        }
+    }
+    /** @return PaperOption */
+    static function make_requested_option(SettingValues $sv, PaperOption $io = null, $ipos) {
+        $io = $io ?? self::make_placeholder_option($sv, -999);
+        if ($ipos === null || $ipos === 0) {
+            return $io;
         }
 
-        if ($sv->use_req()) {
-            $oxpos = self::find_option_req($sv, $o, $xpos);
-            if ($sv->has_reqv("optn_$oxpos")) {
-                $id = cvtint($sv->reqv("optid_$oxpos"));
-                $args = [
-                    "id" => $id <= 0 ? 0 : $id,
-                    "name" => $sv->reqv("optn_$oxpos"),
-                    "description" => $sv->reqv("optd_$oxpos"),
-                    "type" => $sv->reqv("optvt_$oxpos", "checkbox"),
-                    "visibility" => $sv->reqv("optp_$oxpos", ""),
-                    "position" => $sv->reqv("optfp_$oxpos", 1),
-                    "display" => $sv->reqv("optdt_$oxpos"),
-                    "required" => $sv->reqv("optreq_$oxpos")
-                ];
-                if ($sv->reqv("optec_$oxpos") === "final")
-                    $args["final"] = true;
-                else if ($sv->reqv("optec_$oxpos") === "search")
-                    $args["exists_if"] = $sv->reqv("optecs_$oxpos");
-                $o = PaperOption::make((object) $args, $sv->conf);
-                if ($o instanceof SelectorPaperOption) {
-                    $o->set_selector_options(explode("\n", rtrim($sv->reqv("optv_$oxpos", ""))));
+        $args = $io->jsonSerialize();
+        $args->json_key = $io->id > 0 ? null : "__fake__";
+
+        if ($sv->has_reqv("optn_$ipos")) {
+            $name = simplify_whitespace($sv->reqv("optn_$ipos") ?? "");
+            if ($name === "" || strcasecmp($name, "Field name") === 0) {
+                $sv->error_at("optn_$ipos", "Option name required.");
+            } if (preg_match('/\A(?:paper|submission|final|none|any|all|true|false|opt(?:ion)?[-:_ ]?\d+)\z/i', $name)) {
+                $sv->error_at("optn_$ipos", "Option name “" . htmlspecialchars($name) . "” is reserved. Please pick another name.");
+            }
+            $args->name = $name;
+        }
+
+        if ($sv->has_reqv("optvt_$ipos")) {
+            $vt = $sv->reqv("optvt_$ipos");
+            if (($pos = strpos($vt, ":")) !== false) {
+                $args->type = substr($vt, 0, $pos);
+                if (preg_match('/:ds_(\d+)/', $vt, $m)) {
+                    $args->display_space = (int) $m[1];
+                }
+            } else {
+                $args->type = $vt;
+            }
+        }
+
+        if ($sv->has_reqv("optd_$ipos")) {
+            $t = CleanHTML::basic_clean($sv->reqv("optd_$ipos"), $htmlerr);
+            if ($t !== false) {
+                $args->description = $t;
+            } else {
+                $sv->error_at("optd_$ipos", $htmlerr);
+                $args->description = $sv->reqv("optd_$ipos");
+            }
+        }
+
+        if ($sv->has_reqv("optp_$ipos")) {
+            $args->visibility = $sv->reqv("optp_$ipos");
+        }
+
+        if ($sv->has_reqv("optfp_$ipos")) {
+            $args->position = (int) $sv->reqv("optfp_$ipos");
+        }
+
+        if ($sv->has_reqv("optdt_$ipos")) {
+            $args->display = $sv->reqv("optdt_$ipos");
+        }
+
+        if ($sv->has_reqv("optreq_$ipos")) {
+            $args->required = $sv->reqv("optreq_$ipos") == "1";
+        }
+
+        if ($sv->has_reqv("optec_$ipos")) {
+            $ec = $sv->reqv("optec_$ipos");
+            $args->final = $ec === "final";
+            $ecs = $ec === "search" ? $sv->reqv("optecs_$ipos") : "";
+            if ($ecs === "" || $ecs === "(All)") {
+                unset($args->exists_if);
+            } else if ($ecs !== null) {
+                self::validate_condition($sv, $ecs, "optecs_$ipos", $ecs !== $args->exists_if);
+                $args->exists_if = $ecs;
+            }
+        }
+
+        if ($sv->has_reqv("optv_$ipos")) {
+            $args->selector = [];
+            foreach (explode("\n", trim(cleannl($sv->reqv("optv_$ipos")))) as $t) {
+                if ($t !== "")
+                    $args->selector[] = $t;
+            }
+            if (empty($args->selector)
+                && ($jtype = $sv->conf->option_type($args->type))
+                && ($jtype->has_selector ?? false)) {
+                $sv->error_at("optv_$ipos", "Choices missing: enter one choice per line.");
+            }
+        }
+
+        return PaperOption::make((object) $args, $sv->conf);
+    }
+
+    private function echo_property_button($property, $icon, $label) {
+        if (isset($this->properties[$property])) {
+            $all_open = $this->properties[$property];
+            echo Ht::button($icon, ["class" => "btn-licon ui js-settings-show-property need-tooltip" . ($all_open ? " btn-disabled" : ""), "aria-label" => $label, "data-property" => $property]);
+        }
+    }
+
+    private function render_option(SettingValues $sv, PaperOption $io = null, $ipos) {
+        if ($io && isset($this->rendered_options[$io->id])) {
+            return;
+        }
+        $xpos = $ipos ?? $this->max_xpos + 1;
+        $this->max_xpos = max($this->max_xpos, $xpos);
+        $this->rendered_options[$io ? $io->id : "new_$xpos"] = true;
+
+        $old_ignore = $sv->swap_ignore_messages(true);
+        $o = self::make_requested_option($sv, $io, $ipos);
+        $sv->swap_ignore_messages($old_ignore);
+
+        if ($io) {
+            $sv->set_oldv("optn_$xpos", $io->name);
+            $sv->set_oldv("optd_$xpos", $io->description);
+            $sv->set_oldv("optvt_$xpos", $io->type);
+            $sv->set_oldv("optp_$xpos", $io->unparse_visibility());
+            $sv->set_oldv("optdt_$xpos", $io->display_name());
+            $sv->set_oldv("optreq_$xpos", $io->required ? "1" : "0");
+            $sv->set_oldv("optec_$xpos", $io->exists_condition() ? "search" : ($io->final ? "final" : "all"));
+            $sv->set_oldv("optecs_$xpos", $io->exists_condition());
+        }
+
+        $this->properties = [];
+
+        echo '<div class="settings-opt has-fold fold2o"><a href="" class="q ui settings-field-folder"><span class="expander"><span class="in0 fx2">▼</span></span></a>';
+
+        echo '<div class="', $sv->control_class("optn_$xpos", "f-i"), '">',
+            $sv->feedback_at("optn_$xpos"),
+            Ht::entry("optn_$xpos", $o->name, $sv->sjs("optn_$xpos", ["placeholder" => "Field name", "size" => 50, "id" => "optn_$xpos", "style" => "font-weight:bold", "class" => "need-tooltip", "data-tooltip-info" => "settings-option", "data-tooltip-type" => "focus", "aria-label" => "Field name"])),
+            Ht::hidden("optid_$xpos", $o->id > 0 ? $o->id : "new", ["class" => "settings-opt-id", "data-default-value" => $o->id > 0 ? $o->id : ""]),
+            Ht::hidden("optfp_$xpos", count($this->rendered_options), ["class" => "settings-opt-fp", "data-default-value" => count($this->rendered_options)]),
+            '</div>';
+
+        Ht::stash_html('<div id="option_caption_name" class="hidden"><p>Field names should be short and memorable (they are used as search keywords).</p></div><div id="option_caption_choices" class="hidden"><p>Enter choices one per line.</p></div>', 'settings_option_caption');
+
+        foreach ($sv->group_members("options/properties") as $gj) {
+            if (isset($gj->render_option_property_function)) {
+                Conf::xt_resolve_require($gj);
+                $t = call_user_func($gj->render_option_property_function, $sv, $o, $xpos, $this, $gj);
+                if (is_string($t)) { // XXX backward compat
+                    echo $t;
                 }
             }
         }
 
-        $this->option_classes = ["settings-opt", "has-fold", "fold2o"];
-
-        $t = "";
-        foreach ($sv->group_members("options/properties") as $gj) {
-            if (isset($gj->render_option_property_callback)) {
-                Conf::xt_resolve_require($gj);
-                $t .= call_user_func($gj->render_option_property_callback, $sv, $o, $xpos, $this, $gj);
+        if ($o->id && $this->have_options === null) {
+            $this->have_options = [];
+            foreach ($sv->conf->fetch_rows("select optionId, count(distinct paperId) from PaperOption group by optionId") as $row) {
+                $this->have_options[(int) $row[0]] = (int) $row[1];
             }
         }
 
-        echo '<div class="', join(" ", $this->option_classes),
-            '"><a href="" class="q ui settings-field-folder"><span class="expander"><span class="in0 fx2">▼</span></span></a>';
-
-        echo '<div class="', $sv->control_class("optn_$xpos", "f-i"), '">',
-            Ht::entry("optn_$xpos", $o->name, $sv->sjs("optn_$xpos", ["placeholder" => "Field name", "size" => 50, "id" => "optn_$xpos", "style" => "font-weight:bold", "class" => "need-tooltip", "data-tooltip-info" => "settings-option", "data-tooltip-type" => "focus", "aria-label" => "Field name"])),
-            $sv->render_messages_at("optn_$xpos"),
-            Ht::hidden("optid_$xpos", $o->id ? : "new", ["class" => "settings-opt-id"]),
-            Ht::hidden("optfp_$xpos", $xpos, ["class" => "settings-opt-fp", "data-default-value" => $xpos]),
-            '</div>';
-
-        Ht::stash_script('$(settings_option_move_enable)', 'settings_optvt');
-        Ht::stash_html('<div id="option_caption_name" class="hidden"><p>Field names should be short and memorable (they are used as search keywords).</p></div><div id="option_caption_options" class="hidden"><p>Enter choices one per line.</p></div>', 'settings_option_caption');
-
-        echo $t;
-
-        if ($o->id && $this->have_options === null) {
-            $this->have_options = [];
-            foreach ($sv->conf->fetch_rows("select optionId, count(distinct paperId) from PaperOption group by optionId") as $row)
-                $this->have_options[$row[0]] = $row[1];
-        }
-
-        echo '<div class="f-i entryi"><label></label><div class="btnp entry">',
-            '<span class="btnbox">',
-            Ht::button(Icons::ui_description(), ["class" => "btn-licon ui js-settings-option-description need-tooltip", "aria-label" => "Description"]),
-            Ht::button(Icons::ui_edit_hide(), ["class" => "btn-licon ui js-settings-option-presence need-tooltip", "aria-label" => "Form properties"]),
-            Ht::button(Icons::ui_visibility_hide(), ["class" => "btn-licon ui js-settings-option-visibility need-tooltip", "aria-label" => "Reviewer visibility"]),
-            Ht::button(Icons::ui_display(), ["class" => "btn-licon ui js-settings-option-display need-tooltip", "aria-label" => "Display type"]),
-            '</span>',
-            '<span class="btnbox">',
+        echo '<div class="f-i entryi"><label></label><div class="btnp entry"><span class="btnbox">';
+        $this->echo_property_button("description", Icons::ui_description(), "Description");
+        $this->echo_property_button("editing", Icons::ui_edit_hide(), "Edit requirements");
+        $this->echo_property_button("visibility", Icons::ui_visibility_hide(), "Reviewer visibility");
+        $this->echo_property_button("display", Icons::ui_display(), "Display settings");
+        echo '</span><span class="btnbox">',
             Ht::button(Icons::ui_movearrow(0), ["class" => "btn-licon ui js-settings-option-move moveup need-tooltip", "aria-label" => "Move up in display order"]),
             Ht::button(Icons::ui_movearrow(2), ["class" => "btn-licon ui js-settings-option-move movedown need-tooltip", "aria-label" => "Move down in display order"]),
             '</span>',
-            Ht::button(Icons::ui_trash(), ["class" => "btn-licon ui js-settings-option-move delete need-tooltip", "aria-label" => "Delete", "data-option-exists" => get($this->have_options, $o->id)]),
+            Ht::button(Icons::ui_trash(), ["class" => "btn-licon ui js-settings-option-move delete need-tooltip", "aria-label" => "Delete", "data-option-exists" => $this->have_options[$o->id] ?? false]),
             "</div></div>\n";
 
         echo '</div>';
     }
 
     static function render(SettingValues $sv) {
-        echo "<h3 class=\"form-h\">Submission fields</h3>\n";
+        $self = new Options_SettingRenderer;
+        $sv->render_section("Submission fields");
         echo "<hr class=\"g\">\n",
-            Ht::hidden("has_options", 1), "\n\n";
+            Ht::hidden("has_options", 1),
+            Ht::hidden("options:version", (int) $sv->conf->setting("options")),
+            "\n\n";
 
         echo '<div id="settings_opts" class="c">';
-        $self = new Options_SettingRenderer;
-        $pos = 0;
-        $all_options = array_merge($sv->conf->paper_opts->nonfixed_option_list()); // get our own iterator
-        foreach ($all_options as $o)
-            $self->render_option($sv, $o, ++$pos);
+        $iposl = [];
+        if ($sv->use_req()) {
+            for ($ipos = 1; $sv->has_reqv("optid_$ipos"); ++$ipos) {
+                $iposl[] = $ipos;
+            }
+            usort($iposl, function ($a, $b) use ($sv) {
+                return (int) $sv->reqv("optfp_$a") <=> (int) $sv->reqv("optfp_$b") ? : $a <=> $b;
+            });
+        }
+        $self->rendered_options = [];
+        $self->max_xpos = 0;
+        foreach ($iposl as $ipos) {
+            $id = $sv->reqv("optid_$ipos");
+            $o = $id === "new" ? null : $sv->conf->option_by_id((int) $id);
+            if ($id === "new" || $o) {
+                $self->render_option($sv, $o, $ipos);
+            }
+        }
+        $all_options = self::configurable_options($sv); // get our own iterator
+        foreach ($all_options as $o) {
+            $self->render_option($sv, $o, null);
+        }
         echo "</div>\n";
 
         ob_start();
@@ -213,106 +368,70 @@ class Options_SettingRenderer {
             Ht::button("Add submission field", ["class" => "ui js-settings-option-new"]),
             "</div>\n";
     }
+
     static function crosscheck(SettingValues $sv) {
+        if (!$sv->newv("options")) {
+            return;
+        }
+        $options = (array) json_decode($sv->newv("options"));
+        usort($options, function ($a, $b) { return $a->position <=> $b->position; });
         if (($sv->has_interest("options") || $sv->has_interest("sub_blind"))
-            && $sv->newv("options")
             && $sv->newv("sub_blind") == Conf::BLIND_ALWAYS) {
-            $options = (array) json_decode($sv->newv("options"));
-            usort($options, function ($a, $b) { return $a->position - $b->position; });
-            foreach ($options as $pos => $o)
-                if (get($o, "visibility") === "nonblind")
+            foreach ($options as $pos => $o) {
+                if (($o->visibility ?? null) === "nonblind") {
                     $sv->warning_at("optp_" . ($pos + 1), "The “" . htmlspecialchars($o->name) . "” field is “visible if authors are visible,” but authors are not visible. You may want to change " . $sv->setting_link("Settings &gt; Submissions &gt; Blind submission", "sub_blind") . " to “Blind until review.”");
+                }
+            }
+        }
+        if ($sv->has_interest("options")) {
+            foreach ($options as $pos => $o) {
+                if ($o->exists_if ?? null) {
+                    self::validate_condition($sv, $o->exists_if, "optecs_" . ($pos + 1), false);
+                }
+            }
         }
     }
 }
 
 class Options_SettingParser extends SettingParser {
+    private $known_optionids;
     private $next_optionid;
     private $req_optionid;
     private $stashed_options = false;
     private $fake_prow;
 
     function option_request_to_json(SettingValues $sv, $xpos) {
-        $name = simplify_whitespace($sv->reqv("optn_$xpos", ""));
-        if ($name === "" || $name === "(Enter new option)" || $name === "Field name")
-            return null;
-        if (preg_match('/\A(?:paper|submission|final|none|any|all|true|false|opt(?:ion)?[-:_ ]?\d+)\z/i', $name))
-            $sv->error_at("optn_$xpos", "Option name “" . htmlspecialchars($name) . "” is reserved. Please pick another name.");
-
-        $id = cvtint($sv->reqv("optid_$xpos", "new"));
-        $is_new = $id < 0;
-        if ($is_new) {
+        $idname = $sv->reqv("optid_$xpos") ?? "new";
+        if ($idname === "new") {
             if (!$this->next_optionid) {
-                $oid1 = $sv->conf->fetch_ivalue("select coalesce(max(optionId),0) + 1 from PaperOption where optionId<" . PaperOption::MINFIXEDID);
-                $oid2 = $sv->conf->fetch_ivalue("select coalesce(max(documentType),0) + 1 from PaperStorage where documentType>0 and documentType<" . PaperOption::MINFIXEDID);
-                $this->next_optionid = max($oid1, $oid2, $this->req_optionid);
-            }
-            assert($this->next_optionid > 0 && $this->next_optionid < PaperOption::MINFIXEDID);
-            $id = $this->next_optionid++;
-        }
-        $oarg = ["name" => $name, "id" => $id, "final" => false];
-
-        if ($sv->reqv("optd_$xpos") && trim($sv->reqv("optd_$xpos")) != "") {
-            $t = CleanHTML::basic_clean($sv->reqv("optd_$xpos"), $err);
-            if ($t !== false)
-                $oarg["description"] = $t;
-            else
-                $sv->error_at("optd_$xpos", $err);
-        }
-
-        if (($optvt = $sv->reqv("optvt_$xpos"))) {
-            if (($pos = strpos($optvt, ":")) !== false) {
-                $oarg["type"] = substr($optvt, 0, $pos);
-                if (preg_match('/:ds_(\d+)/', $optvt, $m))
-                    $oarg["display_space"] = (int) $m[1];
-            } else
-                $oarg["type"] = $optvt;
-        } else
-            $oarg["type"] = "checkbox";
-
-        if (($optec = $sv->reqv("optec_$xpos"))) {
-            if ($optec === "final") {
-                $oarg["final"] = true;
-            } else if ($optec === "search") {
-                $optecs = (string) $sv->reqv("optecs_$xpos");
-                if ($optecs !== "" && $optecs !== "(All)") {
-                    $ps = new PaperSearch($sv->conf->site_contact(), $optecs);
-                    if (!$this->fake_prow) {
-                        $this->fake_prow = new PaperInfo(null, null, $sv->conf);
-                    }
-                    if ($ps->term()->compile_condition($this->fake_prow, $ps) === null) {
-                        $sv->error_at("optecs_$xpos", "Search too complex for field condition. (Not all search keywords are supported for field conditions.)");
-                    } else {
-                        $oarg["exists_if"] = $optecs;
-                    }
-                    if (!empty($ps->warnings))
-                        $sv->warning_at("optecs_$xpos", join("<br>", $ps->warnings));
+                $this->known_optionids = [];
+                $result = $sv->conf->qe("select distinct optionId from PaperOption where optionId>0 union select distinct documentType from PaperStorage where documentType>0");
+                while (($row = $result->fetch_row())) {
+                    $this->known_optionids[(int) $row[0]] = true;
+                }
+                $this->next_optionid = 1;
+                foreach ($sv->conf->options()->universal() as $o) {
+                    $this->known_optionids[$o->id] = true;
                 }
             }
-        }
-
-        $jtype = $sv->conf->option_type($oarg["type"]);
-        if ($jtype && get($jtype, "has_selector")) {
-            $oarg["selector"] = array();
-            $seltext = trim(cleannl($sv->reqv("optv_$xpos", "")));
-            if ($seltext != "") {
-                foreach (explode("\n", $seltext) as $t)
-                    $oarg["selector"][] = $t;
-            } else {
-                $sv->error_at("optv_$xpos", "Enter selectors one per line.");
+            while (isset($this->known_optionids[$this->next_optionid])) {
+                ++$this->next_optionid;
             }
+            $io = Options_SettingRenderer::make_placeholder_option($sv, $this->next_optionid);
+            ++$this->next_optionid;
+        } else {
+            $io = $sv->conf->option_by_id(cvtint($idname));
         }
-
-        $oarg["visibility"] = $sv->reqv("optp_$xpos", "rev");
-        $oarg["position"] = (int) $sv->reqv("optfp_$xpos", 1);
-        $oarg["display"] = $sv->reqv("optdt_$xpos");
-        $oarg["required"] = !!$sv->reqv("optreq_$xpos");
-
-        return PaperOption::make((object) $oarg, $sv->conf);
+        return Options_SettingRenderer::make_requested_option($sv, $io, $xpos);
     }
 
     function parse(SettingValues $sv, Si $si) {
-        $new_opts = $sv->conf->paper_opts->nonfixed_option_list();
+        if ($sv->has_reqv("options:version")
+            && (int) $sv->reqv("options:version") !== (int) $sv->conf->setting("options")) {
+            $sv->error_at("options", "You modified options settings in another tab. Please reload.");
+        }
+
+        $new_opts = Options_SettingRenderer::configurable_options($sv);
 
         // consider option ids
         $optids = array_map(function ($o) { return $o->id; }, $new_opts);
@@ -334,15 +453,15 @@ class Options_SettingParser extends SettingParser {
         if (!$sv->has_error()) {
             uasort($new_opts, "PaperOption::compare");
             $this->stashed_options = $new_opts;
-            $sv->need_lock["PaperOption"] = true;
+            $sv->request_write_lock("PaperOption");
             return true;
         }
     }
 
     function unparse_json(SettingValues $sv, Si $si, $j) {
         $oj = [];
-        foreach ($sv->conf->paper_opts->nonfixed_option_list() as $o) {
-            $oj[] = $o->unparse();
+        foreach (Options_SettingRenderer::configurable_options($sv) as $o) {
+            $oj[] = $o->jsonSerialize();
         }
         $j->options = $oj;
     }
@@ -350,26 +469,25 @@ class Options_SettingParser extends SettingParser {
     function save(SettingValues $sv, Si $si) {
         $newj = [];
         foreach ($this->stashed_options as $o) {
-            $newj[] = $o->unparse();
+            $newj[] = $o->jsonSerialize();
         }
         $sv->save("next_optionid", null);
-        $sv->save("options", empty($newj) ? null : json_encode_db($newj));
-
-        $deleted_ids = array();
-        foreach ($sv->conf->paper_opts->nonfixed_option_list() as $o) {
-            $newo = get($this->stashed_options, $o->id);
-            if (!$newo
-                || ($newo->type !== $o->type
-                    && !$newo->change_type($o, true, true)
-                    && !$o->change_type($newo, false, true))) {
-                $deleted_ids[] = $o->id;
+        if ($sv->update("options", empty($newj) ? null : json_encode_db($newj))) {
+            $sv->update("options:version", (int) $sv->conf->setting("options") + 1);
+            $deleted_ids = array();
+            foreach (Options_SettingRenderer::configurable_options($sv) as $o) {
+                $newo = $this->stashed_options[$o->id] ?? null;
+                if (!$newo
+                    || ($newo->type !== $o->type
+                        && !$newo->change_type($o, true, true)
+                        && !$o->change_type($newo, false, true))) {
+                    $deleted_ids[] = $o->id;
+                }
             }
+            if (!empty($deleted_ids)) {
+                $sv->conf->qe("delete from PaperOption where optionId?a", $deleted_ids);
+            }
+            $sv->mark_invalidate_caches(["autosearch" => true]);
         }
-        if (!empty($deleted_ids)) {
-            $sv->conf->qe("delete from PaperOption where optionId?a", $deleted_ids);
-        }
-
-        // invalidate cached option list
-        $sv->conf->invalidate_caches(["options" => true]);
     }
 }

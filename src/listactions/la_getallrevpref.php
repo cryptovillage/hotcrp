@@ -6,8 +6,8 @@ class GetAllRevpref_ListAction extends ListAction {
     function allow(Contact $user, Qrequest $qreq) {
         return $user->is_manager();
     }
-    function run(Contact $user, $qreq, $ssel) {
-        $texts = array();
+    function run(Contact $user, Qrequest $qreq, SearchSelection $ssel) {
+        $texts = [];
         $pcm = $user->conf->pc_members();
         $has_conflict = $has_expertise = $has_topic_score = false;
         foreach ($ssel->paper_set($user, ["allReviewerPreference" => 1, "allConflictType" => 1, "topics" => 1]) as $prow) {
@@ -19,7 +19,7 @@ class GetAllRevpref_ListAction extends ListAction {
                 $pref = $prow->preference($p);
                 $cflt = $conflicts[$cid] ?? null;
                 $is_cflt = $cflt && $cflt->is_conflicted();
-                $tv = $prow->topicIds ? $prow->topic_interest_score($p) : 0;
+                $tv = $prow->topicIds !== "" ? $prow->topic_interest_score($p) : 0;
                 if ($pref[0] !== 0 || $pref[1] !== null || $is_cflt || $tv) {
                     $texts[] = array("paper" => $prow->paperId, "title" => $prow->title, "first" => $p->firstName, "last" => $p->lastName, "email" => $p->email,
                                 "preference" => $pref[0] ? : "",
@@ -43,6 +43,6 @@ class GetAllRevpref_ListAction extends ListAction {
         if ($has_conflict) {
             $headers[] = "conflict";
         }
-        return $user->conf->make_csvg("allprefs")->select($headers)->add($texts);
+        return $user->conf->make_csvg("allprefs")->select($headers)->append($texts);
     }
 }

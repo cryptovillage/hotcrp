@@ -1,10 +1,12 @@
 <?php
 // mailclasses.php -- HotCRP mail tool
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class MailRecipients {
+    /** @var Conf */
     private $conf;
-    private $contact;
+    /** @var Contact */
+    private $user;
     private $type;
     private $sel = [];
     private $selflags = [];
@@ -25,9 +27,8 @@ class MailRecipients {
     }
 
     function __construct($contact, $type, $papersel, $newrev_since) {
-        global $Now;
         $this->conf = $contact->conf;
-        $this->contact = $contact;
+        $this->user = $contact;
         assert(!!$contact->isPC);
         $any_pcrev = $any_extrev = 0;
         $any_newpcrev = $any_lead = $any_shepherd = 0;
@@ -40,10 +41,14 @@ class MailRecipients {
 
             // map "somedec:no"/"somedec:yes" to real decisions
             $result = $this->conf->qe("select outcome, count(*) from Paper where timeSubmitted>0 group by outcome");
-            $dec_pcount = edb_map($result);
-            $dec_tcount = array(0 => 0, 1 => 0, -1 => 0);
+            $dec_pcount = [];
+            while (($row = $result->fetch_row())) {
+                $dec_pcount[(int) $row[0]] = (int) $row[1];
+            }
+            Dbl::free($result);
+            $dec_tcount = [0, 0, 0];
             foreach ($dec_pcount as $dnum => $dcount) {
-                $dec_tcount[$dnum > 0 ? 1 : ($dnum < 0 ? -1 : 0)] += $dcount;
+                $dec_tcount[$dnum > 0 ? 2 : ($dnum < 0 ? 0 : 1)] += $dcount;
             }
             if ($type === "somedec:no" || $type === "somedec:yes") {
                 $dmaxcount = -1;
@@ -59,15 +64,16 @@ class MailRecipients {
             }
 
             $this->defsel("bydec_group", "Contact authors by decision", self::F_GROUP);
-            foreach ($this->conf->decision_map() as $dnum => $dname)
+            foreach ($this->conf->decision_map() as $dnum => $dname) {
                 if ($dnum) {
                     $k = "dec:$dname";
-                    $hide = !get($dec_pcount, $dnum);
+                    $hide = !($dec_pcount[$dnum] ?? null);
                     $this->defsel("dec:$dname", "Contact authors of " . htmlspecialchars($dname) . " papers", $hide ? self::F_HIDE : 0);
                 }
-            $this->defsel("dec:yes", "Contact authors of accept-class papers", $dec_tcount[1] == 0 ? self::F_HIDE : 0);
-            $this->defsel("dec:no", "Contact authors of reject-class papers", $dec_tcount[-1] == 0 ? self::F_HIDE : 0);
-            $this->defsel("dec:none", "Contact authors of undecided papers", $dec_tcount[0] == 0 || ($dec_tcount[1] == 0 && $dec_tcount[-1] == 0) ? self::F_HIDE : 0);
+            }
+            $this->defsel("dec:yes", "Contact authors of accept-class papers", $dec_tcount[2] === 0 ? self::F_HIDE : 0);
+            $this->defsel("dec:no", "Contact authors of reject-class papers", $dec_tcount[0] === 0 ? self::F_HIDE : 0);
+            $this->defsel("dec:none", "Contact authors of undecided papers", $dec_tcount[1] === 0 || ($dec_tcount[2] === 0 && $dec_tcount[0] === 0) ? self::F_HIDE : 0);
             $this->defsel("dec:any", "Contact authors of decided papers", self::F_HIDE);
             $this->defsel("bydec_group_end", null, self::F_GROUP);
 
@@ -88,7 +94,7 @@ class MailRecipients {
             }
             $row = $this->conf->fetch_first_row("select
                 exists (select * from PaperReview where reviewType>=" . REVIEW_PC . " and $pidw),
-                exists (select * from PaperReview where reviewType<" . REVIEW_PC . "  and $pidw),
+                exists (select * from PaperReview where reviewType>0 and reviewType<" . REVIEW_PC . "  and $pidw),
                 exists (select * from PaperReview where reviewType>=" . REVIEW_PC . " and reviewSubmitted is null and reviewNeedsSubmit!=0 and timeRequested>timeRequestNotified and $pidw),
                 exists (select * from Paper where timeSubmitted>0 and leadContactId!=0 and $pidw),
                 exists (select * from Paper where timeSubmitted>0 and shepherdContactId!=0 and $pidw)");
@@ -111,7 +117,7 @@ class MailRecipients {
             $this->defsel("rev_group_end", null, self::F_GROUP);
         }
 
-        $hide = !$this->contact->is_requester();
+        $hide = !$this->user->is_requester();
         $this->defsel("myextrev", "Your requested reviewers", self::F_ANYPC | ($hide ? self::F_HIDE : 0));
         $this->defsel("uncmyextrev", "Your requested reviewers with incomplete reviews", self::F_ANYPC | ($hide ? self::F_HIDE : 0));
 
@@ -123,7 +129,7 @@ class MailRecipients {
         $this->defsel("pc_group", "Program committee", self::F_GROUP);
         $selcount = count($this->sel);
         $this->defsel("pc", "Program committee", self::F_ANYPC | self::F_NOPAPERS);
-        foreach ($this->conf->viewable_user_tags($this->contact) as $t) {
+        foreach ($this->conf->viewable_user_tags($this->user) as $t) {
             if ($t !== "pc")
                 $this->defsel("pc:$t", "#$t program committee", self::F_ANYPC | self::F_NOPAPERS);
         }
@@ -134,7 +140,7 @@ class MailRecipients {
         }
 
         if ($contact->privChair) {
-            $this->defsel("all", "All users", self::F_NOPAPERS);
+            $this->defsel("all", "Active users", self::F_NOPAPERS);
         }
 
         if (isset($this->sel[$type])
@@ -153,7 +159,7 @@ class MailRecipients {
             if (preg_match(',\A(?:|n/a|\(?all\)?|0)\z,i', $t)) {
                 $this->newrev_since = 0;
             } else if (($this->newrev_since = $this->conf->parse_time($t)) !== false) {
-                if ($this->newrev_since > $Now) {
+                if ($this->newrev_since > Conf::$now) {
                     $this->conf->warnMsg("That time is in the future.");
                 }
             } else {
@@ -200,6 +206,7 @@ class MailRecipients {
         return Ht::select("to", $sel, $this->type, ["id" => "to"]);
     }
 
+    /** @return string */
     function unparse() {
         $t = $this->sel[$this->type];
         if ($this->type == "newpcrev" && $this->newrev_since) {
@@ -208,12 +215,20 @@ class MailRecipients {
         return $t;
     }
 
+    /** @return bool */
+    function is_authors() {
+        return in_array($this->type, ["s", "unsub", "au"])
+            || str_starts_with($this->type, "dec:");
+    }
+
+    /** @return bool */
     function need_papers() {
         return $this->type !== "pc"
             && substr($this->type, 0, 3) !== "pc:"
             && $this->type !== "all";
     }
 
+    /** @return int */
     function combination_type($paper_sensitive) {
         if (preg_match('/\A(?:pc|pc:.*|(?:|unc|new)pcrev|lead|shepherd)\z/', $this->type)) {
             return 2;
@@ -225,9 +240,9 @@ class MailRecipients {
     }
 
     function query($paper_sensitive) {
-        $cols = array();
-        $where = array("email not regexp '^anonymous[0-9]*\$'");
-        $joins = array("ContactInfo");
+        $cols = [];
+        $where = ["not disabled"];
+        $joins = ["ContactInfo"];
 
         // paper limit
         if ($this->need_papers() && isset($this->papersel)) {
@@ -261,13 +276,13 @@ class MailRecipients {
         }
 
         // additional manager limit
-        if (!$this->contact->privChair
+        if (!$this->user->privChair
             && !($this->selflags[$this->type] & self::F_ANYPC)) {
-            if ($this->conf->check_any_admin_tracks($this->contact)) {
-                $ps = new PaperSearch($this->contact, ["q" => "", "t" => "admin"]);
+            if ($this->conf->check_any_admin_tracks($this->user)) {
+                $ps = new PaperSearch($this->user, ["q" => "", "t" => "admin"]);
                 $where[] = "Paper.paperId" . sql_in_int_list($ps->paper_ids());
             } else {
-                $where[] = "Paper.managerContactId=" . $this->contact->contactId;
+                $where[] = "Paper.managerContactId=" . $this->user->contactId;
             }
         }
 
@@ -280,6 +295,7 @@ class MailRecipients {
         // build query
         if ($this->type == "all") {
             $needpaper = $needconflict = $needreview = false;
+            $where[] = "(ContactInfo.roles!=0 or lastLogin>0 or exists (select * from PaperConflict where contactId=ContactInfo.contactId) or exists (select * from PaperReview where contactId=ContactInfo.contactId and reviewType>0))";
         } else if ($this->type == "pc" || substr($this->type, 0, 3) == "pc:") {
             $needpaper = $needconflict = $needreview = false;
             $where[] = "(ContactInfo.roles&" . Contact::ROLE_PC . ")!=0";
@@ -290,12 +306,12 @@ class MailRecipients {
             $needpaper = $needreview = true;
             $needconflict = false;
             $joins[] = "join Paper";
-            $joins[] = "join PaperReview on (PaperReview.paperId=Paper.paperId and PaperReview.contactId=ContactInfo.contactId)";
+            $joins[] = "join PaperReview on (PaperReview.paperId=Paper.paperId and PaperReview.contactId=ContactInfo.contactId and PaperReview.reviewType>0)";
             $where[] = "Paper.paperId=PaperReview.paperId";
         } else if ($this->type == "lead" || $this->type == "shepherd") {
             $needpaper = $needconflict = $needreview = true;
             $joins[] = "join Paper on (Paper.{$this->type}ContactId=ContactInfo.contactId)";
-            $joins[] = "left join PaperReview on (PaperReview.paperId=Paper.paperId and PaperReview.contactId=ContactInfo.contactId)";
+            $joins[] = "left join PaperReview on (PaperReview.paperId=Paper.paperId and PaperReview.contactId=ContactInfo.contactId and PaperReview.reviewType>0)";
         } else {
             $needpaper = $needconflict = true;
             $needreview = false;
@@ -332,7 +348,7 @@ class MailRecipients {
             // Review type
             if ($revmatch[2] == "myext") {
                 $where[] = "PaperReview.reviewType=" . REVIEW_EXTERNAL;
-                $where[] = "PaperReview.requestedBy=" . $this->contact->contactId;
+                $where[] = "PaperReview.requestedBy=" . $this->user->contactId;
             } else if ($revmatch[2] == "ext") {
                 $where[] = "PaperReview.reviewType=" . REVIEW_EXTERNAL;
             } else if ($revmatch[2] == "pc") {
@@ -355,9 +371,9 @@ class MailRecipients {
         }
         if ($needreview) {
             if (!$revmatch || $this->type === "rev") {
-                $q .= ", " . PaperInfo::my_review_permissions_sql("PaperReview.") . " myReviewPermissions";
+                $q .= ", coalesce(" . PaperInfo::my_review_permissions_sql("PaperReview.") . ", '') myReviewPermissions";
             } else {
-                $q .= ", (select " . PaperInfo::my_review_permissions_sql() . " from PaperReview where PaperReview.paperId=Paper.paperId and PaperReview.contactId=ContactInfo.contactId group by paperId) myReviewPermissions";
+                $q .= ", coalesce((select " . PaperInfo::my_review_permissions_sql() . " from PaperReview where PaperReview.paperId=Paper.paperId and PaperReview.contactId=ContactInfo.contactId group by paperId), '') myReviewPermissions";
             }
         } else {
             $q .= ", '' myReviewPermissions";

@@ -1,4 +1,4 @@
-var start_buzzer_page = (function ($) {
+hotcrp.start_buzzer_page = (function ($) {
 var info, has_format, muted, show_papers, initial = true, last_html = {};
 
 function render_pc(pc) {
@@ -207,7 +207,7 @@ function do_show_papers() {
 }
 
 function do_kiosk() {
-    var hc = popup_skeleton({anchor: this, action: hoturl_post("buzzer")});
+    var hc = popup_skeleton({near: this, action: hoturl_post("buzzer")});
     hc.push('<p>Kiosk mode is a discussion status page with no other site privileges. It’s safe to leave a browser in kiosk mode open in the hallway.</p>');
     hc.push('<p><strong>Kiosk mode will sign your browser out of the site.</strong> Do not use kiosk mode on your main browser.</p>');
     hc.push('<p>These URLs access kiosk mode directly:</p>');
@@ -216,7 +216,7 @@ function do_kiosk() {
             + '</dd></dl>');
     if (show_papers)
         hc.push('<input type="hidden" name="buzzer_showpapers" value="1" />');
-    hc.push_actions(['<button type="submit" name="signout_to_kiosk" value="1">Enter kiosk mode</button>',
+    hc.push_actions(['<button type="submit" name="signout_to_kiosk" value="1" class="btn btn-danger">Enter kiosk mode</button>',
         '<button type="button" name="cancel">Cancel</button>']);
     hc.show();
 }

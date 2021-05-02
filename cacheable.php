@@ -7,28 +7,29 @@ header("Cache-Control: max-age=315576000, public");
 header("Expires: " . gmdate("D, d M Y H:i:s", time() + 315576000) . " GMT");
 
 // *** NB This file does not include all of the HotCRP infrastructure! ***
-$zlib_output_compression = false;
-if (function_exists("zlib_get_coding_type"))
-    $zlib_output_compression = zlib_get_coding_type();
-if ($zlib_output_compression) {
-    header("Content-Encoding: $zlib_output_compression");
-    header("Vary: Accept-Encoding", false);
+if (!function_exists("zlib_get_coding_type")) {
+    /** @phan-suppress-next-line PhanRedefineFunctionInternal */
+    function zlib_get_coding_type() {
+        return false;
+    }
 }
 
 function fail($reason, $file) {
-    global $zlib_output_compression;
     header("HTTP/1.0 $reason");
     header("Content-Type: text/plain; charset=utf-8");
-    $result = "$file\r\n";
-    if (!$zlib_output_compression)
-        header("Content-Length: " . strlen($result));
-    echo $result;
-    exit;
+    if (zlib_get_coding_type() === false) {
+        header("Content-Length: " . (strlen($file) + 2));
+    }
+    echo $file, "\r\n";
 }
 
-$file = isset($_GET["file"]) ? $_GET["file"] : null;
+$file = $_GET["file"] ?? null;
+if (!$file && (Navigation::path())[0] === "/") {
+    $file = substr(Navigation::path(), 1);
+}
 if (!$file) {
     fail("400 Bad Request", "File missing");
+    exit;
 }
 
 $prefix = "";
@@ -65,15 +66,19 @@ if (preg_match(',\A(?:images|scripts|stylesheets)(?:/[^./][^/]+)+\z,', $file)
         header("Content-Type: application/vnd.ms-fontobject");
     } else {
         fail("403 Forbidden", "File cannot be served");
+        exit;
     }
     header("Access-Control-Allow-Origin: *");
 } else {
     fail("403 Forbidden", "File cannot be served");
+    exit;
 }
 
 $mtime = @filemtime($file);
-if ($mtime === false)
+if ($mtime === false) {
     fail("404 Not Found", "File not found");
+    exit;
+}
 $last_modified = gmdate("D, d M Y H:i:s", $mtime) . " GMT";
 $etag = '"' . md5("$file $last_modified") . '"';
 header("Last-Modified: $last_modified");
@@ -84,16 +89,17 @@ $if_modified_since = isset($_SERVER["HTTP_IF_MODIFIED_SINCE"]) ? $_SERVER["HTTP_
 $if_none_match = isset($_SERVER["HTTP_IF_NONE_MATCH"]) ? $_SERVER["HTTP_IF_NONE_MATCH"] : 0;
 if (($if_modified_since || $if_none_match)
     && (!$if_modified_since || $if_modified_since === $last_modified)
-    && (!$if_none_match || $if_none_match === $etag))
+    && (!$if_none_match || $if_none_match === $etag)) {
     header("HTTP/1.0 304 Not Modified");
-else if (function_exists("ob_gzhandler") && !$zlib_output_compression) {
+} else if (function_exists("ob_gzhandler") && zlib_get_coding_type() === false) {
     ob_start("ob_gzhandler");
     echo $prefix;
     readfile($file);
     ob_end_flush();
 } else {
-    if (!$zlib_output_compression)
+    if (zlib_get_coding_type() === false) {
         header("Content-Length: " . (filesize($file) + strlen($prefix)));
+    }
     echo $prefix;
     readfile($file);
 }

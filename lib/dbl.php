@@ -1,6 +1,6 @@
 <?php
 // dbl.php -- database interface layer
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class Dbl_Result {
     /** @var int */
@@ -31,15 +31,21 @@ class Dbl_Result {
         $r = new Dbl_Result;
         $r->affected_rows = $r->warning_count = 0;
         $r->insert_id = null;
-        $r->errno = 1002;
+        $r->errno = 0;
         return $r;
     }
-    /** @return null */
+    /** @return ?array<int,?string> */
     function fetch_row() {
         return null;
     }
-    /** @return null */
-    function fetch_object() {
+    /** @return ?array<string,?string> */
+    function fetch_assoc() {
+        return null;
+    }
+    /** @template T
+     * @param class-string<T> $class_name
+     * @return ?T */
+    function fetch_object($class_name = "stdClass", $params = []) {
         return null;
     }
     function close() {
@@ -51,26 +57,30 @@ class Dbl_MultiResult {
     private $dblink;
     private $flags;
     private $qstr;
-    private $more;
 
     function __construct(mysqli $dblink, $flags, $qstr, $result) {
         $this->dblink = $dblink;
-        $this->flags = $flags;
+        $this->flags = $flags | Dbl::F_MULTI | ($result ? Dbl::F_MULTI_OK : 0);
         $this->qstr = $qstr;
-        $this->more = $result;
     }
+    /** @return false|Dbl_Result */
     function next() {
         // XXX does processing stop at first error?
-        if ($this->more === null) {
-            $this->more = $this->dblink->more_results() ? $this->dblink->next_result() : -1;
-        }
-        if ($this->more === -1) {
-            return false;
-        } else if ($this->more) {
+        if ($this->flags & Dbl::F_MULTI_OK) {
             $result = $this->dblink->store_result();
-            $this->more = null;
-        } else {
+        } else if ($this->flags & Dbl::F_MULTI) {
             $result = false;
+        } else {
+            return false;
+        }
+        if ($this->dblink->more_results()) {
+            if ($this->dblink->next_result()) {
+                $this->flags |= Dbl::F_MULTI_OK;
+            } else {
+                $this->flags &= ~Dbl::F_MULTI_OK;
+            }
+        } else {
+            $this->flags &= ~(Dbl::F_MULTI | Dbl::F_MULTI_OK);
         }
         return Dbl::do_result($this->dblink, $this->flags, $this->qstr, $result);
     }
@@ -88,17 +98,21 @@ class Dbl {
     const F_ERROR = 8;
     const F_ALLOWERROR = 16;
     const F_MULTI = 32;
-    const F_ECHO = 64;
-    const F_NOEXEC = 128;
+    const F_MULTI_OK = 64; // internal
+    const F_ECHO = 128;
+    const F_NOEXEC = 256;
 
+    /** @var int */
     static public $nerrors = 0;
     static public $default_dblink;
+    /** @var callable */
     static private $error_handler = "Dbl::default_error_handler";
     /** @var false|array<string,array{float,int,string}> */
     static private $query_log = false;
     /** @var false|string */
     static private $query_log_key = false;
     static private $query_log_file = null;
+    /** @var bool */
     static public $check_warnings = true;
     static public $landmark_sanitizer = "/^Dbl::/";
 
@@ -156,8 +170,8 @@ class Dbl {
         }
 
         $dbsock = $Opt["dbSocket"] ?? null;
-        if ($dbsock && $dbport === null) {
-            $dbport = (int) ini_get("mysqli.default_port");
+        if ($dbport === null) {
+            $dbport = $dbsock ? (int) ini_get("mysqli.default_port") : 0;
         }
         if ($dbpass === null) {
             $dbpass = ini_get("mysqli.default_pw");
@@ -407,7 +421,7 @@ class Dbl {
         return $result;
     }
 
-    /** @return mysqli_result|Dbl_Result */
+    /** @return Dbl_Result */
     static private function do_query_with($dblink, $qstr, $argv, $flags) {
         if (!($flags & self::F_RAW)) {
             $qstr = self::format_query_args($dblink, $qstr, $argv);
@@ -415,19 +429,19 @@ class Dbl {
         return self::do_result($dblink, $flags, $qstr, self::call_query($dblink, $flags, "query", $qstr));
     }
 
-    /** @return mysqli_result|Dbl_Result */
+    /** @return Dbl_Result */
     static private function do_query($args, $flags) {
         list($dblink, $qstr, $argv) = self::query_args($args, $flags, true);
         return self::do_query_with($dblink, $qstr, $argv, $flags);
     }
 
-    /** @return mysqli_result|Dbl_Result */
+    /** @return Dbl_Result */
     static function do_query_on($dblink, $args, $flags) {
         list($ignored_dblink, $qstr, $argv) = self::query_args($args, $flags, true);
         return self::do_query_with($dblink, $qstr, $argv, $flags);
     }
 
-    /** @return mysqli_result|Dbl_Result */
+    /** @return Dbl_Result */
     static public function do_result($dblink, $flags, $qstr, $result) {
         if ($result === false && $dblink->errno) {
             if (!($flags & self::F_ALLOWERROR)) {
@@ -443,6 +457,7 @@ class Dbl {
             $result = Dbl_Result::make($dblink);
         } else if ($result === null) {
             $result = Dbl_Result::make_empty();
+            $result->errno = 1002;
         }
         if (self::$check_warnings
             && !($flags & self::F_ALLOWERROR)
@@ -456,6 +471,7 @@ class Dbl {
         return $result;
     }
 
+    /** @return Dbl_MultiResult */
     static private function do_multi_query($args, $flags) {
         list($dblink, $qstr, $argv) = self::query_args($args, $flags, true);
         if (!($flags & self::F_RAW)) {
@@ -464,77 +480,77 @@ class Dbl {
         return new Dbl_MultiResult($dblink, $flags, $qstr, self::call_query($dblink, $flags, "multi_query", $qstr));
     }
 
-    /** @return mysqli_result|Dbl_Result */
+    /** @return Dbl_Result */
     static function query(/* [$dblink,] $qstr, ... */) {
         return self::do_query(func_get_args(), 0);
     }
 
-    /** @return mysqli_result|Dbl_Result */
+    /** @return Dbl_Result */
     static function query_raw(/* [$dblink,] $qstr */) {
         return self::do_query(func_get_args(), self::F_RAW);
     }
 
-    /** @return mysqli_result|Dbl_Result */
+    /** @return Dbl_Result */
     static function query_apply(/* [$dblink,] $qstr, [$argv] */) {
         return self::do_query(func_get_args(), self::F_APPLY);
     }
 
-    /** @return mysqli_result|Dbl_Result */
+    /** @return Dbl_Result */
     static function q(/* [$dblink,] $qstr, ... */) {
         return self::do_query(func_get_args(), 0);
     }
 
-    /** @return mysqli_result|Dbl_Result */
+    /** @return Dbl_Result */
     static function q_raw(/* [$dblink,] $qstr */) {
         return self::do_query(func_get_args(), self::F_RAW);
     }
 
-    /** @return mysqli_result|Dbl_Result */
+    /** @return Dbl_Result */
     static function q_apply(/* [$dblink,] $qstr, [$argv] */) {
         return self::do_query(func_get_args(), self::F_APPLY);
     }
 
-    /** @return mysqli_result|Dbl_Result */
+    /** @return Dbl_Result */
     static function qx(/* [$dblink,] $qstr, ... */) {
         return self::do_query(func_get_args(), self::F_ALLOWERROR);
     }
 
-    /** @return mysqli_result|Dbl_Result */
+    /** @return Dbl_Result */
     static function qx_raw(/* [$dblink,] $qstr */) {
         return self::do_query(func_get_args(), self::F_RAW | self::F_ALLOWERROR);
     }
 
-    /** @return mysqli_result|Dbl_Result */
+    /** @return Dbl_Result */
     static function qx_apply(/* [$dblink,] $qstr, [$argv] */) {
         return self::do_query(func_get_args(), self::F_APPLY | self::F_ALLOWERROR);
     }
 
-    /** @return mysqli_result|Dbl_Result */
+    /** @return Dbl_Result */
     static function ql(/* [$dblink,] $qstr, ... */) {
         return self::do_query(func_get_args(), self::F_LOG);
     }
 
-    /** @return mysqli_result|Dbl_Result */
+    /** @return Dbl_Result */
     static function ql_raw(/* [$dblink,] $qstr */) {
         return self::do_query(func_get_args(), self::F_RAW | self::F_LOG);
     }
 
-    /** @return mysqli_result|Dbl_Result */
+    /** @return Dbl_Result */
     static function ql_apply(/* [$dblink,] $qstr, [$argv] */) {
         return self::do_query(func_get_args(), self::F_APPLY | self::F_LOG);
     }
 
-    /** @return mysqli_result|Dbl_Result */
+    /** @return Dbl_Result */
     static function qe(/* [$dblink,] $qstr, ... */) {
         return self::do_query(func_get_args(), self::F_ERROR);
     }
 
-    /** @return mysqli_result|Dbl_Result */
+    /** @return Dbl_Result */
     static function qe_raw(/* [$dblink,] $qstr */) {
         return self::do_query(func_get_args(), self::F_RAW | self::F_ERROR);
     }
 
-    /** @return mysqli_result|Dbl_Result */
+    /** @return Dbl_Result */
     static function qe_apply(/* [$dblink,] $qstr, [$argv] */) {
         return self::do_query(func_get_args(), self::F_APPLY | self::F_ERROR);
     }
@@ -608,12 +624,15 @@ class Dbl {
         return self::make_multi_query_stager($dblink ? : self::$default_dblink, self::F_ERROR);
     }
 
+    /** @param null|Dbl_Result|mysqli_result $result */
     static function free($result) {
         if ($result && $result instanceof mysqli_result) {
             $result->close();
         }
     }
 
+    /** @param null|Dbl_Result|mysqli_result $result
+     * @return bool */
     static function is_error($result) {
         return !$result
             || ($result instanceof Dbl_Result && $result->errno);
@@ -724,7 +743,7 @@ class Dbl {
      * @return null|int|string */
     static function compare_and_swap($dblink, $value_query, $value_query_args,
                                      $callback, $update_query, $update_query_args) {
-        while (true) {
+        for ($n = 0; $n < 200; ++$n) {
             $result = self::qe_apply($dblink, $value_query, $value_query_args);
             $value = self::fetch_value($result);
             $new_value = call_user_func($callback, $value);
@@ -738,6 +757,7 @@ class Dbl {
                 return $new_value;
             }
         }
+        throw new Exception("Dbl::compare_and_swap failure on query `" . Dbl::format_query_args($dblink, $value_query, $value_query_args) . "`");
     }
 
     static function log_queries($limit, $file = false) {
@@ -756,7 +776,7 @@ class Dbl {
     static function shutdown() {
         if (self::$query_log) {
             uasort(self::$query_log, function ($a, $b) {
-                return $b[0] < $a[0] ? -1 : $b[0] > $a[0];
+                return $b[0] <=> $a[0];
             });
             $self = Navigation::self();
             $i = 1;
@@ -797,61 +817,6 @@ class Dbl {
         $qstr = count($args) > 1 ? $args[1] : $args[0];
         return "_" . $utf8 . $qstr . " collate " . $utf8 . "_general_ci";
     }
-}
-
-// number of rows returned by a select query, or 'false' if result is an error
-function edb_nrows($result) {
-    return $result ? $result->num_rows : false;
-}
-
-// next row as an array, or 'false' if no more rows or result is an error
-function edb_row($result) {
-    return $result ? $result->fetch_row() : false;
-}
-
-// array of all rows as arrays
-function edb_rows($result) {
-    $x = array();
-    while ($result && ($row = $result->fetch_row())) {
-        $x[] = $row;
-    }
-    Dbl::free($result);
-    return $x;
-}
-
-// array of all first columns as arrays
-function edb_first_columns($result) {
-    $x = array();
-    while ($result && ($row = $result->fetch_row())) {
-        $x[] = $row[0];
-    }
-    Dbl::free($result);
-    return $x;
-}
-
-// map of all rows
-function edb_map($result) {
-    $x = array();
-    while ($result && ($row = $result->fetch_row())) {
-        $x[$row[0]] = (count($row) == 2 ? $row[1] : array_slice($row, 1));
-    }
-    Dbl::free($result);
-    return $x;
-}
-
-// next row as an object, or 'false' if no more rows or result is an error
-function edb_orow($result) {
-    return $result ? $result->fetch_object() : false;
-}
-
-// array of all rows as objects
-function edb_orows($result) {
-    $x = array();
-    while ($result && ($row = $result->fetch_object())) {
-        $x[] = $row;
-    }
-    Dbl::free($result);
-    return $x;
 }
 
 // quoting for SQL

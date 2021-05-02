@@ -4,7 +4,7 @@ Subject: [Testconf I] Welcome to the program committee
 
 Greetings,
 
-You have been added to the program committee at the Test Conference I
+You have been added to the program committee on the Test Conference I
 (Testconf I) submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -14,7 +14,7 @@ You will need a password to sign in. Use this link to set one up:
 
 http://hotcrp.lcdf.org/test/resetpassword/{{}}
 
-Should the link expire, obtain a new link using "Forgot my password".
+Should the link expire, obtain a new one using "Forgot my password".
 
 If you already have an account under a different email address, you may
 merge this new account into that one. Go to your profile page and select
@@ -30,7 +30,7 @@ Subject: [Testconf I] Welcome to the program committee
 
 Greetings,
 
-You have been added to the program committee at the Test Conference I
+You have been added to the program committee on the Test Conference I
 (Testconf I) submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -40,7 +40,7 @@ You will need a password to sign in. Use this link to set one up:
 
 http://hotcrp.lcdf.org/test/resetpassword/{{}}
 
-Should the link expire, obtain a new link using "Forgot my password".
+Should the link expire, obtain a new one using "Forgot my password".
 
 If you already have an account under a different email address, you may
 merge this new account into that one. Go to your profile page and select
@@ -56,7 +56,7 @@ Subject: [Testconf I] Welcome to the program committee
 
 Greetings,
 
-You have been added to the program committee at the Test Conference I
+You have been added to the program committee on the Test Conference I
 (Testconf I) submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -66,7 +66,7 @@ You will need a password to sign in. Use this link to set one up:
 
 http://hotcrp.lcdf.org/test/resetpassword/{{}}
 
-Should the link expire, obtain a new link using "Forgot my password".
+Should the link expire, obtain a new one using "Forgot my password".
 
 If you already have an account under a different email address, you may
 merge this new account into that one. Go to your profile page and select
@@ -84,7 +84,7 @@ Subject: [Testconf I] Welcome to the program committee
 
 Greetings,
 
-You have been added to the program committee at the Test Conference I
+You have been added to the program committee on the Test Conference I
 (Testconf I) submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -94,7 +94,7 @@ You will need a password to sign in. Use this link to set one up:
 
 http://hotcrp.lcdf.org/test/resetpassword/{{}}
 
-Should the link expire, obtain a new link using "Forgot my password".
+Should the link expire, obtain a new one using "Forgot my password".
 
 If you already have an account under a different email address, you may
 merge this new account into that one. Go to your profile page and select
@@ -110,7 +110,7 @@ Subject: [Testconf I] Welcome to the program committee
 
 Greetings,
 
-You have been added to the program committee at the Test Conference I
+You have been added to the program committee on the Test Conference I
 (Testconf I) submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -120,7 +120,7 @@ You will need a password to sign in. Use this link to set one up:
 
 http://hotcrp.lcdf.org/test/resetpassword/{{}}
 
-Should the link expire, obtain a new link using "Forgot my password".
+Should the link expire, obtain a new one using "Forgot my password".
 
 If you already have an account under a different email address, you may
 merge this new account into that one. Go to your profile page and select
@@ -136,7 +136,7 @@ Subject: [Testconf I] Welcome to the program committee
 
 Greetings,
 
-You have been added to the program committee at the Test Conference I
+You have been added to the program committee on the Test Conference I
 (Testconf I) submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -146,7 +146,7 @@ You will need a password to sign in. Use this link to set one up:
 
 http://hotcrp.lcdf.org/test/resetpassword/{{}}
 
-Should the link expire, obtain a new link using "Forgot my password".
+Should the link expire, obtain a new one using "Forgot my password".
 
 If you already have an account under a different email address, you may
 merge this new account into that one. Go to your profile page and select
@@ -162,7 +162,7 @@ Subject: [Testconf I] Welcome to the program committee
 
 Greetings,
 
-You have been added to the program committee at the Test Conference I
+You have been added to the program committee on the Test Conference I
 (Testconf I) submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -172,7 +172,7 @@ You will need a password to sign in. Use this link to set one up:
 
 http://hotcrp.lcdf.org/test/resetpassword/{{}}
 
-Should the link expire, obtain a new link using "Forgot my password".
+Should the link expire, obtain a new one using "Forgot my password".
 
 If you already have an account under a different email address, you may
 merge this new account into that one. Go to your profile page and select
@@ -188,7 +188,7 @@ Subject: [Testconf I] Welcome to the program committee
 
 Greetings,
 
-You have been added to the program committee at the Test Conference I
+You have been added to the program committee on the Test Conference I
 (Testconf I) submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -198,7 +198,7 @@ You will need a password to sign in. Use this link to set one up:
 
 http://hotcrp.lcdf.org/test/resetpassword/{{}}
 
-Should the link expire, obtain a new link using "Forgot my password".
+Should the link expire, obtain a new one using "Forgot my password".
 
 If you already have an account under a different email address, you may
 merge this new account into that one. Go to your profile page and select
@@ -214,7 +214,7 @@ Subject: [Testconf I] Welcome to the program committee
 
 Greetings,
 
-You have been added to the program committee at the Test Conference I
+You have been added to the program committee on the Test Conference I
 (Testconf I) submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -224,7 +224,7 @@ You will need a password to sign in. Use this link to set one up:
 
 http://hotcrp.lcdf.org/test/resetpassword/{{}}
 
-Should the link expire, obtain a new link using "Forgot my password".
+Should the link expire, obtain a new one using "Forgot my password".
 
 If you already have an account under a different email address, you may
 merge this new account into that one. Go to your profile page and select
@@ -240,7 +240,7 @@ Subject: [Testconf I] Welcome to the program committee
 
 Greetings,
 
-You have been added to the program committee at the Test Conference I
+You have been added to the program committee on the Test Conference I
 (Testconf I) submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -250,7 +250,7 @@ You will need a password to sign in. Use this link to set one up:
 
 http://hotcrp.lcdf.org/test/resetpassword/{{}}
 
-Should the link expire, obtain a new link using "Forgot my password".
+Should the link expire, obtain a new one using "Forgot my password".
 
 If you already have an account under a different email address, you may
 merge this new account into that one. Go to your profile page and select
@@ -266,7 +266,7 @@ Subject: [Testconf I] Welcome to the program committee
 
 Greetings,
 
-You have been added to the program committee at the Test Conference I
+You have been added to the program committee on the Test Conference I
 (Testconf I) submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -276,7 +276,7 @@ You will need a password to sign in. Use this link to set one up:
 
 http://hotcrp.lcdf.org/test/resetpassword/{{}}
 
-Should the link expire, obtain a new link using "Forgot my password".
+Should the link expire, obtain a new one using "Forgot my password".
 
 If you already have an account under a different email address, you may
 merge this new account into that one. Go to your profile page and select
@@ -292,7 +292,7 @@ Subject: [Testconf I] Welcome to the program committee
 
 Greetings,
 
-You have been added to the program committee at the Test Conference I
+You have been added to the program committee on the Test Conference I
 (Testconf I) submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -302,7 +302,7 @@ You will need a password to sign in. Use this link to set one up:
 
 http://hotcrp.lcdf.org/test/resetpassword/{{}}
 
-Should the link expire, obtain a new link using "Forgot my password".
+Should the link expire, obtain a new one using "Forgot my password".
 
 If you already have an account under a different email address, you may
 merge this new account into that one. Go to your profile page and select
@@ -318,7 +318,7 @@ Subject: [Testconf I] Welcome to the program committee
 
 Greetings,
 
-You have been added to the program committee at the Test Conference I
+You have been added to the program committee on the Test Conference I
 (Testconf I) submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -328,7 +328,7 @@ You will need a password to sign in. Use this link to set one up:
 
 http://hotcrp.lcdf.org/test/resetpassword/{{}}
 
-Should the link expire, obtain a new link using "Forgot my password".
+Should the link expire, obtain a new one using "Forgot my password".
 
 If you already have an account under a different email address, you may
 merge this new account into that one. Go to your profile page and select
@@ -344,7 +344,7 @@ Subject: [Testconf I] Welcome to the program committee
 
 Greetings,
 
-You have been added to the program committee at the Test Conference I
+You have been added to the program committee on the Test Conference I
 (Testconf I) submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -354,7 +354,7 @@ You will need a password to sign in. Use this link to set one up:
 
 http://hotcrp.lcdf.org/test/resetpassword/{{}}
 
-Should the link expire, obtain a new link using "Forgot my password".
+Should the link expire, obtain a new one using "Forgot my password".
 
 If you already have an account under a different email address, you may
 merge this new account into that one. Go to your profile page and select
@@ -370,7 +370,7 @@ Subject: [Testconf I] Welcome to the program committee
 
 Greetings,
 
-You have been added to the program committee at the Test Conference I
+You have been added to the program committee on the Test Conference I
 (Testconf I) submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -380,7 +380,7 @@ You will need a password to sign in. Use this link to set one up:
 
 http://hotcrp.lcdf.org/test/resetpassword/{{}}
 
-Should the link expire, obtain a new link using "Forgot my password".
+Should the link expire, obtain a new one using "Forgot my password".
 
 If you already have an account under a different email address, you may
 merge this new account into that one. Go to your profile page and select
@@ -396,7 +396,7 @@ Subject: [Testconf I] Welcome to the program committee
 
 Greetings,
 
-You have been added to the program committee at the Test Conference I
+You have been added to the program committee on the Test Conference I
 (Testconf I) submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -406,7 +406,7 @@ You will need a password to sign in. Use this link to set one up:
 
 http://hotcrp.lcdf.org/test/resetpassword/{{}}
 
-Should the link expire, obtain a new link using "Forgot my password".
+Should the link expire, obtain a new one using "Forgot my password".
 
 If you already have an account under a different email address, you may
 merge this new account into that one. Go to your profile page and select
@@ -424,7 +424,7 @@ Subject: [Testconf I] Welcome to the program committee
 
 Greetings,
 
-You have been added to the program committee at the Test Conference I
+You have been added to the program committee on the Test Conference I
 (Testconf I) submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -434,7 +434,7 @@ You will need a password to sign in. Use this link to set one up:
 
 http://hotcrp.lcdf.org/test/resetpassword/{{}}
 
-Should the link expire, obtain a new link using "Forgot my password".
+Should the link expire, obtain a new one using "Forgot my password".
 
 If you already have an account under a different email address, you may
 merge this new account into that one. Go to your profile page and select
@@ -444,13 +444,41 @@ Contact Eddie Kohler <ekohler@hotcrp.lcdf.org> with any questions or
 concerns.
 
 - Testconf I Submissions
+******** create-vera@bombay.com
+To: Véra Djükuba <vera@bombay.com>
+Subject: [Testconf I] Welcome to the program committee
+
+Greetings,
+
+You have been added to the program committee on the Test Conference I
+(Testconf I) submission site.
+
+        Site: http://hotcrp.lcdf.org/test/
+       Email: vera@bombay.com
+
+You will need a password to sign in. Use this link to set one up:
+
+http://hotcrp.lcdf.org/test/resetpassword/{{}}
+
+Should the link expire, obtain a new one using "Forgot my password".
+
+If you already have an account under a different email address, you may
+merge this new account into that one. Go to your profile page and select
+"Merge with another account".
+
+Contact Eddie Kohler <ekohler@hotcrp.lcdf.org> with any questions or
+concerns.
+
+- Testconf I Submissions
+******** create-randy@cs.berkeley.edu
+
 ******** create-micke@cdt.luth.se
 To: Mikael Degermark <micke@cdt.luth.se>
 Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -471,7 +499,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -492,7 +520,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -513,7 +541,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -534,7 +562,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -555,7 +583,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -576,7 +604,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -597,7 +625,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -618,7 +646,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -639,7 +667,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -660,7 +688,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -681,7 +709,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -702,7 +730,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -723,7 +751,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -744,7 +772,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -765,7 +793,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -786,7 +814,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -807,7 +835,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -828,7 +856,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -849,7 +877,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -870,7 +898,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -891,7 +919,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -912,7 +940,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -933,7 +961,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -954,7 +982,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -975,7 +1003,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -996,7 +1024,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -1017,7 +1045,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -1038,7 +1066,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -1059,7 +1087,7 @@ Subject: [Testconf I] Account information
 
 Greetings,
 
-An account has been created for you at the Test Conference I (Testconf I)
+An account has been created for you on the Test Conference I (Testconf I)
 submission site.
 
         Site: http://hotcrp.lcdf.org/test/
@@ -1082,14 +1110,14 @@ Subject: [Testconf I] Submitted review #1B "Scalable Timers for Soft State
 Greetings,
 
 Review #1B for Test Conference I (Testconf I) submission #1 has been
-submitted. The review is available at the submission site.
+submitted. The review is available on the submission site.
 
         Site: http://hotcrp.lcdf.org/test/paper/1
        Title: Scalable Timers for Soft State Protocols
    Review by: Mark Handley <mjh@isi.edu>
 
-For the most up-to-date reviews and comments, or to unsubscribe from email
-notification, see the submission site.
+For the most up-to-date reviews and comments, or to unsubscribe from
+email notification, see the submission site.
 
 Contact Eddie Kohler <ekohler@hotcrp.lcdf.org> with any questions or
 concerns.
@@ -1099,7 +1127,6 @@ concerns.
 Review #1B
 ===========================================================================
 * Reviewer: Mark Handley <mjh@isi.edu>
-* Updated: {{}}
 
 Overall merit
 -------------
@@ -1114,8 +1141,8 @@ To: Jane Chair <chair@_.com>
 Subject: [Testconf I] Comment for #2 "Small Forwarding Tables for Fast
  Routing..."
 
-A comment for Test Conference I (Testconf I) submission #2 has been posted.
-For the most up-to-date comments, or to unsubscribe from email
+A comment for Test Conference I (Testconf I) submission #2 has been
+posted. For the most up-to-date comments, or to unsubscribe from email
 notification, see the submission site.
 
         Site: http://hotcrp.lcdf.org/test/paper/2
@@ -1137,14 +1164,14 @@ Subject: [Testconf I] Submitted review #2A "Small Forwarding Tables for Fast
 Greetings,
 
 Review #2A for Test Conference I (Testconf I) submission #2 has been
-submitted. The review is available at the submission site.
+submitted. The review is available on the submission site.
 
         Site: http://hotcrp.lcdf.org/test/paper/2
        Title: Small Forwarding Tables for Fast Routing Lookups
    Review by: Jon Crowcroft <jon@cs.ucl.ac.uk>
 
-For the most up-to-date reviews and comments, or to unsubscribe from email
-notification, see the submission site.
+For the most up-to-date reviews and comments, or to unsubscribe from
+email notification, see the submission site.
 
 Contact Eddie Kohler <ekohler@hotcrp.lcdf.org> with any questions or
 concerns.
@@ -1154,7 +1181,6 @@ concerns.
 Review #2A
 ===========================================================================
 * Reviewer: Jon Crowcroft <jon@cs.ucl.ac.uk>
-* Updated: {{}}
 
 Overall merit
 -------------
@@ -1172,14 +1198,14 @@ Subject: [Testconf I] Submitted review #2B "Small Forwarding Tables for Fast
 Greetings,
 
 Review #2B for Test Conference I (Testconf I) submission #2 has been
-submitted. The review is available at the submission site.
+submitted. The review is available on the submission site.
 
         Site: http://hotcrp.lcdf.org/test/paper/2
        Title: Small Forwarding Tables for Fast Routing Lookups
    Review by: Peter Druschel <pdruschel@cs.rice.edu>
 
-For the most up-to-date reviews and comments, or to unsubscribe from email
-notification, see the submission site.
+For the most up-to-date reviews and comments, or to unsubscribe from
+email notification, see the submission site.
 
 Contact Eddie Kohler <ekohler@hotcrp.lcdf.org> with any questions or
 concerns.
@@ -1189,7 +1215,6 @@ concerns.
 Review #2B
 ===========================================================================
 * Reviewer: Peter Druschel <pdruschel@cs.rice.edu>
-* Updated: {{}}
 
 Overall merit
 -------------
@@ -1208,14 +1233,14 @@ X-Landmark: test/test01.php:573
 Greetings,
 
 Review #2C for Test Conference I (Testconf I) submission #2 has been
-submitted. The review is available at the submission site.
+submitted. The review is available on the submission site.
 
         Site: http://hotcrp.lcdf.org/test/paper/2
        Title: Small Forwarding Tables for Fast Routing Lookups
    Review by: External Reviewer <external@_.com>
 
-For the most up-to-date reviews and comments, or to unsubscribe from email
-notification, see the submission site.
+For the most up-to-date reviews and comments, or to unsubscribe from
+email notification, see the submission site.
 
 Contact Eddie Kohler <ekohler@hotcrp.lcdf.org> with any questions or
 concerns.
@@ -1225,7 +1250,6 @@ concerns.
 Review #2C
 ===========================================================================
 * Reviewer: External Reviewer <external@_.com>
-* Updated: {{}}
 
 Overall merit
 -------------
@@ -1245,15 +1269,15 @@ Subject: [Testconf I] Submitted review #17A "Network Text Editor (NTE): A
 Greetings,
 
 Review #17A for Test Conference I (Testconf I) submission #17 has been
-submitted. The review is available at the submission site.
+submitted. The review is available on the submission site.
 
         Site: http://hotcrp.lcdf.org/test/paper/17
-       Title: Network Text Editor (NTE): A Scalable Shared Text Editor for
-              the MBone
+       Title: Network Text Editor (NTE): A Scalable Shared Text Editor
+              for the MBone
    Review by: Mary Baker <mgbaker@cs.stanford.edu>
 
-For the most up-to-date reviews and comments, or to unsubscribe from email
-notification, see the submission site.
+For the most up-to-date reviews and comments, or to unsubscribe from
+email notification, see the submission site.
 
 Contact Eddie Kohler <ekohler@hotcrp.lcdf.org> with any questions or
 concerns.
@@ -1263,7 +1287,6 @@ concerns.
 Review #17A [R2]
 ===========================================================================
 * Reviewer: Mary Baker <mgbaker@cs.stanford.edu>
-* Updated: {{}}
 
 Overall merit
 -------------
@@ -1290,15 +1313,15 @@ X-Landmark: test/test06.php:607
 Greetings,
 
 Review #17B for Test Conference I (Testconf I) submission #17 has been
-submitted. The review is available at the submission site.
+submitted. The review is available on the submission site.
 
         Site: http://hotcrp.lcdf.org/test/paper/17
-       Title: Network Text Editor (NTE): A Scalable Shared Text Editor for
-              the MBone
+       Title: Network Text Editor (NTE): A Scalable Shared Text Editor
+              for the MBone
    Review by: External Reviewer <external@_.com>
 
-For the most up-to-date reviews and comments, or to unsubscribe from email
-notification, see the submission site.
+For the most up-to-date reviews and comments, or to unsubscribe from
+email notification, see the submission site.
 
 Contact Eddie Kohler <ekohler@hotcrp.lcdf.org> with any questions or
 concerns.
@@ -1308,7 +1331,6 @@ concerns.
 Review #17B [R2]
 ===========================================================================
 * Reviewer: External Reviewer <external@_.com>
-* Updated: {{}}
 
 Overall merit
 -------------
@@ -1335,15 +1357,15 @@ X-Landmark: test/test06.php:622
 Greetings,
 
 Review #17C for Test Conference I (Testconf I) submission #17 has been
-submitted. The review is available at the submission site.
+submitted. The review is available on the submission site.
 
         Site: http://hotcrp.lcdf.org/test/paper/17
-       Title: Network Text Editor (NTE): A Scalable Shared Text Editor for
-              the MBone
+       Title: Network Text Editor (NTE): A Scalable Shared Text Editor
+              for the MBone
    Review by: Lixia Zhang <lixia@cs.ucla.edu>
 
-For the most up-to-date reviews and comments, or to unsubscribe from email
-notification, see the submission site.
+For the most up-to-date reviews and comments, or to unsubscribe from
+email notification, see the submission site.
 
 Contact Eddie Kohler <ekohler@hotcrp.lcdf.org> with any questions or
 concerns.
@@ -1353,7 +1375,6 @@ concerns.
 Review #17C [R1]
 ===========================================================================
 * Reviewer: Lixia Zhang <lixia@cs.ucla.edu>
-* Updated: {{}}
 
 Overall merit
 -------------
@@ -1382,15 +1403,15 @@ On behalf of the Test Conference I (Testconf I) program committee, Lixia
 Zhang <lixia@cs.ucla.edu> has asked you to review Test Conference I
 (Testconf I) submission #17.
 
-       Title: Network Text Editor (NTE): A Scalable Shared Text Editor for
-              the MBone
+       Title: Network Text Editor (NTE): A Scalable Shared Text Editor
+              for the MBone
         Site: http://hotcrp.lcdf.org/test/paper/17
 
-If you are willing to review this submission, you may enter your review on
-the conference site or complete a review form offline and upload it.
+If you are willing to review this submission, you may enter your review
+on the conference site or complete a review form offline and upload it.
 
-Once you've decided, please accept or decline this review request using one
-of these links. You may also contact Lixia Zhang directly.
+Once you've decided, please accept or decline this review request using
+one of these links. You may also contact Lixia Zhang directly.
 
       Accept: http://hotcrp.lcdf.org/test/review/17?cap={{}}&accept=1
      Decline: http://hotcrp.lcdf.org/test/review/17?cap={{}}&decline=1
@@ -1400,7 +1421,7 @@ create a password to sign in. Use this link to set one up:
 
 http://hotcrp.lcdf.org/test/resetpassword/{{}}
 
-Should the link expire, obtain a new link using "Forgot my password".
+Should the link expire, obtain a new one using "Forgot my password".
 
 Thank you for your help -- we appreciate that reviewing is hard work.
 
@@ -1420,8 +1441,8 @@ Jo March <external2@_.com>'s review for Test Conference I (Testconf I)
 submission #17 has been submitted for approval.
 
  Review site: http://hotcrp.lcdf.org/test/review/17?r={{}}
-       Title: Network Text Editor (NTE): A Scalable Shared Text Editor for
-              the MBone
+       Title: Network Text Editor (NTE): A Scalable Shared Text Editor
+              for the MBone
    Review by: Jo March <external2@_.com>
 
 Contact Eddie Kohler <ekohler@hotcrp.lcdf.org> with any questions or
@@ -1451,14 +1472,14 @@ X-Landmark: test/test06.php:759
 Greetings,
 
 Review #17E for Test Conference I (Testconf I) submission #17 has been
-submitted. The review is available at the submission site.
+submitted. The review is available on the submission site.
 
         Site: http://hotcrp.lcdf.org/test/paper/17
-       Title: Network Text Editor (NTE): A Scalable Shared Text Editor for
-              the MBone
+       Title: Network Text Editor (NTE): A Scalable Shared Text Editor
+              for the MBone
 
-For the most up-to-date reviews and comments, or to unsubscribe from email
-notification, see the submission site.
+For the most up-to-date reviews and comments, or to unsubscribe from
+email notification, see the submission site.
 
 Contact Eddie Kohler <ekohler@hotcrp.lcdf.org> with any questions or
 concerns.
@@ -1467,7 +1488,6 @@ concerns.
 
 Review #17E
 ===========================================================================
-* Updated: {{}}
 
 Overall merit
 -------------
@@ -1486,15 +1506,15 @@ X-Landmark: test/test06.php:759
 Greetings,
 
 Review #17E for Test Conference I (Testconf I) submission #17 has been
-submitted. The review is available at the submission site.
+submitted. The review is available on the submission site.
 
         Site: http://hotcrp.lcdf.org/test/paper/17
-       Title: Network Text Editor (NTE): A Scalable Shared Text Editor for
-              the MBone
+       Title: Network Text Editor (NTE): A Scalable Shared Text Editor
+              for the MBone
    Review by: Jo March <external2@_.com>
 
-For the most up-to-date reviews and comments, or to unsubscribe from email
-notification, see the submission site.
+For the most up-to-date reviews and comments, or to unsubscribe from
+email notification, see the submission site.
 
 Contact Eddie Kohler <ekohler@hotcrp.lcdf.org> with any questions or
 concerns.
@@ -1504,7 +1524,6 @@ concerns.
 Review #17E
 ===========================================================================
 * Reviewer: Jo March <external2@_.com>
-* Updated: {{}}
 
 Overall merit
 -------------
@@ -1523,15 +1542,15 @@ X-Landmark: test/test06.php:759
 Greetings,
 
 Review #17E for Test Conference I (Testconf I) submission #17 has been
-submitted. The review is available at the submission site.
+submitted. The review is available on the submission site.
 
         Site: http://hotcrp.lcdf.org/test/paper/17
-       Title: Network Text Editor (NTE): A Scalable Shared Text Editor for
-              the MBone
+       Title: Network Text Editor (NTE): A Scalable Shared Text Editor
+              for the MBone
    Review by: Jo March <external2@_.com>
 
-For the most up-to-date reviews and comments, or to unsubscribe from email
-notification, see the submission site.
+For the most up-to-date reviews and comments, or to unsubscribe from
+email notification, see the submission site.
 
 Contact Eddie Kohler <ekohler@hotcrp.lcdf.org> with any questions or
 concerns.
@@ -1541,7 +1560,6 @@ concerns.
 Review #17E
 ===========================================================================
 * Reviewer: Jo March <external2@_.com>
-* Updated: {{}}
 
 Overall merit
 -------------
@@ -1550,4 +1568,123 @@ Overall merit
 Reviewer expertise
 ------------------
 3. Knowledgeable
+
+******** test06-external3-request17
+To: Christian Huitema <huitema@bellcore.com>, Jane Chair <chair@_.com>, Scott Shenker <shenker@parc.xerox.com>
+Subject: [Testconf I] Review proposal for submission #17
+X-Landmark: test/test06.php:885
+
+Greetings,
+
+Lixia Zhang <lixia@cs.ucla.edu> would like Amy March <external3@_.com>
+to review Test Conference I (Testconf I) submission #17.
+
+Visit the assignment page to approve or deny the proposal.
+
+       Title: Network Text Editor (NTE): A Scalable Shared Text Editor
+              for the MBone
+        Site: http://hotcrp.lcdf.org/test/assign/17
+
+- Testconf I Submissions
+******** test05-reject14-1
+To: Henrik Frystyk Nielsen <frystyk@w3.org>, James Gettys <jg@pa.dec.com>, Anselm Baird-Smith <abaird@w3.org>
+Subject: [Testconf I] Rejected submission #14 "Network Performance Effects of
+ HTTP/1.1,..."
+X-Landmark: test/test05.php:821
+
+Dear author(s),
+
+The Test Conference I (Testconf I) program committee is sorry to inform
+you that your submission #14 was rejected, and will not appear in the
+conference.
+
+       Title: Network Performance Effects of HTTP/1.1, CSS1, and PNG
+     Authors: Henrik Frystyk Nielsen (World Wide Web Consortium)
+              James Gettys (Visiting Scientist, World Wide Web
+              Consortium; Digital Equipment Corporation)
+              Anselm Baird-Smith (World Wide Web Consortium)
+              Eric Prud'hommeaux (World Wide Web Consortium)
+              Håkon Wium Lie (World Wide Web Consortium)
+              Chris Lilley (World Wide Web Consortium)
+        Site: http://hotcrp.lcdf.org/test/paper/14?cap={{}}
+
+0 papers were accepted out of 32 submissions.
+
+Visit the submission site for reviews, comments, and related
+information. Reviews and comments are also included below.
+
+Contact Eddie Kohler <ekohler@hotcrp.lcdf.org> with any questions or
+concerns.
+
+- Testconf I Submissions
+
+Review #14A
+===========================================================================
+
+Overall merit
+-------------
+5. Strong accept
+
+Reviewer expertise
+------------------
+2. Some familiarity
+
+Paper summary
+-------------
+Summary V
+
+Comments for author
+-------------------
+Comments V
+
+******** test05-reject14-2
+To: Henrik Frystyk Nielsen <frystyk@w3.org>, James Gettys <jg@pa.dec.com>, Anselm Baird-Smith <abaird@w3.org>, George Varghese <varghese@ccrc.wustl.edu>
+Subject: [Testconf I] Rejected submission #14 "Network Performance Effects of
+ HTTP/1.1,..."
+X-Landmark: test/test05.php:821
+
+Dear author(s),
+
+The Test Conference I (Testconf I) program committee is sorry to inform
+you that your submission #14 was rejected, and will not appear in the
+conference.
+
+       Title: Network Performance Effects of HTTP/1.1, CSS1, and PNG
+     Authors: Henrik Frystyk Nielsen (World Wide Web Consortium)
+              James Gettys (Visiting Scientist, World Wide Web
+              Consortium; Digital Equipment Corporation)
+              Anselm Baird-Smith (World Wide Web Consortium)
+              Eric Prud'hommeaux (World Wide Web Consortium)
+              Håkon Wium Lie (World Wide Web Consortium)
+              Chris Lilley (World Wide Web Consortium)
+        Site: http://hotcrp.lcdf.org/test/paper/14?cap={{}}
+
+0 papers were accepted out of 32 submissions.
+
+Visit the submission site for reviews, comments, and related
+information. Reviews and comments are also included below.
+
+Contact Eddie Kohler <ekohler@hotcrp.lcdf.org> with any questions or
+concerns.
+
+- Testconf I Submissions
+
+Review #14A
+===========================================================================
+
+Overall merit
+-------------
+5. Strong accept
+
+Reviewer expertise
+------------------
+2. Some familiarity
+
+Paper summary
+-------------
+Summary V
+
+Comments for author
+-------------------
+Comments V
 

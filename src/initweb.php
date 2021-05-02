@@ -5,57 +5,13 @@
 require_once("init.php");
 global $Conf, $Me, $Qreq;
 
-// Check method: GET/HEAD/POST only, except OPTIONS is allowed for API calls
-if (!($_SERVER["REQUEST_METHOD"] === "GET"
-      || $_SERVER["REQUEST_METHOD"] === "HEAD"
-      || $_SERVER["REQUEST_METHOD"] === "POST"
-      || (Navigation::page() === "api"
-          && $_SERVER["REQUEST_METHOD"] === "OPTIONS"))) {
-    header("HTTP/1.0 405 Method Not Allowed");
-    exit;
-}
-
-// Check for PHP suffix
-if ($Conf->opt("phpSuffix") !== null) {
-    Navigation::get()->php_suffix = $Conf->opt("phpSuffix");
-}
-
-// Collect $Qreq
-$Qreq = make_qreq();
-
-// Check for redirect to https
-if ($Conf->opt("redirectToHttps")) {
-    Navigation::redirect_http_to_https($Conf->opt("allowLocalHttp"));
-}
-
-// Check and fix zlib output compression
-global $zlib_output_compression;
-$zlib_output_compression = false;
-if (function_exists("zlib_get_coding_type")) {
-    $zlib_output_compression = zlib_get_coding_type();
-}
-if ($zlib_output_compression) {
-    header("Content-Encoding: $zlib_output_compression");
-    header("Vary: Accept-Encoding", false);
-}
-
-// Mark as already expired to discourage caching, but allow the browser
-// to cache for history buttons
-header("Cache-Control: max-age=0,must-revalidate,private");
-
-// Set up Content-Security-Policy if appropriate
-$Conf->prepare_content_security_policy();
-
-// Don't set up a session if $Me is false
-if ($Me === false) {
-    return;
-}
-
-
-// Initialize user
 function initialize_user_redirect($nav, $uindex, $nusers) {
     if ($nav->page === "api") {
-        json_exit(["ok" => false, "error" => "You have been signed out."]);
+        if ($nusers === 0) {
+            json_exit(["ok" => false, "error" => "You have been signed out."]);
+        } else {
+            json_exit(["ok" => false, "error" => "Bad user specification."]);
+        }
     } else if ($_SERVER["REQUEST_METHOD"] === "GET") {
         $page = $nusers > 0 ? "u/$uindex/" : "";
         if ($nav->page !== "index" || $nav->path !== "") {
@@ -67,18 +23,52 @@ function initialize_user_redirect($nav, $uindex, $nusers) {
     }
 }
 
-function initialize_user() {
-    global $Conf, $Me, $Now, $Qreq;
+function initialize_web() {
+    global $Qreq;
+    $conf = Conf::$main;
     $nav = Navigation::get();
 
-    // set up session
-    if (isset($Conf->opt["sessionHandler"])) {
-        $sh = $Conf->opt["sessionHandler"];
-        /** @phan-suppress-next-line PhanTypeExpectedObjectOrClassName, PhanNonClassMethodCall */
-        $Conf->_session_handler = new $sh($Conf);
-        session_set_save_handler($Conf->_session_handler, true);
+    // check PHP suffix
+    if (($php_suffix = Conf::$main->opt("phpSuffix")) !== null) {
+        $nav->php_suffix = $php_suffix;
     }
-    set_session_name($Conf);
+
+    // maybe redirect to https
+    if (Conf::$main->opt("redirectToHttps")) {
+        Navigation::redirect_http_to_https(Conf::$main->opt("allowLocalHttp"));
+    }
+
+    // collect $Qreq
+    $Qreq = Qrequest::make_global();
+
+    // check method
+    if ($Qreq->method() !== "GET"
+        && $Qreq->method() !== "POST"
+        && $Qreq->method() !== "HEAD"
+        && ($Qreq->method() !== "OPTIONS" || $nav->page !== "api")) {
+        header("HTTP/1.0 405 Method Not Allowed");
+        exit;
+    }
+
+    // mark as already expired to discourage caching, but allow the browser
+    // to cache for history buttons
+    header("Cache-Control: max-age=0,must-revalidate,private");
+
+    // set up Content-Security-Policy if appropriate
+    Conf::$main->prepare_security_headers();
+
+    // skip user initialization if requested
+    if (Contact::$no_guser) {
+        return;
+    }
+
+    // set up session
+    if (($sh = $conf->opt["sessionHandler"] ?? null)) {
+        /** @phan-suppress-next-line PhanTypeExpectedObjectOrClassName, PhanNonClassMethodCall */
+        $conf->_session_handler = new $sh($conf);
+        session_set_save_handler($conf->_session_handler, true);
+    }
+    set_session_name($conf);
     $sn = session_name();
 
     // check CSRF token, using old value of session ID
@@ -86,9 +76,9 @@ function initialize_user() {
         $sid = $_COOKIE[$sn];
         $l = strlen($Qreq->post);
         if ($l >= 8 && $Qreq->post === substr($sid, strlen($sid) > 16 ? 8 : 0, $l)) {
-            $Qreq->approve_post();
+            $Qreq->approve_token();
         } else if ($_SERVER["REQUEST_METHOD"] === "POST") {
-            error_log("{$Conf->dbname}: bad post={$Qreq->post}, cookie={$sid}, url=" . $_SERVER["REQUEST_URI"]);
+            error_log("{$conf->dbname}: bad post={$Qreq->post}, cookie={$sid}, url=" . $_SERVER["REQUEST_URI"]);
         }
     }
     ensure_session(ENSURE_SESSION_ALLOW_EMPTY);
@@ -106,9 +96,12 @@ function initialize_user() {
 
     $uindex = 0;
     if ($nav->shifted_path === "") {
-        if (isset($_GET["i"]) && $_SERVER["REQUEST_METHOD"] === "GET") {
+        // redirect to `/u` version
+        if (isset($_GET["i"])) {
             $uindex = Contact::session_user_index($_GET["i"]);
-        } else if (count($userset) > 1 && $_SERVER["REQUEST_METHOD"] === "GET") {
+        } else if ($_SERVER["REQUEST_METHOD"] === "GET"
+                   && $nav->page !== "api"
+                   && count($userset) > 1) {
             $uindex = -1;
         }
     } else if (substr($nav->shifted_path, 0, 2) === "u/") {
@@ -121,48 +114,45 @@ function initialize_user() {
     }
 
     if (isset($_GET["i"])
-        && $_SERVER["REQUEST_METHOD"] === "GET"
         && $trueemail
         && strcasecmp($_GET["i"], $trueemail) !== 0) {
-        Conf::msg_error("You are not signed in as " . htmlspecialchars($_GET["i"]) . ". <a href=\"" . $Conf->hoturl("index", ["signin" => 1, "email" => $_GET["i"]]) . "\">Sign in</a>");
+        Conf::msg_error("You are signed in as " . htmlspecialchars($trueemail) . ", not " . htmlspecialchars($_GET["i"]) . ". <a href=\"" . $conf->hoturl("signin", ["email" => $_GET["i"]]) . "\">Sign in</a>");
     }
 
     // look up and activate user
-    $Me = null;
-    if ($trueemail) {
-        $Me = $Conf->user_by_email($trueemail);
+    $guser = $trueemail ? $conf->user_by_email($trueemail) : null;
+    if (!$guser) {
+        $guser = new Contact($trueemail ? (object) ["email" => $trueemail] : null);
     }
-    if (!$Me) {
-        $Me = new Contact($trueemail ? (object) ["email" => $trueemail] : null);
-    }
-    $Me = $Me->activate($Qreq, true);
+    $guser = $guser->activate($Qreq, true);
+    Contact::set_guser($guser);
 
     // author view capability documents should not be indexed
-    if (!$Me->email
-        && $Me->has_author_view_capability()
-        && !$Conf->opt("allowIndexPapers")) {
+    if (!$guser->email
+        && $guser->has_author_view_capability()
+        && !$conf->opt("allowIndexPapers")) {
         header("X-Robots-Tag: noindex, noarchive");
     }
 
     // redirect if disabled
-    if ($Me->is_disabled()) {
-        $gj = $Conf->page_partials($Me)->get($nav->page);
-        if (!$gj || !get($gj, "allow_disabled")) {
-            Navigation::redirect_site($Conf->hoturl_site_relative_raw("index"));
+    if ($guser->is_disabled()) {
+        $gj = $conf->page_partials($guser)->get($nav->page);
+        if (!$gj || !($gj->allow_disabled ?? false)) {
+            Navigation::redirect_site($conf->hoturl_site_relative_raw("index"));
         }
     }
 
     // if bounced through login, add post data
     if (isset($_SESSION["login_bounce"][4])
-        && $_SESSION["login_bounce"][4] <= $Now) {
+        && $_SESSION["login_bounce"][4] <= Conf::$now) {
         unset($_SESSION["login_bounce"]);
     }
 
-    if (!$Me->is_empty()
+    if (!$guser->is_empty()
         && isset($_SESSION["login_bounce"])
         && !isset($_SESSION["testsession"])) {
         $lb = $_SESSION["login_bounce"];
-        if ($lb[0] == $Conf->dsn
+        if ($lb[0] == $conf->dsn
             && $lb[2] !== "index"
             && $lb[2] == Navigation::page()) {
             assert($Qreq instanceof Qrequest);
@@ -177,7 +167,7 @@ function initialize_user() {
 
     // set $_SESSION["addrs"]
     if ($_SERVER["REMOTE_ADDR"]
-        && (!$Me->is_empty()
+        && (!$guser->is_empty()
             || isset($_SESSION["addrs"]))
         && (!isset($_SESSION["addrs"])
             || !is_array($_SESSION["addrs"])
@@ -193,4 +183,4 @@ function initialize_user() {
     }
 }
 
-initialize_user();
+initialize_web();

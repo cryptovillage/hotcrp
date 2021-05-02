@@ -1,6 +1,6 @@
 <?php
 // contactlist.php -- HotCRP helper class for producing lists of contacts
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class ContactList {
     const FIELD_SELECTOR = 1000;
@@ -21,7 +21,6 @@ class ContactList {
     const FIELD_SHEPHERDS = 14;
     const FIELD_TAGS = 15;
     const FIELD_COLLABORATORS = 16;
-    const FIELD_ACCEPTED_PAPERS = 17;
     const FIELD_SCORE = 50;
 
     public static $folds = array("topics", "aff", "tags", "collab");
@@ -30,6 +29,7 @@ class ContactList {
     public $conf;
     /** @var Contact */
     public $user;
+    /** @var Qrequest */
     public $qreq;
     var $showHeader = true;
     var $sortField = null;
@@ -47,8 +47,8 @@ class ContactList {
     private $_rowset;
     /** @var array<int,list<int>> */
     private $_au_data;
-    /** @var array<int,list<int>> */
-    private $_auacc_data;
+    /** @var array<int,bool> */
+    private $_au_unsub;
     /** @var array<int,list<int>> */
     private $_re_data;
     /** @var array<int,list<array{int,int,int,int}>> */
@@ -65,6 +65,8 @@ class ContactList {
     private $_rating_data;
     /** @var array<int,true> */
     private $_limit_cids;
+    /** @var array<int,array> */
+    private $_sort_data;
 
     function __construct(Contact $user, $sortable = true, $qreq = null) {
         global $contactListFields;
@@ -117,9 +119,8 @@ class ContactList {
             }
             $this->qopt["revratings"] = $this->qopt["reviews"] = true;
         }
-        if ($fieldId == self::FIELD_PAPERS
-            || $fieldId == self::FIELD_ACCEPTED_PAPERS) {
-            $this->qopt["papers"] = true;
+        if ($fieldId == self::FIELD_PAPERS) {
+            $this->qopt["papers"] = $this->limit;
         }
         if ($fieldId == self::FIELD_REVIEW_PAPERS) {
             $this->qopt["repapers"] = $this->qopt["reviews"] = true;
@@ -134,8 +135,7 @@ class ContactList {
             $this->have_folds["collab"] = true;
         }
         if (($f = $this->conf->review_field($fieldId))) {
-            $revViewScore = $this->user->permissive_view_score_bound();
-            if ($f->view_score <= $revViewScore || !$f->has_options) {
+            if (!$f->has_options || !$this->user->can_view_some_review_field($f)) {
                 return false;
             }
             $this->qopt["reviews"] = true;
@@ -149,56 +149,49 @@ class ContactList {
     }
 
     function _sortBase($a, $b) {
-        return strcasecmp($a->sorter, $b->sorter);
+        return call_user_func($this->conf->user_comparator(), $a, $b);
     }
 
     function _sortEmail($a, $b) {
-        return strcasecmp($a->email, $b->email);
+        return strnatcasecmp($a->email, $b->email);
     }
 
     function _sortAffiliation($a, $b) {
-        $x = strcasecmp($a->affiliation, $b->affiliation);
+        $x = strnatcasecmp($a->affiliation, $b->affiliation);
         return $x ? : $this->_sortBase($a, $b);
     }
 
     function _sortLastVisit($a, $b) {
-        if ($a->activity_at != $b->activity_at)
-            return $a->activity_at < $b->activity_at ? 1 : -1;
-        else
-            return $this->_sortBase($a, $b);
+        return $b->activity_at <=> $a->activity_at ? : $this->_sortBase($a, $b);
     }
 
     function _sortReviews($a, $b) {
         $ac = $this->_rect_data[$a->contactId] ?? [0, 0];
         $bc = $this->_rect_data[$b->contactId] ?? [0, 0];
-        $x = $bc[1] - $ac[1] ? : $bc[0] - $ac[0];
-        return $x ? : $this->_sortBase($a, $b);
+        return $bc[1] <=> $ac[1] ? : ($bc[0] <=> $ac[0] ? : $this->_sortBase($a, $b));
     }
 
     function _sortLeads($a, $b) {
-        $cid = $b->contactId;
-        $x = ($this->_lead_data[$b->contactId] ?? 0) - ($this->_lead_data[$a->contactId] ?? 0);
-        return $x ? : $this->_sortBase($a, $b);
+        return ($this->_lead_data[$b->contactId] ?? 0) <=> ($this->_lead_data[$a->contactId] ?? 0) ? : $this->_sortBase($a, $b);
     }
 
     function _sortShepherds($a, $b) {
-        $x = ($this->_shepherd_data[$b->contactId] ?? 0) - ($this->_shepherd_data[$a->contactId] ?? 0);
-        return $x ? : $this->_sortBase($a, $b);
+        return ($this->_shepherd_data[$b->contactId] ?? 0) <=> ($this->_shepherd_data[$a->contactId] ?? 0) ? : $this->_sortBase($a, $b);
     }
 
     function _sortReviewRatings($a, $b) {
         list($ag, $ab) = $this->_rating_data[$a->contactId] ?? [0, 0];
         list($bg, $bb) = $this->_rating_data[$b->contactId] ?? [0, 0];
-        if ($ag - $ab === 0) {
+        if ($ag + $ab === 0) {
             if ($bg + $bb !== 0) {
                 return 1;
             }
         } else if ($bg + $bb === 0) {
             return -1;
         } else if ($ag - $ab !== $bg - $bb) {
-            return $ag - $ab > $bg - $bb ? -1 : 1;
+            return $bg - $bb <=> $ag - $ab;
         } else if ($ag + $ab !== $bg + $bb) {
-            return $ag + $ab > $bg + $bb ? -1 : 1;
+            return $bg + $bb <=> $ag + $ab;
         }
         return $this->_sortBase($a, $b);
     }
@@ -223,17 +216,15 @@ class ContactList {
         return $this->_sort_paper_list($a, $b, $this->_au_data);
     }
 
-    function _sort_accepted_papers($a, $b) {
-        return $this->_sort_paper_list($a, $b, $this->_auacc_data);
-    }
-
     function _sort_reviewed_papers($a, $b) {
         return $this->_sort_paper_list($a, $b, $this->_re_data);
     }
 
-    function _sortScores($a, $b) {
-        if (!($x = ScoreInfo::compare($b->_sort_info, $a->_sort_info, -1))) {
-            $x = ScoreInfo::compare($b->_sort_avg, $a->_sort_avg);
+    function _sort_scores($a, $b) {
+        $ai = $this->_sort_data[$a->contactId];
+        $bi = $this->_sort_data[$b->contactId];
+        if (!($x = ScoreInfo::compare($bi[1], $ai[1], -1))) {
+            $x = ScoreInfo::compare($bi[0], $ai[0]);
         }
         return $x ? ($x < 0 ? -1 : 1) : $this->_sortBase($a, $b);
     }
@@ -268,9 +259,6 @@ class ContactList {
         case self::FIELD_PAPERS:
             usort($rows, [$this, "_sort_papers"]);
             break;
-        case self::FIELD_ACCEPTED_PAPERS:
-            usort($rows, [$this, "_sort_accepted_papers"]);
-            break;
         case self::FIELD_REVIEW_PAPERS:
             usort($rows, [$this, "_sort_reviewed_papers"]);
             break;
@@ -282,15 +270,13 @@ class ContactList {
                 if (!in_array($scoresort, ["A", "V", "D"], true)) {
                     $scoresort = "A";
                 }
-                Contact::$allow_nonexistent_properties = true;
                 foreach ($rows as $row) {
                     $scores = $this->_score_data[$fieldId][$row->contactId] ?? [];
                     $scoreinfo = new ScoreInfo($scores, true);
-                    $row->_sort_info = $scoreinfo->sort_data($scoresort);
-                    $row->_sort_avg = $scoreinfo->mean();
+                    $this->_sort_data[$row->contactId] =
+                        [$scoreinfo->sort_data($scoresort), $scoreinfo->mean()];
                 }
-                usort($rows, array($this, "_sortScores"));
-                Contact::$allow_nonexistent_properties = false;
+                usort($rows, [$this, "_sort_scores"]);
             }
             break;
         }
@@ -327,9 +313,16 @@ class ContactList {
         case self::FIELD_SELECTOR:
             return "";
         case self::FIELD_PAPERS:
-            return "Submissions";
-        case self::FIELD_ACCEPTED_PAPERS:
-            return "Accepted submissions";
+            if ($this->limit === "auacc") {
+                return "Accepted submissions";
+            } else if ($this->limit === "aurej") {
+                return "Rejected submissions";
+            } else if ($this->limit === "auuns") {
+                return "Incomplete submissions";
+            } else {
+                assert($this->limit === "au" || $this->limit === "all");
+                return "Submissions";
+            }
         case self::FIELD_REVIEW_PAPERS:
             return "Assigned submissions";
         case self::FIELD_TAGS:
@@ -354,18 +347,18 @@ class ContactList {
             $this->_reord_data[$cid][] = [$rrow->paperId, $rrow->reviewId, $rrow->reviewOrdinal];
         }
         if ($review_limit
-            && ($prow->timeSubmitted > 0 || $rrow->reviewSubmitted > 0 || $rrow->timeApprovalRequested < 0)) {
+            && ($rrow->reviewStatus >= ReviewInfo::RS_ADOPTED || $prow->timeSubmitted > 0 || $review_limit === "all")) {
             if ($this->limit === "re"
                 || ($this->limit === "req" && $rrow->reviewType == REVIEW_EXTERNAL && $rrow->requestedBy == $this->user->contactId)
                 || ($this->limit === "ext" && $rrow->reviewType == REVIEW_EXTERNAL)
-                || ($this->limit === "extsub" && $rrow->reviewType == REVIEW_EXTERNAL && ($rrow->reviewSubmitted > 0 || $rrow->timeApprovalRequested < 0))) {
+                || ($this->limit === "extsub" && $rrow->reviewType == REVIEW_EXTERNAL && $rrow->reviewStatus >= ReviewInfo::RS_ADOPTED)) {
                 $this->_limit_cids[$cid] = true;
             }
         }
         if (!isset($this->_rect_data[$cid])) {
             $this->_rect_data[$cid] = [0, 0];
         }
-        if ($rrow->reviewSubmitted > 0 || $rrow->timeApprovalRequested < 0) {
+        if ($rrow->reviewStatus >= ReviewInfo::RS_ADOPTED) {
             $this->_rect_data[$cid][0] += 1;
             $this->_rect_data[$cid][1] += 1;
             if ($this->user->can_view_review($prow, $rrow)) {
@@ -375,13 +368,32 @@ class ContactList {
                     }
                 }
             }
-        } else if ($rrow->reviewNeedsSubmit) {
+        } else if ($rrow->reviewNeedsSubmit && $prow->timeSubmitted > 0) {
             $this->_rect_data[$cid][0] += 1;
         }
     }
 
+    private function test_paper_authors(PaperInfo $prow) {
+        if ($this->user->can_view_authors($prow)) {
+            if ($this->limit === "au") {
+                return $prow->timeSubmitted > 0;
+            } else if ($this->limit === "auuns") {
+                return $prow->timeSubmitted <= 0;
+            } else if ($this->limit === "aurej") {
+                return $prow->outcome < 0 && $this->user->can_view_decision($prow);
+            } else if ($this->limit === "auacc") {
+                return $prow->outcome > 0 && $this->user->can_view_decision($prow);
+            } else {
+                return true;
+            }
+        } else {
+            return false;
+        }
+    }
+
     private function collect_paper_data() {
-        $review_limit = in_array($this->limit, ["re", "req", "ext", "extsub"]);
+        $limit = $this->limit;
+        $review_limit = in_array($limit, ["re", "req", "ext", "extsub", "all"]) ? $limit : null;
 
         $args = [];
         if (isset($this->qopt["papers"])) {
@@ -393,13 +405,21 @@ class ContactList {
                 $args["scores"] = $this->qopt["scores"];
             }
         }
-        if ($this->limit === "req") {
-            $args["myReviewRequests"] = true;
+        if ($limit === "req") {
+            $args["myReviewRequests"] = $args["finalized"] = true;
+        } else if ($limit === "au") {
+            $args["finalized"] = true;
+        } else if ($limit === "aurej") {
+            $args["rejected"] = true;
+        } else if ($limit === "auacc") {
+            $args["accepted"] = true;
+        } else if ($limit === "auuns") {
+            $args["unsub"] = true;
         }
         if (empty($args)
             && !isset($this->qopt["leads"])
             && !isset($this->qopt["shepherds"])
-            && !str_starts_with($this->limit, "au")) {
+            && !str_starts_with($limit, "au")) {
             return;
         }
 
@@ -410,15 +430,10 @@ class ContactList {
             return $this->user->can_view_paper($prow);
         });
 
-        if (str_starts_with($this->limit, "au")) {
+        if (str_starts_with($limit, "au") || $limit === "all") {
             $this->_limit_cids = [];
             foreach ($prows as $prow) {
-                if (($this->limit === "au" && $prow->timeSubmitted <= 0)
-                    || ($this->limit === "aurej" && $prow->outcome >= 0)
-                    || ($this->limit === "auacc" && $prow->outcome <= 0)
-                    || ($this->limit === "auuns" && $prow->timeSubmitted > 0)) {
-                    /* skip */
-                } else {
+                if ($this->test_paper_authors($prow)) {
                     foreach ($prow->contacts() as $cid => $cflt) {
                         $this->_limit_cids[$cid] = true;
                     }
@@ -429,16 +444,14 @@ class ContactList {
         }
 
         if (isset($this->qopt["papers"])) {
-            $this->_au_data = $this->_auacc_data = [];
+            $this->_au_data = [];
+            $this->_au_unsub = [];
             foreach ($prows as $prow) {
-                if ($this->user->can_view_authors($prow)) {
+                if ($this->test_paper_authors($prow)) {
                     foreach ($prow->contacts() as $cflt) {
                         $this->_au_data[$cflt->contactId][] = $prow->paperId;
-                    }
-                    if ($prow->outcome > 0
-                        && $this->user->can_view_decision($prow)) {
-                        foreach ($prow->contacts() as $cflt) {
-                            $this->_auacc_data[$cflt->contactId][] = $prow->paperId;
+                        if ($prow->timeSubmitted <= 0) {
+                            $this->_au_unsub[$cflt->contactId] = true;
                         }
                     }
                 }
@@ -458,7 +471,7 @@ class ContactList {
             foreach ($prows as $prow) {
                 if ($this->user->can_view_review_assignment($prow, null)
                     && $this->user->can_view_review_identity($prow, null)) {
-                    foreach ($prow->reviews_by_id() as $rrow) {
+                    foreach ($prow->all_reviews() as $rrow) {
                         if ($this->user->can_view_review_assignment($prow, $rrow)
                             && $this->user->can_view_review_identity($prow, $rrow)) {
                             $this->collect_review_data($prow, $rrow, $repapers, $review_limit, $scores);
@@ -475,7 +488,7 @@ class ContactList {
                     $pids[] = $prow->paperId;
                 }
             }
-            $result = $this->conf->qe("select paperId, reviewId, " . $this->conf->query_ratings() . " allRatings from PaperReview where paperId ?a group by paperId, reviewId", $pids);
+            $result = $this->conf->qe("select paperId, reviewId, " . $this->conf->query_ratings() . " ratingSignature from PaperReview where paperId?a and reviewType>0 group by paperId, reviewId", $pids);
             while (($row = $result->fetch_row())) {
                 $ratings[$row[0]][$row[1]] = $row[2];
             }
@@ -483,10 +496,13 @@ class ContactList {
             $this->_rating_data = [];
             foreach ($prows as $prow) {
                 if ($this->user->can_view_review_ratings($prow)) {
-                    foreach ($prow->reviews_by_id() as $rrow) {
+                    $allow_admin = $this->user->allow_administer($prow);
+                    foreach ($prow->all_reviews() as $rrow) {
                         if (isset($ratings[$prow->paperId][$rrow->reviewId])
-                            && $this->user->can_view_review_ratings($prow, $rrow)) {
-                            $rrow->allRatings = $ratings[$prow->paperId][$rrow->reviewId];
+                            && ($allow_admin
+                                || ($this->user->can_view_review_ratings($prow, $rrow)
+                                    && $this->user->can_view_review_identity($prow, $rrow)))) {
+                            $rrow->ratingSignature = $ratings[$prow->paperId][$rrow->reviewId];
                             $cid = $rrow->contactId;
                             $this->_rating_data[$cid] = $this->_rating_data[$cid] ?? [0, 0];
                             foreach ($rrow->ratings() as $rate) {
@@ -502,9 +518,9 @@ class ContactList {
         if (isset($this->qopt["leads"])) {
             $this->_lead_data = [];
             foreach ($prows as $prow) {
-                if ($prow->leadContactId
+                if ($prow->leadContactId > 0
                     && $this->user->can_view_lead($prow)) {
-                    $c = (int) $prow->leadContactId;
+                    $c = $prow->leadContactId;
                     $this->_lead_data[$c] = ($this->_lead_data[$c] ?? 0) + 1;
                 }
             }
@@ -513,9 +529,9 @@ class ContactList {
         if (isset($this->qopt["shepherds"])) {
             $this->_shepherd_data = [];
             foreach ($prows as $prow) {
-                if ($prow->shepherdContactId
+                if ($prow->shepherdContactId > 0
                     && $this->user->can_view_shepherd($prow)) {
-                    $c = (int) $prow->shepherdContactId;
+                    $c = $prow->shepherdContactId;
                     $this->_shepherd_data[$c] = ($this->_shepherd_data[$c] ?? 0) + 1;
                 }
             }
@@ -527,12 +543,8 @@ class ContactList {
     function content($fieldId, $row) {
         switch ($fieldId) {
         case self::FIELD_NAME:
-            if ($this->sortField == $fieldId && $this->conf->sort_by_last) {
-                $t = Text::name_html($row, NameInfo::make_last_first());
-            } else {
-                $t = Text::name_html($row);
-            }
-            if (trim($t) == "") {
+            $t = $row->name_h($this->sortField == $fieldId ? NAME_S : 0);
+            if (trim($t) === "") {
                 $t = "[No name]";
             }
             $t = '<span class="taghl">' . $t . '</span>';
@@ -553,7 +565,7 @@ class ContactList {
             }
             if ($this->user->privChair && $row->email != $this->user->email) {
                 $t .= " <a href=\"" . $this->conf->hoturl("index", "actas=" . urlencode($row->email)) . "\">"
-                    . Ht::img("viewas.png", "[Act as]", array("title" => "Act as " . Text::name_text($row)))
+                    . Ht::img("viewas.png", "[Act as]", ["title" => "Act as " . $row->name(NAME_P)])
                     . "</a>";
             }
             if ($row->is_disabled() && $this->user->isPC) {
@@ -587,7 +599,7 @@ class ContactList {
             if ($fieldId == self::FIELD_SELECTOR_ON) {
                 $c = ' checked="checked"';
             }
-            return '<input type="checkbox" class="uic js-range-click" name="pap[]" value="' . $row->contactId . '" tabindex="1"' . $c . ' />';
+            return '<input type="checkbox" class="uic js-range-click js-selector" name="pap[]" value="' . $row->contactId . '" tabindex="1"' . $c . ' />';
         case self::FIELD_HIGHTOPICS:
         case self::FIELD_LOWTOPICS:
             if (!($topics = $row->topic_interest_map())) {
@@ -628,11 +640,11 @@ class ContactList {
                 $a = $b = [];
                 if ($c[0]) {
                     $a[] = "{$c[0]} positive";
-                    $b[] = "<a href=\"" . $this->conf->hoturl("search", "q=re:" . urlencode($row->email) . "+rate:good") . "\">+{$c[0]}</a>";
+                    $b[] = "<a href=\"" . $this->conf->hoturl("search", "q=rate:good:" . urlencode($row->email)) . "\">+{$c[0]}</a>";
                 }
                 if ($c[1]) {
                     $a[] = "{$c[1]} negative";
-                    $b[] = "<a href=\"" . $this->conf->hoturl("search", "q=re:" . urlencode($row->email) . "+rate:bad") . "\">&minus;{$c[1]}</a>";
+                    $b[] = "<a href=\"" . $this->conf->hoturl("search", "q=rate:bad:" . urlencode($row->email)) . "\">&minus;{$c[1]}</a>";
                 }
                 return '<span class="hastitle" title="' . join(", ", $a) . '">' . join(" ", $b) . '</span>';
             } else {
@@ -644,26 +656,17 @@ class ContactList {
                 foreach ($pids as $p) {
                     $t[] = '<a href="' . $this->conf->hoturl("paper", "p=$p") . '">' . $p . '</a>';
                 }
-                if ($this->limit === "auuns" || $this->limit === "all") {
-                    $ls = "p/all/";
-                } else {
-                    $ls = "p/s/";
+                $lsx = "au:{$row->email}";
+                if ($this->limit === "auuns") {
+                    $lsx .= " -is:submitted";
+                } else if ($this->limit === "auacc") {
+                    $lsx .= " dec:yes";
+                } else if ($this->limit === "aurej") {
+                    $lsx .= " dec:no";
                 }
+                $lst = $this->_au_unsub[$row->contactId] ?? false ? "all" : "s";
                 return '<div class="has-hotlist" data-hotlist="'
-                    . htmlspecialchars($ls . urlencode("au:" . $row->email))
-                    . '">' . join(", ", $t) . '</div>';
-            } else {
-                return "";
-            }
-        case self::FIELD_ACCEPTED_PAPERS:
-            if (($pids = $this->_auacc_data[$row->contactId] ?? null)) {
-                $t = [];
-                foreach ($pids as $p) {
-                    $t[] = '<a href="' . $this->conf->hoturl("paper", "p=$p") . '">' . $p . '</a>';
-                }
-                return '<div class="has-hotlist" data-hotlist="'
-                    . htmlspecialchars("p/acc/" . urlencode("au:" . $row->email))
-                    . '">' . join(", ", $t) . '</div>';
+                    . htmlspecialchars("p/$lst/" . urlencode($lsx)) . '">' . join(", ", $t) . '</div>';
             } else {
                 return "";
             }
@@ -674,7 +677,7 @@ class ContactList {
                 foreach ($reords as $reord) {
                     if ($last !== $reord[0])  {
                         if ($reord[2]) {
-                            $url = $this->conf->hoturl("paper", "p={$reord[0]}#r{$reord[0]}" . unparseReviewOrdinal($reord[2]));
+                            $url = $this->conf->hoturl("paper", "p={$reord[0]}#r{$reord[0]}" . unparse_latin_ordinal($reord[2]));
                         } else {
                             $url = $this->conf->hoturl("review", "p={$reord[0]}&amp;r={$reord[1]}");
                         }
@@ -694,9 +697,9 @@ class ContactList {
             if ($this->user->isPC
                 && ($tags = $row->viewable_tags($this->user))) {
                 $x = [];
-                foreach (TagInfo::split($tags) as $t) {
+                foreach (Tagger::split($tags) as $t) {
                     if ($t !== "pc#0")
-                        $x[] = '<a class="qq nw" href="' . $this->conf->hoturl("users", "t=%23" . TagInfo::base($t)) . '">' . $this->tagger->unparse_hashed($t) . '</a>';
+                        $x[] = '<a class="qq nw" href="' . $this->conf->hoturl("users", "t=%23" . Tagger::base($t)) . '">' . $this->tagger->unparse_hashed($t) . '</a>';
                 }
                 return join(" ", $x);
             } else {
@@ -705,15 +708,10 @@ class ContactList {
         case self::FIELD_COLLABORATORS:
             if ($this->user->isPC && ($row->roles & Contact::ROLE_PC)) {
                 $t = [];
-                foreach (explode("\n", $row->collaborators()) as $collab) {
-                    if (preg_match(',\A(.*?)\s*(\(.*\))\s*\z,', $collab, $m)) {
-                        $t[] = '<span class="nw">' . htmlspecialchars($m[1])
-                            . ' <span class="auaff">' . htmlspecialchars($m[2]) . '</span></span>';
-                    } else if (($collab = trim($collab)) !== "" && strcasecmp($collab, "None")) {
-                        $t[] = '<span class="nw">' . htmlspecialchars($collab) . '</span>';
-                    }
+                foreach ($row->collaborator_generator() as $co) {
+                    $t[] = (empty($t) ? '' : ';</span> ') . '<span class="nw">' . $co->name_h(NAME_A);
                 }
-                return join("; ", $t);
+                return empty($t) ? "" : join("", $t) . '</span>';
             } else {
                 return "";
             }
@@ -761,11 +759,10 @@ class ContactList {
           case "au":
           case "aurej":
           case "auuns":
-            return [$listname, self::FIELD_SELECTOR, self::FIELD_NAME, self::FIELD_EMAIL, self::FIELD_AFFILIATION_ROW, self::FIELD_LASTVISIT, self::FIELD_TAGS, self::FIELD_PAPERS, self::FIELD_COLLABORATORS];
           case "auacc":
-            return [$listname, self::FIELD_SELECTOR, self::FIELD_NAME, self::FIELD_EMAIL, self::FIELD_AFFILIATION_ROW, self::FIELD_LASTVISIT, self::FIELD_TAGS, self::FIELD_ACCEPTED_PAPERS, self::FIELD_COLLABORATORS];
+            return [$listname, self::FIELD_SELECTOR, self::FIELD_NAME, self::FIELD_EMAIL, self::FIELD_AFFILIATION_ROW, self::FIELD_LASTVISIT, self::FIELD_TAGS, self::FIELD_PAPERS, self::FIELD_COLLABORATORS];
           case "all":
-            return ["all", self::FIELD_SELECTOR, self::FIELD_NAME, self::FIELD_EMAIL, self::FIELD_AFFILIATION_ROW, self::FIELD_LASTVISIT, self::FIELD_TAGS, self::FIELD_PAPERS, self::FIELD_COLLABORATORS];
+            return ["all", self::FIELD_SELECTOR, self::FIELD_NAME, self::FIELD_EMAIL, self::FIELD_AFFILIATION_ROW, self::FIELD_LASTVISIT, self::FIELD_TAGS, self::FIELD_PAPERS, self::FIELD_REVIEWS, self::FIELD_COLLABORATORS];
           default:
             return null;
         }
@@ -782,15 +779,15 @@ class ContactList {
             $types["pcinfo"] = "PC info";
         }
         $lllgroups[] = ["", "Download",
-            Ht::select("getaction", $types, null, ["class" => "want-focus"])
-            . "&nbsp; " . Ht::submit("getgo", "Go")];
+            Ht::select("getfn", $types, null, ["class" => "want-focus"])
+            . "&nbsp; " . Ht::submit("fn", "Go", ["value" => "get"])];
 
         if ($this->user->privChair) {
             $lllgroups[] = ["", "Tag",
-                Ht::select("tagtype", array("a" => "Add", "d" => "Remove", "s" => "Define"), $this->qreq->tagtype)
+                Ht::select("tagfn", ["a" => "Add", "d" => "Remove", "s" => "Define"], $this->qreq->tagfn)
                 . ' &nbsp;tag(s) &nbsp;'
-                . Ht::entry("tag", $this->qreq->tag, ["size" => 15, "class" => "want-focus js-autosubmit", "data-autosubmit-type" => "tagact"])
-                . ' &nbsp;' . Ht::submit("tagact", "Go")];
+                . Ht::entry("tag", $this->qreq->tag, ["size" => 15, "class" => "want-focus js-autosubmit", "data-autosubmit-type" => "tag"])
+                . ' &nbsp;' . Ht::submit("fn", "Go", ["value" => "tag"])];
 
             $mods = ["disableaccount" => "Disable", "enableaccount" => "Enable"];
             if ($this->user->can_change_password(null)) {
@@ -798,8 +795,8 @@ class ContactList {
             }
             $mods["sendaccount"] = "Send account information";
             $lllgroups[] = ["", "Modify",
-                Ht::select("modifytype", $mods, null, ["class" => "want-focus"])
-                . "&nbsp; " . Ht::submit("modifygo", "Go")];
+                Ht::select("modifyfn", $mods, null, ["class" => "want-focus"])
+                . "&nbsp; " . Ht::submit("fn", "Go", ["value" => "modify"])];
         }
 
         return "  <tfoot class=\"pltable" . ($hascolors ? " pltable-colored" : "")
@@ -824,8 +821,10 @@ class ContactList {
         } else if ($this->limit == "pcadmin" || $this->limit == "pcadminx") {
             $mainwhere[] = "roles!=0 and (roles&" . Contact::ROLE_PCLIKE . ")!=0";
         }
-        if ($this->_limit_cids !== null) {
-            $mainwhere[] = "contactId in (" . join(",", array_keys($this->_limit_cids)) . ")";
+        if ($this->limit === "all") {
+            $mainwhere[] = "(roles!=0 or lastLogin>0 or contactId" . sql_in_int_list(array_keys($this->_limit_cids)) . ")";
+        } else if ($this->_limit_cids !== null) {
+            $mainwhere[] = "contactId" . sql_in_int_list(array_keys($this->_limit_cids));
         }
 
         // make query
@@ -862,8 +861,8 @@ class ContactList {
         $this->limit = array_shift($baseFieldId);
 
         // get field array
-        $fieldDef = array();
-        $acceptable_fields = array();
+        $fieldDef = [];
+        $acceptable_fields = [];
         $this->any = (object) array("sel" => false);
         $ncol = 0;
         foreach ($baseFieldId as $fid) {
@@ -886,7 +885,8 @@ class ContactList {
         }
 
         // sort rows
-        if (!$this->sortField || !get($acceptable_fields, $this->sortField)) {
+        if (!$this->sortField
+            || !($acceptable_fields[$this->sortField] ?? false)) {
             $this->sortField = self::FIELD_NAME;
         }
         $srows = $this->_sort($rows);
@@ -894,14 +894,17 @@ class ContactList {
         // count non-callout columns
         $firstcallout = $lastcallout = null;
         $n = 0;
-        foreach ($fieldDef as $fieldId => $fdef)
+        foreach ($fieldDef as $fieldId => $fdef) {
             if ($fdef[1] == 1) {
-                if ($firstcallout === null && $fieldId < self::FIELD_SELECTOR)
+                if ($firstcallout === null && $fieldId < self::FIELD_SELECTOR) {
                     $firstcallout = $n;
-                if ($fieldId < self::FIELD_SCORE)
+                }
+                if ($fieldId < self::FIELD_SCORE) {
                     $lastcallout = $n + 1;
+                }
                 ++$n;
             }
+        }
         $firstcallout = $firstcallout ? $firstcallout : 0;
         $lastcallout = ($lastcallout ? $lastcallout : $ncol) - $firstcallout;
 
@@ -909,7 +912,7 @@ class ContactList {
         $this->count = 0;
         $show_colors = $this->user->isPC;
 
-        $anyData = array();
+        $anyData = [];
         $body = '';
         $extrainfo = $hascolors = false;
         $ids = array();
@@ -984,7 +987,7 @@ class ContactList {
         $uldisplay = $this->user->session("uldisplay", " tags overAllMerit ");
         $foldclasses = array();
         foreach (self::$folds as $k => $fold) {
-            if (get($this->have_folds, $fold) !== null) {
+            if (($this->have_folds[$fold] ?? null) !== null) {
                 $this->have_folds[$fold] = strpos($uldisplay, " $fold ") !== false;
                 $foldclasses[] = "fold" . ($k + 1) . ($this->have_folds[$fold] ? "o" : "c");
             }
@@ -1090,24 +1093,23 @@ class ContactList {
 
 
 global $contactListFields;
-$contactListFields = array(
-        ContactList::FIELD_SELECTOR => array('sel', 1, 0),
-        ContactList::FIELD_SELECTOR_ON => array('sel', 1, 0),
-        ContactList::FIELD_NAME => array('name', 1, 1),
-        ContactList::FIELD_EMAIL => array('email', 1, 1),
-        ContactList::FIELD_AFFILIATION => array('affiliation', 1, 1),
-        ContactList::FIELD_AFFILIATION_ROW => array('affrow', 4, 0),
-        ContactList::FIELD_LASTVISIT => array('lastvisit', 1, 1),
-        ContactList::FIELD_HIGHTOPICS => array('topics', 3, 0),
-        ContactList::FIELD_LOWTOPICS => array('topics', 3, 0),
-        ContactList::FIELD_REVIEWS => array('revstat', 1, 1),
-        ContactList::FIELD_REVIEW_RATINGS => array('revstat', 1, 1),
-        ContactList::FIELD_PAPERS => array('papers', 1, 1),
-        ContactList::FIELD_ACCEPTED_PAPERS => array('papers', 1, 1),
-        ContactList::FIELD_REVIEW_PAPERS => array('papers', 1, 1),
-        ContactList::FIELD_SCORE => array('uscores', 1, 1),
-        ContactList::FIELD_LEADS => array('revstat', 1, 1),
-        ContactList::FIELD_SHEPHERDS => array('revstat', 1, 1),
-        ContactList::FIELD_TAGS => array('tags', 5, 0),
-        ContactList::FIELD_COLLABORATORS => array('collab', 6, 0)
-        );
+$contactListFields = [
+    ContactList::FIELD_SELECTOR => array('sel', 1, 0),
+    ContactList::FIELD_SELECTOR_ON => array('sel', 1, 0),
+    ContactList::FIELD_NAME => array('name', 1, 1),
+    ContactList::FIELD_EMAIL => array('email', 1, 1),
+    ContactList::FIELD_AFFILIATION => array('affiliation', 1, 1),
+    ContactList::FIELD_AFFILIATION_ROW => array('affrow', 4, 0),
+    ContactList::FIELD_LASTVISIT => array('lastvisit', 1, 1),
+    ContactList::FIELD_HIGHTOPICS => array('topics', 3, 0),
+    ContactList::FIELD_LOWTOPICS => array('topics', 3, 0),
+    ContactList::FIELD_REVIEWS => array('revstat', 1, 1),
+    ContactList::FIELD_REVIEW_RATINGS => array('revstat', 1, 1),
+    ContactList::FIELD_PAPERS => array('papers', 1, 1),
+    ContactList::FIELD_REVIEW_PAPERS => array('papers', 1, 1),
+    ContactList::FIELD_SCORE => array('uscores', 1, 1),
+    ContactList::FIELD_LEADS => array('revstat', 1, 1),
+    ContactList::FIELD_SHEPHERDS => array('revstat', 1, 1),
+    ContactList::FIELD_TAGS => array('tags', 5, 0),
+    ContactList::FIELD_COLLABORATORS => array('collab', 6, 0)
+];

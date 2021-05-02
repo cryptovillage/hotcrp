@@ -3,13 +3,20 @@
 // Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
 
 class IntlMsg {
+    /** @var ?string */
     public $context;
+    /** @var string */
     public $otext;
     public $require;
+    /** @var float */
     public $priority = 0.0;
+    /** @var ?int */
     public $format;
-    public $no_conversions;
-    public $template;
+    /** @var bool */
+    public $no_conversions = false;
+    /** @var bool */
+    public $template = false;
+    /** @var ?IntlMsg */
     public $next;
 
     private function resolve_arg(IntlMsgSet $ms, $args, $argname, &$val) {
@@ -90,10 +97,13 @@ class IntlMsg {
 }
 
 class IntlMsgSet {
+    /** @var array<string,IntlMsg> */
     private $ims = [];
     private $require_resolvers = [];
-    private $_ctx;
+    private $_context_prefix;
     private $_default_priority;
+    private $_default_format;
+    private $_recursion = 0;
 
     const PRIO_OVERRIDE = 1000.0;
 
@@ -110,10 +120,10 @@ class IntlMsgSet {
         } else if (!$ctx) {
             $x = $this->addj($m);
         } else {
-            $octx = $this->_ctx;
-            $this->_ctx = $ctx;
+            $octx = $this->_context_prefix;
+            $this->_context_prefix = $ctx;
             $x = $this->addj($m);
-            $this->_ctx = $octx;
+            $this->_context_prefix = $octx;
         }
         return $x;
     }
@@ -122,15 +132,26 @@ class IntlMsgSet {
      * @return bool */
     private function _addj_object($m) {
         if (isset($m->members) && is_array($m->members)) {
-            $octx = $this->_ctx;
+            $octx = $this->_context_prefix;
+            $oprio = $this->_default_priority;
+            $ofmt = $this->_default_format;
             if (isset($m->context) && is_string($m->context)) {
-                $this->_ctx = ((string) $this->_ctx === "" ? "" : $this->_ctx . "/") . $m->context;
+                $cp = $this->_context_prefix ?? "";
+                $this->_context_prefix = ($cp === "" ? $m->context : $cp . "/" . $m->context);
+            }
+            if (isset($m->priority) && (is_int($m->priority) || is_float($m->priority))) {
+                $this->_default_priority = (float) $m->priority;
+            }
+            if (isset($m->format) && is_int($m->format)) {
+                $this->_default_format = $m->format;
             }
             $ret = true;
             foreach ($m->members as $mm) {
                 $ret = $this->addj($mm) && $ret;
             }
-            $this->_ctx = $octx;
+            $this->_context_prefix = $octx;
+            $this->_default_priority = $oprio;
+            $this->_default_format = $ofmt;
             return $ret;
         } else {
             $im = new IntlMsg;
@@ -205,12 +226,11 @@ class IntlMsgSet {
     /** @param string $itext
      * @param IntlMsg $im */
     private function _addj_finish($itext, $im) {
-        if ($this->_ctx) {
-            $im->context = $this->_ctx . ($im->context ? "/" . $im->context : "");
+        if ($this->_context_prefix) {
+            $im->context = $this->_context_prefix . ($im->context ? "/" . $im->context : "");
         }
-        if ($im->priority === null && $this->_default_priority !== null) {
-            $im->priority = $this->_default_priority;
-        }
+        $im->priority = $im->priority ?? $this->_default_priority;
+        $im->format = $im->format ?? $this->_default_format;
         $im->next = $this->ims[$itext] ?? null;
         $this->ims[$itext] = $im;
     }
@@ -255,7 +275,16 @@ class IntlMsgSet {
         return null;
     }
 
+    /** @param ?string $context
+     * @param string $itext
+     * @param list<mixed> $args
+     * @param ?float $priobound
+     * @return ?IntlMsg */
     private function find($context, $itext, $args, $priobound) {
+        assert(is_string($args[0]));
+        if (++$this->_recursion > 5) {
+            throw new Exception("too much recursion");
+        }
         $match = null;
         $matchnreq = $matchctxlen = 0;
         if ($context === "") {
@@ -296,20 +325,35 @@ class IntlMsgSet {
                 $matchctxlen = $ctxlen;
             }
         }
+        --$this->_recursion;
         return $match;
     }
 
-    private function expand($s, $args, $context, $im) {
-        if ($s === null || $s === false || $s === "")
+    /** @param string $s
+     * @param list<mixed> $args
+     * @param ?string $context
+     * @param ?IntlMsg $im
+     * @param ?int $format
+     * @return string */
+    private function expand($s, $args, $context, $im, $format) {
+        if ($s === null || $s === false || $s === "") {
             return $s;
+        }
         $pos = strpos($s, "%");
         $argnum = 0;
         while ($pos !== false) {
             ++$pos;
             if (preg_match('/(?!\d+)\w+(?=%)/A', $s, $m, 0, $pos)
-                && ($imt = $this->find($context, strtolower($m[0]), [], null))
+                && ($imt = $this->find($context, strtolower($m[0]), [$m[0]], null))
                 && $imt->template) {
-                $t = substr($s, 0, $pos - 1) . $this->expand($imt->otext, $args, null, null);
+                $t = substr($s, 0, $pos - 1);
+                ++$this->_recursion;
+                if ($this->_recursion < 5) {
+                    $t .= $this->expand($imt->otext, $args, null, null, $format);
+                } else {
+                    error_log("RECURSION ERROR ON {$m[0]} " . debug_string_backtrace());
+                }
+                --$this->_recursion;
                 $s = $t . substr($s, $pos + strlen($m[0]) + 1);
                 $pos = strlen($t);
             } else if (($im && $im->no_conversions) || count($args) === 1) {
@@ -340,65 +384,67 @@ class IntlMsgSet {
         return $s;
     }
 
-    function x($itext) {
-        $args = func_get_args();
-        if (($im = $this->find(null, $itext, $args, null))) {
+    /** @return string */
+    function _(...$args) {
+        if (($im = $this->find(null, $args[0], $args, null))) {
             $args[0] = $im->otext;
         }
-        return $this->expand($args[0], $args, null, $im);
+        return $this->expand($args[0], $args, null, $im, null);
     }
 
-    function xc($context, $itext) {
-        $args = array_slice(func_get_args(), 1);
-        if (($im = $this->find($context, $itext, $args, null))) {
+    /** @param string $context
+     * @return string */
+    function _c($context, ...$args) {
+        if (($im = $this->find($context, $args[0], $args, null))) {
             $args[0] = $im->otext;
         }
-        return $this->expand($args[0], $args, $context, $im);
+        return $this->expand($args[0], $args, $context, $im, null);
     }
 
-    function xi($id, $itext = null) {
-        $args = array_slice(func_get_args(), 1);
-        if (empty($args)) {
-            $args[] = "";
-        }
+    /** @param string $id
+     * @return string */
+    function _i($id, ...$args) {
+        $args[0] = $args[0] ?? "";
         if (($im = $this->find(null, $id, $args, null))
-            && ($itext === null || $itext === false || $im->priority > 0.0)) {
+            && ($args[0] === "" || $im->priority > 0.0)) {
             $args[0] = $im->otext;
         }
-        return $this->expand($args[0], $args, $id, $im);
+        return $this->expand($args[0], $args, $id, $im, null);
     }
 
-    function xci($context, $id, $itext = null) {
-        $args = array_slice(func_get_args(), 2);
-        if (empty($args)) {
-            $args[] = "";
-        }
+    /** @param string $context
+     * @param string $id
+     * @return string */
+    function _ci($context, $id, ...$args) {
+        $args[0] = $args[0] ?? "";
         if (($im = $this->find($context, $id, $args, null))
-            && ($itext === null || $itext === false || $im->priority > 0.0)) {
+            && ($args[0] === "" || $im->priority > 0.0)) {
             $args[0] = $im->otext;
         }
         $cid = (string) $context === "" ? $id : "$context/$id";
-        return $this->expand($args[0], $args, $cid, $im);
+        return $this->expand($args[0], $args, $cid, $im, null);
     }
 
-    function render_xci($fr, $context, $id, $itext = null) {
-        $args = array_slice(func_get_args(), 3);
-        if (empty($args)) {
-            $args[] = "";
-        }
+    /** @param FieldRender $fr
+     * @param string $context
+     * @param string $id */
+    function render_ci($fr, $context, $id, ...$args) {
+        $args[0] = $args[0] ?? "";
         if (($im = $this->find($context, $id, $args, null))
-            && ($itext === null || $itext === false || $im->priority > 0.0)) {
+            && ($args[0] === "" || $im->priority > 0.0)) {
             $args[0] = $im->otext;
             if ($im->format !== null) {
                 $fr->value_format = $im->format;
             }
         }
         $cid = (string) $context === "" ? $id : "$context/$id";
-        $fr->value = $this->expand($args[0], $args, $cid, $im);
+        $fr->value = $this->expand($args[0], $args, $cid, $im, null);
     }
 
-    function default_itext($id, $itext) {
-        $args = array_slice(func_get_args(), 1);
+    /** @param string $id
+     * @return string */
+    function default_itext($id, ...$args) {
+        $args[0] = $args[0] ?? "";
         if (($im = $this->find(null, $id, $args, self::PRIO_OVERRIDE))) {
             $args[0] = $im->otext;
         }

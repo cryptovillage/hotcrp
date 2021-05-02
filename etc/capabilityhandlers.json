@@ -1,10 +1,18 @@
 [
     {
         "match": "0([1-9][0-9]*)a\\S+",
-        "callback": "CapabilityManager::apply_old_author_view"
+        "function": "AuthorView_Capability::apply_old_author_view"
     },
     {
         "match": "([1-9][0-9]*)ra(\\S+)",
-        "callback": "CapabilityManager::apply_review_acceptor"
+        "function": "ReviewAccept_Capability::apply_review_acceptor"
+    },
+    {
+        "match": "ra([1-9][0-9]*)([a-zA-Z]+)",
+        "function": "ReviewAccept_Capability::apply_review_acceptor"
+    },
+    {
+        "match": "kiosk-([a-zA-Z0-9]+)",
+        "function": "MeetingTracker::apply_kiosk_capability"
     }
 ]

@@ -1,10 +1,11 @@
 <?php
 // bulkassign.php -- HotCRP bulk paper assignment page
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 require_once("src/initweb.php");
-if (!$Me->is_manager())
+if (!$Me->is_manager()) {
     $Me->escape();
+}
 $null_mailer = new HotCRPMailer($Conf, null, [
     "requester_contact" => $Me,
     "other_contact" => $Me /* backwards compat */,
@@ -12,7 +13,7 @@ $null_mailer = new HotCRPMailer($Conf, null, [
 ]);
 
 $Qreq->rev_round = (string) $Conf->sanitize_round_name($Qreq->rev_round);
-if ($Qreq->post_ok()) {
+if ($Qreq->valid_post()) {
     header("X-Accel-Buffering: no");  // NGINX: do not hold on to file
 }
 
@@ -30,13 +31,11 @@ function assignment_defaults($qreq) {
     return $defaults;
 }
 
-$csv_lineno = 0;
 $csv_preparing = false;
 $csv_started = 0;
-function keep_browser_alive($assignset, $lineno, $line) {
-    global $Conf, $csv_lineno, $csv_preparing, $csv_started;
+function keep_browser_alive(AssignmentSet $assignset, CsvRow $line = null) {
+    global $Conf, $csv_preparing, $csv_started;
     $time = microtime(true);
-    $csv_lineno = $lineno;
     if (!$csv_started) {
         $csv_started = $time;
     } else if ($time - $csv_started > 1) {
@@ -46,18 +45,13 @@ function keep_browser_alive($assignset, $lineno, $line) {
                 "</div>";
             $csv_preparing = true;
         }
-        if ($assignset->filename) {
-            $text = '<span class="lineno">'
-                . htmlspecialchars($assignset->filename) . ":$lineno:</span>";
-        } else {
-            $text = "<span class=\"lineno\">line $lineno:</span>";
-        }
-        if ($line === false) {
+        $text = '<span class="lineno">' . htmlspecialchars($assignset->landmark()) . ':</span>';
+        if (!$line) {
             $text .= " processing";
         } else {
-            $text .= " <code>" . htmlspecialchars(join(",", $line->as_array())) . "</code>";
+            $text .= " <code>" . htmlspecialchars(join(",", $line->as_list())) . "</code>";
         }
-        echo Ht::unstash_script("\$\$('mailcount').innerHTML=" . json_encode_browser($text) . ";");
+        echo Ht::unstash_script("document.getElementById('mailcount').innerHTML=" . json_encode_browser($text) . ";");
         flush();
         while (@ob_end_flush()) {
         }
@@ -66,17 +60,20 @@ function keep_browser_alive($assignset, $lineno, $line) {
 
 function finish_browser_alive() {
     global $csv_preparing;
-    if ($csv_preparing)
-        echo Ht::unstash_script("fold('mail',null)");
+    if ($csv_preparing) {
+        echo Ht::unstash_script("hotcrp.fold('mail',null)");
+    }
 }
 
 function complete_assignment($qreq, $callback) {
     global $Me;
     $SSel = SearchSelection::make($qreq, $Me);
     $assignset = new AssignmentSet($Me, true);
+    if ($callback) {
+        $assignset->add_progress_handler($callback);
+    }
     $assignset->enable_papers($SSel->selection());
-    $assignset->parse($qreq->file, $qreq->filename,
-                      assignment_defaults($qreq), $callback);
+    $assignset->parse($qreq->file, $qreq->filename, assignment_defaults($qreq));
     return $assignset->execute(true);
 }
 
@@ -84,51 +81,34 @@ function complete_assignment($qreq, $callback) {
 // redirect if save cancelled
 if (isset($Qreq->saveassignment) && isset($Qreq->cancel)) {
     unset($Qreq->saveassignment);
-    $Conf->self_redirect($Qreq); // should not return
+    $Conf->redirect_self($Qreq); // should not return
 }
 
 // perform quick assignments all at once
 if (isset($Qreq->saveassignment)
-    && $Qreq->post_ok()
+    && $Qreq->valid_post()
     && isset($Qreq->file)
     && $Qreq->assignment_size_estimate < 1000
     && complete_assignment($Qreq, null)) {
-    $Conf->self_redirect($Qreq);
+    $Conf->redirect_self($Qreq);
 }
 
 
 $Conf->header("Assignments", "bulkassign", ["subtitle" => "Bulk update"]);
-echo '<div class="psmode">',
-    '<div class="papmode"><a href="', hoturl("autoassign"), '">Automatic</a></div>',
-    '<div class="papmode"><a href="', hoturl("manualassign"), '">Manual</a></div>',
-    '<div class="papmode"><a href="', hoturl("conflictassign"), '">Conflicts</a></div>',
-    '<div class="papmode active"><a href="', hoturl("bulkassign"), '">Bulk update</a></div>',
-    '</div><hr class="c" />';
-
-
-// Help list
-echo '<div class="helpside"><div class="helpinside">
-Assignment methods:
-<ul><li><a href="', hoturl("autoassign"), '">Automatic</a></li>
- <li><a href="', hoturl("manualassign"), '">Manual by PC member</a></li>
- <li><a href="', hoturl("assign"), '">Manual by paper</a></li>
- <li><a href="', hoturl("conflictassign"), '">Potential conflicts</a></li>
- <li><a href="', hoturl("bulkassign"), '" class="q"><strong>Bulk update</strong></a></li>
-</ul>
-<hr class="hr">
-<p>Types of PC review:</p>
-<dl><dt>', review_type_icon(REVIEW_PRIMARY), ' Primary</dt><dd>Mandatory review</dd>
-  <dt>', review_type_icon(REVIEW_SECONDARY), ' Secondary</dt><dd>May be delegated to external reviewers</dd>
-  <dt>', review_type_icon(REVIEW_PC), ' Optional</dt><dd>May be declined</dd>
-  <dt>', review_type_icon(REVIEW_META), ' Metareview</dt><dd>Can view all other reviews before completing their own</dd></dl>
-</div></div>';
+echo '<div class="mb-5 clearfix">',
+    '<div class="papmode"><a href="', $Conf->hoturl("autoassign"), '">Automatic</a></div>',
+    '<div class="papmode"><a href="', $Conf->hoturl("manualassign"), '">Manual</a></div>',
+    '<div class="papmode"><a href="', $Conf->hoturl("conflictassign"), '">Conflicts</a></div>',
+    '<div class="papmode active"><a href="', $Conf->hoturl("bulkassign"), '">Bulk update</a></div>',
+    '</div>';
 
 
 // upload review form action
-if (isset($Qreq->bulkentry) && trim($Qreq->bulkentry) === "Enter assignments")
+if (isset($Qreq->bulkentry) && trim($Qreq->bulkentry) === "Enter assignments") {
     unset($Qreq->bulkentry);
+}
 if (isset($Qreq->upload)
-    && $Qreq->post_ok()
+    && $Qreq->valid_post()
     && ($Qreq->bulkentry || $Qreq->has_file("bulk"))) {
     flush();
     while (@ob_end_flush()) {
@@ -146,9 +126,10 @@ if (isset($Qreq->upload)
     } else {
         $assignset = new AssignmentSet($Me, true);
         $assignset->set_flags(AssignmentState::FLAG_CSV_CONTEXT);
+        $assignset->add_progress_handler("keep_browser_alive");
         $defaults = assignment_defaults($Qreq);
         $text = convert_to_utf8($text);
-        $assignset->parse($text, $filename, $defaults, "keep_browser_alive");
+        $assignset->parse($text, $filename, $defaults);
         finish_browser_alive();
         if ($assignset->has_error()) {
             $assignset->report_errors();
@@ -160,15 +141,16 @@ if (isset($Qreq->upload)
             $Conf->infoMsg("Select “Apply changes” if this looks OK. (You can always alter the assignment afterwards.)");
 
             $atypes = $assignset->assigned_types();
-            $apids = $assignset->assigned_pids(true);
-            echo Ht::form(hoturl_post("bulkassign",
-                                      ["saveassignment" => 1,
-                                       "assigntypes" => join(" ", $atypes),
-                                       "assignpids" => join(" ", $apids)])),
-                Ht::hidden("default_action", get($defaults, "action", "guess")),
+            $apids = $assignset->numjoin_assigned_pids(" ");
+            echo Ht::form($Conf->hoturl_post("bulkassign", [
+                    "saveassignment" => 1,
+                    "assigntypes" => join(" ", $atypes),
+                    "assignpids" => $apids
+                ])),
+                Ht::hidden("default_action", $defaults["action"] ?? "guess"),
                 Ht::hidden("rev_round", $defaults["round"]),
                 Ht::hidden("file", $text),
-                Ht::hidden("assignment_size_estimate", $csv_lineno),
+                Ht::hidden("assignment_size_estimate", max($assignset->assignment_count(), $assignset->request_count())),
                 Ht::hidden("filename", $filename),
                 Ht::hidden("requestreview_notify", $Qreq->requestreview_notify),
                 Ht::hidden("requestreview_subject", $Qreq->requestreview_subject),
@@ -190,7 +172,7 @@ if (isset($Qreq->upload)
 }
 
 if (isset($Qreq->saveassignment)
-    && $Qreq->post_ok()
+    && $Qreq->valid_post()
     && isset($Qreq->file)
     && $Qreq->assignment_size_estimate >= 1000) {
     complete_assignment($Qreq, "keep_browser_alive");
@@ -198,12 +180,30 @@ if (isset($Qreq->saveassignment)
 }
 
 
-echo Ht::form(hoturl_post("bulkassign", "upload=1"));
+// Help list
+echo '<div class="helpside"><div class="helpinside">
+Assignment methods:
+<ul><li><a href="', hoturl("autoassign"), '">Automatic</a></li>
+ <li><a href="', hoturl("manualassign"), '">Manual by PC member</a></li>
+ <li><a href="', hoturl("assign"), '">Manual by paper</a></li>
+ <li><a href="', hoturl("conflictassign"), '">Potential conflicts</a></li>
+ <li><a href="', hoturl("bulkassign"), '" class="q"><strong>Bulk update</strong></a></li>
+</ul>
+<hr class="hr">
+<p>Types of PC review:</p>
+<dl><dt>', review_type_icon(REVIEW_PRIMARY), ' Primary</dt><dd>Mandatory review</dd>
+  <dt>', review_type_icon(REVIEW_SECONDARY), ' Secondary</dt><dd>May be delegated to external reviewers</dd>
+  <dt>', review_type_icon(REVIEW_PC), ' Optional</dt><dd>May be declined</dd>
+  <dt>', review_type_icon(REVIEW_META), ' Metareview</dt><dd>Can view all other reviews before completing their own</dd></dl>
+</div></div>';
+
+
+echo Ht::form($Conf->hoturl_post("bulkassign", "upload=1"));
 
 // Upload
 echo '<div class="lg"><div class="f-i" style="margin-top:1em">',
     Ht::textarea("bulkentry", (string) $Qreq->bulkentry,
-                 ["rows" => 1, "cols" => 80, "placeholder" => "Enter assignments", "class" => "need-autogrow"]),
+                 ["rows" => 1, "cols" => 80, "placeholder" => "Enter assignments", "class" => "need-autogrow", "spellcheck" => "false"]),
     '</div>';
 
 echo '<div class="g"><strong>OR</strong> &nbsp;',
@@ -227,8 +227,8 @@ echo '<div id="foldoptions" class="lg foldc fold2c fold3c"><label>',
     '</label>';
 Ht::stash_script('$(function(){
 $("#tsel").on("change",function(){
-foldup.call(this,null,{f:this.value!=="review"});
-foldup.call(this,null,{f:!/^(?:primary|secondary|(?:pc|meta)?review)$/.test(this.value),n:2});
+hotcrp.foldup.call(this,null,{f:this.value!=="review"});
+hotcrp.foldup.call(this,null,{f:!/^(?:primary|secondary|(?:pc|meta)?review)$/.test(this.value),n:2});
 }).trigger("change")})');
 $rev_rounds = $Conf->round_selector_options(null);
 $expected_round = $Qreq->rev_round ? : $Conf->assignment_round_option(false);
@@ -257,7 +257,7 @@ if (($requestreview_template = $null_mailer->expand_template("requestreview"))) 
 echo '<div class="lg"></div>', Ht::submit("Prepare assignments", ["class" => "btn-primary"]),
     " &nbsp; <span class=\"hint\">You’ll be able to check the assignments before they are saved.</span></div>\n";
 
-echo '<div style="margin-top:1.5em"><a href="', hoturl_post("search", "fn=get&amp;getfn=pcassignments&amp;t=manager&amp;q=&amp;p=all"), '">Download current PC review assignments</a></div>';
+echo '<div style="margin-top:1.5em"><a href="', $Conf->hoturl_post("search", "fn=get&amp;getfn=pcassignments&amp;t=manager&amp;q=&amp;p=all"), '">Download current PC review assignments</a></div>';
 
 echo "</form>
 
@@ -266,7 +266,7 @@ echo "</form>
 
 <p class=\"w-text\">Upload a CSV (comma-separated value file) to prepare an assignment; HotCRP
 will display the consequences of the requested assignment for confirmation and
-approval. The <code>action</code> column determines what kind of assignment is
+approval. The <code>action</code> field determines the assignment to be
 performed. Supported actions include:</p>";
 
 BulkAssign_HelpTopic::echo_actions($Me);

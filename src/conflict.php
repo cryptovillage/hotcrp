@@ -46,13 +46,27 @@ class Conflict {
     }
     /** @param int $ct
      * @return int */
-    static function nonauthor_part($ct) {
+    static function pc_part($ct) {
         return $ct & 31;
+    }
+    /** @param int $ct1
+     * @param int $ct2
+     * @return int */
+    static function merge($ct1, $ct2) {
+        if ($ct2 >= CONFLICT_AUTHOR && $ct1 < CONFLICT_AUTHOR) {
+            $ct1 |= CONFLICT_CONTACTAUTHOR;
+        }
+        if (($ct2 & CONFLICT_PCMASK) !== 0
+            && (($ct1 & CONFLICT_PCMASK) === 0
+                || (($ct1 & 1) === 0 && ($ct2 & 1) !== 0))) {
+            $ct1 = ($ct1 & ~CONFLICT_PCMASK) | ($ct2 & CONFLICT_PCMASK);
+        }
+        return $ct1;
     }
 
     function __construct(Conf $conf) {
         $this->conf = $conf;
-        $this->_desc = !!$conf->setting("sub_pcconfdesc");
+        $this->_desc = !!$conf->setting("sub_pcconfsel");
     }
 
     /** @return list<int> */
@@ -157,6 +171,22 @@ class Conflict {
      * @return string */
     function unparse_html($ct) {
         return htmlspecialchars($this->unparse_text($ct));
+    }
+
+    /** @param int $ct
+     * @return string */
+    function unparse_text_description($ct)  {
+        if (!$this->_desc && isset(self::$desc_map[$ct & ~1])) {
+            return $this->conf->_c("conflict_type", self::$desc_map[$ct & ~1]);
+        } else {
+            return $this->unparse_text($ct);
+        }
+    }
+
+    /** @param int $ct
+     * @return string */
+    function unparse_html_description($ct) {
+        return htmlspecialchars($this->unparse_text_description($ct));
     }
 
     /** @param int $ct

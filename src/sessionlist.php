@@ -38,11 +38,11 @@ class SessionList {
     }
 
     /** @param string $s
-     * @return list<int>|false */
+     * @return ?list<int> */
     static function decode_ids($s) {
         if (str_starts_with($s, "[")
             && ($a = json_decode($s)) !== null) {
-            return is_int_list($a) ? $a : false;
+            return is_int_list($a) ? $a : null;
         }
 
         $a = [];
@@ -78,12 +78,6 @@ class SessionList {
                 continue;
             }
 
-            while ($ch === "z") {
-                $sign = -$sign;
-                ++$i;
-                $ch = $i < $l ? $s[$i] : "s";
-            }
-
             $include = true;
             $n = $skip = 0;
             if ($ch >= "a" && $ch <= "h") {
@@ -103,9 +97,13 @@ class SessionList {
             } else if ($ch >= "I" && $ch <= "P") {
                 $n = ord($ch) - 72;
                 $skip = 2;
-            } else if (strspn($ch, "s[],0123456789") !== 1) {
-                error_log("bad SessionList decode_ids contains $ch"); // XXX delete this
-                return false;
+            } else if ($ch === "z") {
+                $sign = -$sign;
+            } else if ($ch === "Z") {
+                $sign = -$sign;
+                $skip = 2;
+            } else if (strspn($ch, "s[],0123456789'#") !== 1) {
+                return null;
             }
 
             while ($n > 0 && $include) {
@@ -144,10 +142,11 @@ class SessionList {
         // q<N>: range of <N> sequential present papers
         // r<N>: range of <N> sequential missing papers
         // <N>[-<N>]: include <N>, set direction forwards
-        // z: next range is backwards
+        // z: switch direction
+        // Z: like z + j
         // A-H: like a-h + i
         // I-P: like a-h + j
-        // [s\[\],]: ignored
+        // [#s\[\],']: ignored
         $n = count($ids);
         $a = [(string) $ids[0]];
         '@phan-var list<string> $a';
@@ -161,6 +160,9 @@ class SessionList {
                 $a[count($a) - 1] = chr(ord($ch) - 40 + 8 * $delta);
             } else if ($delta > 0 && $delta <= 8) {
                 $a[] = chr(104 + $delta);
+            } else if ($delta === -2) {
+                $sign = -$sign;
+                $a[] = "Z";
             } else if ($delta < 0 && $delta >= -8) {
                 $sign = -$sign;
                 $a[] = "z" . chr(104 - $delta);
@@ -216,15 +218,14 @@ class SessionList {
         if (($j = json_decode($info))
             && is_object($j)
             && (!isset($j->listid) || is_string($j->listid))) {
-            $listid = $j->listid ?? null;
+            $listid = $j->listid ?? $type;
             if ($listid !== $type && !str_starts_with($listid, "{$type}/")) {
                 return null;
             }
-            '@phan-var-force ?string $listid';
 
             $ids = $j->ids ?? null;
             if (is_string($ids)) {
-                if (($ids = self::decode_ids($ids)) === false)
+                if (($ids = self::decode_ids($ids)) === null)
                     return null;
             } else if ($ids !== null && !is_int_list($ids)) {
                 return null;
@@ -235,7 +236,7 @@ class SessionList {
             '@phan-var-force ?string $digest';
 
             if ($ids !== null || $digest !== null) {
-                $list = new SessionList($listid ?? $type, $ids);
+                $list = new SessionList($listid, $ids);
                 foreach (get_object_vars($j) as $k => $v) {
                     if ($k !== "listid" && $k !== "ids")
                         $list->$k = $v;
@@ -287,13 +288,18 @@ class SessionList {
     /** @return string */
     function info_string() {
         $j = [];
-        if ($this->ids !== null) {
-            $j["ids"] = self::encode_ids($this->ids);
-        }
         foreach (get_object_vars($this) as $k => $v) {
             if ($v != null
                 && !in_array($k, ["ids", "id_position", "curid", "previd", "nextid"], true))
                 $j[$k] = $v;
+        }
+        if ($this->ids !== null) {
+            $j["ids"] = self::encode_ids($this->ids);
+            if (strlen($j["ids"]) > 160) {
+                $x = $this->ids;
+                sort($x);
+                $j["sorted_ids"] = self::encode_ids($x);
+            }
         }
         return json_encode_browser($j);
     }
@@ -318,9 +324,8 @@ class SessionList {
     }
 
     function set_cookie(Contact $user) {
-        global $Now;
         $t = round(microtime(true) * 1000);
-        $user->conf->set_cookie("hotlist-info-" . $t, $this->info_string(), $Now + 20);
+        $user->conf->set_cookie("hotlist-info-" . $t, $this->info_string(), Conf::$now + 20);
     }
 
     /** @param int $id */

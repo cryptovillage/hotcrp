@@ -5,11 +5,15 @@
 class CleanHTML {
     const BADTAGS_IGNORE = 1;
 
+    /** @var int */
     private $flags;
+    /** @var array<string,mixed> */
     private $goodtags;
+    /** @var array<string,mixed> */
     private $emptytags;
 
-    static private $g;
+    /** @var CleanHTML */
+    static private $main;
 
     function __construct($flags = 0, $goodtags = null, $emptytags = null) {
         if ($goodtags === null)
@@ -53,7 +57,7 @@ class CleanHTML {
                 $tag = strtolower($m[1]);
                 if (!isset($this->goodtags[$tag])) {
                     if (!($this->flags & self::BADTAGS_IGNORE))
-                        return self::_cleanHTMLError($err, "some <code>&lt;$tag&gt;</code> tag");
+                        return self::_cleanHTMLError($err, "an unacceptable <code>&lt;$tag&gt;</code> tag");
                     $x .= "&lt;";
                     $t = substr($t, 1);
                     continue;
@@ -107,7 +111,7 @@ class CleanHTML {
                 $tag = strtolower($m[1]);
                 if (!isset($this->goodtags[$tag])) {
                     if (!($this->flags & self::BADTAGS_IGNORE)) {
-                        return self::_cleanHTMLError($err, "some <code>&lt;/$tag&gt;</code> tag");
+                        return self::_cleanHTMLError($err, "an unacceptable <code>&lt;/$tag&gt;</code> tag");
                     }
                     $x .= "&lt;";
                     $t = substr($t, 1);
@@ -149,10 +153,10 @@ class CleanHTML {
 
     /** @return CleanHTML */
     static function basic() {
-        if (!self::$g) {
-            self::$g = new CleanHTML;
+        if (!self::$main) {
+            self::$main = new CleanHTML;
         }
-        return self::$g;
+        return self::$main;
     }
 
     /** @return string|false */

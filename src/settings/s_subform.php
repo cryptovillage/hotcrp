@@ -1,16 +1,13 @@
 <?php
 // src/settings/s_subform.php -- HotCRP settings > submission form page
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class BanalSettings {
     static function render($suffix, $sv) {
-        $cfs = new FormatSpec($sv->curv("sub_banal_opt$suffix"),
-                              $sv->curv("sub_banal_data$suffix"));
+        $cfs = new FormatSpec($sv->oldv("sub_banal_opt$suffix"),
+                              $sv->oldv("sub_banal_data$suffix"));
         foreach (["papersize", "pagelimit", "columns", "textblock", "bodyfontsize", "bodylineheight", "unlimitedref"] as $k) {
-            $val = $cfs->unparse_key($k);
-            if ($val === "")
-                $val = ($k === "unlimitedref" ? null : "N/A");
-            $sv->set_oldv("sub_banal_$k$suffix", $val);
+            $sv->set_oldv("sub_banal_$k$suffix", $cfs->unparse_key($k));
         }
 
         $open = $sv->curv("sub_banal$suffix") > 0;
@@ -32,7 +29,7 @@ class BanalSettings {
         echo "</div></div>\n";
     }
     static private function cf_status(CheckFormat $cf) {
-        if ($cf->failed) {
+        if (!$cf->check_ok()) {
             return "failed";
         } else if ($cf->has_error()) {
             return "error";
@@ -41,14 +38,13 @@ class BanalSettings {
         }
     }
     static private function check_banal($sv) {
-        global $ConfSitePATH;
         $cf = new CheckFormat($sv->conf);
         $interesting_keys = ["papersize", "pagelimit", "textblock", "bodyfontsize", "bodylineheight"];
-        $cf->check_file("$ConfSitePATH/src/sample.pdf", "letter;2;;6.5inx9in;12;14");
+        $cf->check_file(SiteLoader::find("etc/sample.pdf"), "letter;2;;6.5inx9in;12;14");
         $s1 = self::cf_status($cf);
         $e1 = join(",", array_intersect($cf->problem_fields(), $interesting_keys)) ? : "none";
         $e1_papersize = $cf->has_problem_at("papersize");
-        $cf->check_file("$ConfSitePATH/src/sample.pdf", "a4;1;;3inx3in;14;15");
+        $cf->check_file(SiteLoader::find("etc/sample.pdf"), "a4;1;;3inx3in;14;15");
         $s2 = self::cf_status($cf);
         $e2 = join(",", array_intersect($cf->problem_fields(), $interesting_keys)) ? : "none";
         $want_e2 = join(",", $interesting_keys);
@@ -69,7 +65,6 @@ class BanalSettings {
         }
     }
     static function parse($suffix, $sv, $check) {
-        global $Now;
         if (!$sv->has_reqv("sub_banal$suffix")) {
             $fs = new FormatSpec($sv->newv("sub_banal_opt$suffix"));
             $sv->save("sub_banal$suffix", $fs->is_banal_empty() ? 0 : -1);
@@ -81,7 +76,7 @@ class BanalSettings {
         $cfs = new FormatSpec($sv->oldv("sub_banal_data$suffix"));
         $old_unparse = $cfs->unparse_banal();
         $cfs->papersize = [];
-        if (($s = trim($sv->reqv("sub_banal_papersize$suffix", ""))) !== ""
+        if (($s = trim($sv->reqv("sub_banal_papersize$suffix") ?? "")) !== ""
             && strcasecmp($s, "any") !== 0
             && strcasecmp($s, "N/A") !== 0) {
             $ses = preg_split('/\s*,\s*|\s+OR\s+/i', $s);
@@ -98,7 +93,7 @@ class BanalSettings {
         }
 
         $cfs->pagelimit = null;
-        if (($s = trim($sv->reqv("sub_banal_pagelimit$suffix", ""))) !== ""
+        if (($s = trim($sv->reqv("sub_banal_pagelimit$suffix") ?? "")) !== ""
             && strcasecmp($s, "N/A") !== 0) {
             if (($sx = cvtint($s, -1)) > 0) {
                 $cfs->pagelimit = [0, $sx];
@@ -113,11 +108,11 @@ class BanalSettings {
 
         $cfs->unlimitedref = null;
         if ($cfs->pagelimit
-            && trim($sv->reqv("sub_banal_unlimitedref$suffix", "")) !== "")
+            && trim($sv->reqv("sub_banal_unlimitedref$suffix") ?? "") !== "")
             $cfs->unlimitedref = true;
 
         $cfs->columns = 0;
-        if (($s = trim($sv->reqv("sub_banal_columns$suffix", ""))) !== ""
+        if (($s = trim($sv->reqv("sub_banal_columns$suffix") ?? "")) !== ""
             && strcasecmp($s, "any") !== 0
             && strcasecmp($s, "N/A") !== 0) {
             if (($sx = cvtint($s, -1)) >= 0)
@@ -129,7 +124,7 @@ class BanalSettings {
         }
 
         $cfs->textblock = null;
-        if (($s = trim($sv->reqv("sub_banal_textblock$suffix", ""))) !== ""
+        if (($s = trim($sv->reqv("sub_banal_textblock$suffix") ?? "")) !== ""
             && strcasecmp($s, "any") !== 0
             && strcasecmp($s, "N/A") !== 0) {
             // change margin specifications into text block measurements
@@ -174,7 +169,7 @@ class BanalSettings {
         }
 
         $cfs->bodyfontsize = null;
-        if (($s = trim($sv->reqv("sub_banal_bodyfontsize$suffix", ""))) !== ""
+        if (($s = trim($sv->reqv("sub_banal_bodyfontsize$suffix") ?? "")) !== ""
             && strcasecmp($s, "any") !== 0
             && strcasecmp($s, "N/A") !== 0) {
             $cfs->bodyfontsize = FormatSpec::parse_range($s);
@@ -185,7 +180,7 @@ class BanalSettings {
         }
 
         $cfs->bodylineheight = null;
-        if (($s = trim($sv->reqv("sub_banal_bodylineheight$suffix", ""))) !== ""
+        if (($s = trim($sv->reqv("sub_banal_bodylineheight$suffix") ?? "")) !== ""
             && strcasecmp($s, "any") !== 0
             && strcasecmp($s, "N/A") !== 0) {
             $cfs->bodylineheight = FormatSpec::parse_range($s);
@@ -205,11 +200,12 @@ class BanalSettings {
         $opt_spec = new FormatSpec($sv->newv("sub_banal_opt$suffix"));
         $opt_unparse = $opt_spec->unparse_banal();
         $unparse = $cfs->unparse();
-        if ($unparse === $opt_unparse)
+        if ($unparse === $opt_unparse) {
             $unparse = "";
+        }
         $sv->save("sub_banal_data$suffix", $unparse);
         if ($old_unparse !== $unparse || $sv->oldv("sub_banal$suffix") <= 0) {
-            $sv->save("sub_banal$suffix", $unparse !== "" ? $Now : 0);
+            $sv->save("sub_banal$suffix", $unparse !== "" ? Conf::$now : 0);
         } else {
             $sv->save("sub_banal$suffix", $unparse === "" ? 0 : $sv->oldv("sub_banal$suffix"));
         }
@@ -229,17 +225,17 @@ class BanalSettings {
 
 class SubForm_SettingRenderer {
     static function render(SettingValues $sv) {
-        echo "<h3 class=\"form-h\">Abstract and PDF</h3>\n";
+        $sv->render_section("Abstract and PDF");
 
         echo '<div id="foldpdfupload" class="fold2o fold3o">';
         echo '<div class="f-i">',
             $sv->label("sub_noabstract", "Abstract requirement", ["class" => "n"]),
-            $sv->render_select("sub_noabstract", [0 => "Abstract required to register submission", 2 => "Abstract optional", 1 => "No abstract"]),
+            $sv->select("sub_noabstract", [0 => "Abstract required to register submission", 2 => "Abstract optional", 1 => "No abstract"]),
             '</div>';
 
         echo '<div class="f-i">',
             $sv->label("sub_nopapers", "PDF requirement", ["class" => "n"]),
-            $sv->render_select("sub_nopapers", [0 => "PDF required to complete submission", 2 => "PDF optional", 1 => "No PDF allowed"]),
+            $sv->select("sub_nopapers", [0 => "PDF required to complete submission", 2 => "PDF optional", 1 => "No PDF allowed"], ["class" => "uich js-settings-sub-nopapers"]),
             '<div class="f-h fx3">Registering a submission never requires a PDF.</div></div>';
 
         if (is_executable("src/banal")) {
@@ -249,37 +245,37 @@ class SubForm_SettingRenderer {
         }
 
         echo '</div>';
-        Ht::stash_script('function sub_nopapers_change() { var v = $("#sub_nopapers").val(); fold("pdfupload",v==1,2); fold("pdfupload",v!=0,3); } $("#sub_nopapers").on("change", sub_nopapers_change); $(sub_nopapers_change)');
 
-        echo "<h3 class=\"form-h\">Conflicts and collaborators</h3>\n",
-            '<div id="foldpcconf" class="form-g fold',
+        $sv->render_section("Conflicts and collaborators");
+        echo '<div id="foldpcconf" class="form-g fold',
             ($sv->curv("sub_pcconf") ? "o" : "c"), "\">\n";
         $sv->echo_checkbox("sub_pcconf", "Collect authors’ PC conflicts", ["class" => "uich js-foldup"]);
         $cflt = array();
         $confset = $sv->conf->conflict_types();
         foreach ($confset->basic_conflict_types() as $ct) {
-            $cflt[] = "“" . $confset->unparse_html($ct) . "”";
+            $cflt[] = "“" . $confset->unparse_html_description($ct) . "”";
         }
         $sv->echo_checkbox("sub_pcconfsel", "Collect PC conflict descriptions (" . commajoin($cflt, "or") . ")", ["group_class" => "fx"]);
-        $sv->echo_checkbox("sub_collab", "Collect authors’ other collaborators as text");
+        $sv->echo_checkbox("sub_collab", "Collect authors’ other conflicts and collaborators as text");
         echo "</div>\n";
 
         echo '<div class="form-g">';
-        $sv->echo_message_minor("msg.conflictdef", "Definition of conflict of interest");
+        $sv->echo_message_minor("conflict_description", "Definition of conflict of interest");
         echo "</div>\n";
 
         echo '<div class="form-g">', $sv->label("sub_pcconfvis", "When can reviewers see conflict information?"),
             '&nbsp; ',
-            $sv->render_select("sub_pcconfvis", [1 => "Never", 0 => "When authors or tracker are visible", 2 => "Always"]),
+            $sv->select("sub_pcconfvis", [1 => "Never", 0 => "When authors or tracker are visible", 2 => "Always"]),
             '</div>';
     }
 }
 
 class Banal_SettingParser extends SettingParser {
     function parse(SettingValues $sv, Si $si) {
-        if ($si->base_name === "sub_banal")
+        if ($si->base_name === "sub_banal") {
             return BanalSettings::parse(substr($si->name, 9), $sv, true);
-        else
+        } else {
             return false;
+        }
     }
 }

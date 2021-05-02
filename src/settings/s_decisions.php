@@ -1,18 +1,21 @@
 <?php
 // src/settings/s_decisions.php -- HotCRP settings > decisions page
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class Decisions_SettingParser extends SettingParser {
     static private function render_row(SettingValues $sv, $ndec, $k, $v, $isnew, $count) {
         $vx = $v;
         if ($ndec && $sv->use_req()) {
-            $vx = $sv->reqv("dec_name_$ndec", $v);
+            $vx = $sv->reqv("dec_name_$ndec") ?? $v;
         }
+        $editable = $sv->editable("decisions");
         echo '<tr><td class="lentry nw">',
-            Ht::entry("dec_name_$ndec", $vx, ["size" => 35, "placeholder" => "Decision name", "data-default-value" => $v]),
-            '</td><td class="lentry nw">',
-            '<a href="" class="ui js-settings-remove-decision-type btn qx need-tooltip" aria-label="Delete decision" tabindex="-1">✖</a>',
-            '</td><td>';
+            Ht::entry("dec_name_$ndec", $vx, ["size" => 35, "placeholder" => "Decision name", "data-default-value" => $v, "readonly" => !$editable]),
+            '</td>';
+        if ($editable) {
+            echo '<td class="lentry nw"><a href="" class="ui js-settings-remove-decision-type btn qx need-tooltip" aria-label="Delete decision" tabindex="-1">✖</a></td>';
+        }
+        echo '<td>';
         if ($isnew) {
             echo Ht::select("dec_class_$ndec",
                     [1 => "Accept class", -1 => "Reject class"],
@@ -36,7 +39,7 @@ class Decisions_SettingParser extends SettingParser {
         $decs_pcount = array();
         $result = $sv->conf->qe_raw("select outcome, count(*) from Paper where timeSubmitted>0 group by outcome");
         while (($row = $result->fetch_row())) {
-            $decs_pcount[$row[0]] = $row[1];
+            $decs_pcount[(int) $row[0]] = (int) $row[1];
         }
 
         // real decisions
@@ -47,7 +50,7 @@ class Decisions_SettingParser extends SettingParser {
         foreach ($sv->conf->decision_map() as $k => $v) {
             if ($k) {
                 ++$ndec;
-                self::render_row($sv, $ndec, $k, $v, false, get($decs_pcount, $k));
+                self::render_row($sv, $ndec, $k, $v, false, $decs_pcount[$k] ?? null);
             }
         }
         if ($sv->use_req()) {
@@ -59,9 +62,13 @@ class Decisions_SettingParser extends SettingParser {
             '<tr><td colspan="3" class="hint">Examples: “Accepted as short paper”, “Early reject”</td></tr>',
             '</tbody><tbody id="settings-new-decision-type" class="hidden">';
         self::render_row($sv, 0, 1, "", true, 0);
-        echo '</tbody></table><div class="mg">',
-            Ht::button("Add decision type", ["class" => "ui js-settings-add-decision-type"]),
-            "</div></div>\n";
+        echo '</tbody></table>';
+        if ($sv->editable("decisions")) {
+            echo '<div class="mg">',
+                Ht::button("Add decision type", ["class" => "ui js-settings-add-decision-type"]),
+                '</div>';
+        }
+        echo "</div>\n";
     }
 
     function parse(SettingValues $sv, Si $si) {
@@ -88,7 +95,7 @@ class Decisions_SettingParser extends SettingParser {
                 }
             }
         }
-        $sv->need_lock["Paper"] = true;
+        $sv->request_write_lock("Paper");
         return true;
     }
 

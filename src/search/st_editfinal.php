@@ -1,6 +1,6 @@
 <?php
 // search/st_editfinal.php -- HotCRP helper class for searching for papers
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class EditFinal_SearchTerm extends SearchTerm {
     function __construct() {
@@ -12,18 +12,14 @@ class EditFinal_SearchTerm extends SearchTerm {
         } else if (strcasecmp($word, "no") === 0) {
             return (new EditFinal_SearchTerm)->negate();
         } else {
-            $srch->warn("Only “editfinal:yes” and “editfinal:no” allowed.");
+            $srch->warning("Only “editfinal:yes” and “editfinal:no” allowed.");
             return new False_SearchTerm;
         }
     }
     function sqlexpr(SearchQueryInfo $sqi) {
-        $sqi->add_column("outcome", "Paper.outcome");
         return "(Paper.outcome>0)";
     }
-    function exec(PaperInfo $row, PaperSearch $srch) {
+    function test(PaperInfo $row, $rrow) {
         return $row->can_author_edit_final_paper();
-    }
-    function compile_condition(PaperInfo $row, PaperSearch $srch) {
-        return $this->exec($row, $srch);
     }
 }

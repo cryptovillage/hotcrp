@@ -1,9 +1,9 @@
 <?php
 // src/help/h_chairsguide.php -- HotCRP help functions
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class ChairsGuide_HelpTopic {
-    static function render_presubmission($hth, $gj) {
+    static function render_presubmission(HelpRenderer $hth, $gj) {
         if ($gj->itemid === -1) {
             echo $hth->subhead("Submission time");
             echo "<p>Follow these steps to prepare to accept submissions.</p>\n\n<ol>\n";
@@ -76,11 +76,11 @@ form also can include:</p>
 
         } else if ($gj->itemid === 6) {
             echo "<li><p><strong>", $hth->setting_link("Open the site for submissions.", "sub"),
-  "</strong> Submissions will be accepted only until the listed deadline.</p></li>\n";
+  "</strong> Submissions are allowed up to the listed deadline.</p></li>\n";
         }
     }
 
-    static function render_assignments($hth, $gj) {
+    static function render_assignments(HelpRenderer $hth, $gj) {
         if ($gj->itemid === -1) {
             echo $hth->subhead("Assignments");
             echo "<p>After the submission deadline has passed:</p>\n<ol>\n";
@@ -155,11 +155,11 @@ form also can include:</p>
   ".</p></li>\n";
 
         } else if ($gj->itemid === 9) {
-            echo "<li><p><strong>", $hth->setting_link("Open the site for reviewing.", "rev_open"), "</strong></p></li>\n";
+            echo "<li><p><strong>", $hth->setting_link("Enable review editing.", "rev_open"), "</strong></p></li>\n";
         }
     }
 
-    static function render_chair_conflicts($hth) {
+    static function render_chair_conflicts(HelpRenderer $hth) {
         echo $hth->subhead("Chair conflicts");
         echo "<p>Chairs and system administrators can access any information stored in the
 conference system, including reviewer identities for conflicted papers.
@@ -195,7 +195,7 @@ review tokens; then even web server access logs store only the
 administrator’s identity.</p>\n\n";
     }
 
-    static function render_premeeting($hth, $gj) {
+    static function render_premeeting(HelpRenderer $hth, $gj) {
         if ($gj->itemid === -1) {
             echo $hth->subhead("Before the meeting");
             echo "<ol>\n";
@@ -212,12 +212,11 @@ administrator’s identity.</p>\n\n";
   "; authors are informed via email of any review changes.</p></li>\n";
 
         } else if ($gj->itemid === 2) {
-            echo "<li><p>Set <strong>", $hth->setting_link("PC can see all reviews", "pc_seeallrev"),
-  "</strong> if you haven’t already, allowing the program
-  committee to see reviews and scores for
-  non-conflicted papers.  (During most conferences’ review periods, a PC member
-  can see a paper’s reviews only after completing their own
-  review for that paper.  This supposedly reduces bias.)</p></li>\n";
+            echo "<li><p>Set <strong>", $hth->setting_link("PC can see review contents", "pc_seeallrev"),
+  "</strong> to “Yes” (optional). This opens up the reviews to the program committee,
+  allowing everyone to see scores and read reviews for non-conflicted papers.
+  (During most conferences’ review periods, a PC member can see a paper’s reviews
+  only after completing their own review for that paper.)</p></li>\n";
 
         } else if ($gj->itemid === 3) {
             echo "<li><p><strong>", $hth->search_link("Examine paper scores", "show:scores"),
@@ -256,7 +255,7 @@ administrator’s identity.</p>\n\n";
     }
 
 
-    static function render_atmeeting($hth, $gj) {
+    static function render_atmeeting(HelpRenderer $hth, $gj) {
         if ($gj->itemid === -1) {
             echo $hth->subhead("At the meeting");
             echo "<ol>\n";
@@ -294,7 +293,7 @@ administrator’s identity.</p>\n\n";
         }
     }
 
-    static function render_postmeeting($hth, $gj) {
+    static function render_postmeeting(HelpRenderer $hth, $gj) {
         if ($gj->itemid === -1) {
             echo $hth->subhead("After the meeting");
             echo "<ol>\n";

@@ -1,9 +1,7 @@
 <?php
-$ConfSitePATH = preg_replace(',/batch/[^/]+,', '', __FILE__);
-require_once("$ConfSitePATH/src/init.php");
-require_once("$ConfSitePATH/lib/getopt.php");
+require_once(preg_replace('/\/batch\/[^\/]+/', '/src/init.php', __FILE__));
 
-$arg = getopt_rest($argv, "hn:qeV", array("help", "name:", "quiet", "extensions", "verbose"));
+$arg = Getopt::rest($argv, "hn:qeV", array("help", "name:", "quiet", "extensions", "verbose"));
 if (isset($arg["h"]) || isset($arg["help"])) {
     fwrite(STDOUT, "Usage: php batch/s3test.php [-q] [--extensions] [FILE...]\n");
     exit(0);
@@ -45,9 +43,10 @@ foreach ($arg["_"] as $fn) {
             $doc->mimetype = Mimetype::content_type($content);
         }
         $s3fn = $doc->s3_key();
-        if (!$s3doc->check($s3fn)) {
-            if (!$quiet)
+        if (!$s3doc->head($s3fn)) {
+            if (!$quiet) {
                 echo "$fn: $s3fn not found\n";
+            }
             $ok = 1;
         } else if ($verbose) {
             echo "$fn: $s3fn OK\n";

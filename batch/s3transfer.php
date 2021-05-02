@@ -6,8 +6,7 @@ if (isset($arg["h"]) || isset($arg["help"])) {
     exit(0);
 }
 
-$ConfSitePATH = preg_replace(',/batch/[^/]+,', '', __FILE__);
-require_once("$ConfSitePATH/src/init.php");
+require_once(preg_replace('/\/batch\/[^\/]+/', '/src/init.php', __FILE__));
 
 $active = false;
 if (isset($arg["a"]) || isset($arg["active"])) {
@@ -48,7 +47,7 @@ foreach ($sids as $sid) {
         continue;
     }
     $front = "[" . $Conf->unparse_time_log($doc->timestamp) . "] "
-        . $doc->export_filename() . " ($sid)";
+        . $doc->export_filename(DocumentInfo::ANY_MEMBER_FILENAME) . " ($sid)";
 
     $chash = $doc->content_binary_hash($doc->binary_hash());
     if ($chash !== $doc->binary_hash()) {

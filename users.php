@@ -1,6 +1,6 @@
 <?php
 // users.php -- HotCRP people listing/editing page
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 require_once("src/initweb.php");
 require_once("src/contactlist.php");
@@ -10,11 +10,8 @@ if ($Viewer->contactId && $Viewer->is_disabled()) {
     $Viewer = new Contact(["email" => $Viewer->email], $Conf);
 }
 
-$getaction = "";
-if (isset($Qreq->get)) {
-    $getaction = $Qreq->get;
-} else if (isset($Qreq->getgo) && isset($Qreq->getaction)) {
-    $getaction = $Qreq->getaction;
+if (isset($Qreq->default) && $Qreq->defaultact) {
+    $Qreq->fn = $Qreq->defaultact;
 }
 
 
@@ -45,7 +42,8 @@ if ($Viewer->privChair
 if ($Viewer->isPC) {
     $tOpt["req"] = "External reviewers you requested";
 }
-if ($Viewer->privChair || ($Viewer->isPC && $Conf->subBlindNever())) {
+if ($Viewer->privChair
+    || ($Viewer->isPC && $Conf->submission_blindness() === Conf::BLIND_NEVER)) {
     $tOpt["au"] = "Contact authors of submitted papers";
 }
 if ($Viewer->privChair
@@ -53,12 +51,14 @@ if ($Viewer->privChair
     $tOpt["auacc"] = "Contact authors of accepted papers";
 }
 if ($Viewer->privChair
-    || ($Viewer->isPC && $Conf->subBlindNever() && $Conf->time_pc_view_decision(true))) {
+    || ($Viewer->isPC
+        && $Conf->submission_blindness() === Conf::BLIND_NEVER
+        && $Conf->time_pc_view_decision(true))) {
     $tOpt["aurej"] = "Contact authors of rejected papers";
 }
 if ($Viewer->privChair) {
     $tOpt["auuns"] = "Contact authors of non-submitted papers";
-    $tOpt["all"] = "All users";
+    $tOpt["all"] = "Active users";
 }
 if (empty($tOpt)) {
     $Viewer->escape();
@@ -93,7 +93,7 @@ if (isset($Qreq->pap) && is_string($Qreq->pap)) {
     $Qreq->pap = preg_split('/\s+/', $Qreq->pap);
 }
 if ((isset($Qreq->pap) && is_array($Qreq->pap))
-    || ($getaction && !isset($Qreq->pap))) {
+    || ($Qreq->fn === "get" && !isset($Qreq->pap))) {
     $allowed_papers = array();
     $pl = new ContactList($Viewer, true);
     // Ensure that we only select contacts we're allowed to see.
@@ -114,48 +114,88 @@ if ((isset($Qreq->pap) && is_array($Qreq->pap))
     }
 }
 
-if ($getaction == "nameemail" && isset($papersel) && $Viewer->isPC) {
-    $result = $Conf->qe_raw("select firstName first, lastName last, email, affiliation from ContactInfo where " . paperselPredicate($papersel) . " order by lastName, firstName, email");
-    $people = [];
-    while (($row = $result->fetch_object())) {
-        $people[] = $row;
-    }
-    csv_exit($Conf->make_csvg("users")
-             ->select(["first", "last", "email", "affiliation"])
-             ->add($people));
-}
-
-if ($getaction == "pcinfo" && isset($papersel) && $Viewer->privChair) {
+if ($Qreq->fn === "get"
+    && $Qreq->getfn === "nameemail"
+    && isset($papersel)
+    && $Viewer->isPC) {
+    $result = $Conf->qe_raw("select * from ContactInfo where " . paperselPredicate($papersel));
     $users = [];
-    $result = $Conf->qe_raw("select ContactInfo.* from ContactInfo where " . paperselPredicate($papersel));
     while (($user = Contact::fetch($result, $Conf))) {
         $users[] = $user;
     }
     Dbl::free($result);
 
-    usort($users, "Contact::compare");
+    usort($users, $Conf->user_comparator());
+    Contact::ensure_contactdb_users($Conf, $users);
+
+    $texts = [];
+    $has_country = false;
+    foreach ($users as $u) {
+        $texts[] = $line = [
+            "first" => $u->firstName,
+            "last" => $u->lastName,
+            "email" => $u->email,
+            "affiliation" => $u->affiliation,
+            "country" => $u->country()
+        ];
+        $has_country = $has_country || $line["country"] !== "";
+    }
+    $header = ["first", "last", "email", "affiliation"];
+    if ($has_country) {
+        $header[] = "country";
+    }
+    $Conf->make_csvg("users")->select($header)->append($texts)->emit();
+    exit;
+}
+
+if ($Qreq->fn === "get"
+    && $Qreq->getfn === "pcinfo"
+    && isset($papersel)
+    && $Viewer->privChair) {
+    $result = $Conf->qe_raw("select * from ContactInfo where " . paperselPredicate($papersel));
+    $users = [];
+    while (($user = Contact::fetch($result, $Conf))) {
+        $users[] = $user;
+    }
+    Dbl::free($result);
+
+    usort($users, $Conf->user_comparator());
     Contact::load_topic_interests($users);
+    Contact::ensure_contactdb_users($Conf, $users);
 
     // NB This format is expected to be parsed by profile.php's bulk upload.
     $tagger = new Tagger($Viewer);
     $people = [];
+    $has_preferred_email = $has_tags = $has_topics =
+        $has_phone = $has_country = $has_disabled = false;
     $has = (object) [];
     foreach ($users as $user) {
-        $row = (object) ["first" => $user->firstName, "last" => $user->lastName,
-            "email" => $user->email, "phone" => $user->phone,
-            "disabled" => !!$user->is_disabled(), "affiliation" => $user->affiliation,
-            "collaborators" => rtrim($user->collaborators())];
+        $row = [
+            "first" => $user->firstName,
+            "last" => $user->lastName,
+            "email" => $user->email,
+            "affiliation" => $user->affiliation,
+            "country" => $user->country(),
+            "phone" => $user->phone(),
+            "disabled" => $user->is_disabled() ? "yes" : "",
+            "collaborators" => rtrim($user->collaborators())
+        ];
+        $has_country = $has_country || $row["country"] !== "";
+        $has_phone = $has_phone || ($row["phone"] ?? "") !== "";
+        $has_disabled = $has_disabled || $user->is_disabled();
         if ($user->preferredEmail && $user->preferredEmail !== $user->email) {
-            $row->preferred_email = $user->preferredEmail;
+            $row["preferred_email"] = $user->preferredEmail;
+            $has_preferred_email = true;
         }
         if ($user->contactTags) {
-            $row->tags = $tagger->unparse($user->contactTags);
+            $row["tags"] = $tagger->unparse($user->contactTags);
+            $has_tags = $has_tags || $row["tags"] !== "";
         }
         foreach ($user->topic_interest_map() as $t => $i) {
-            $k = "topic$t";
-            $row->$k = $i;
+            $row["topic$t"] = $i;
+            $has_topics = true;
         }
-        $f = array();
+        $f = [];
         if ($user->defaultWatch & Contact::WATCH_REVIEW) {
             $f[] = "reviews";
         }
@@ -169,10 +209,7 @@ if ($getaction == "pcinfo" && isset($papersel) && $Viewer->privChair) {
         if ($user->defaultWatch & Contact::WATCH_FINAL_SUBMIT_ALL) {
             $f[] = "allfinal";
         }
-        if (empty($f)) {
-            $f[] = "none";
-        }
-        $row->follow = join(",", $f);
+        $row["follow"] = empty($f) ? "none" : join(" ", $f);
         if ($user->roles & (Contact::ROLE_PC | Contact::ROLE_ADMIN | Contact::ROLE_CHAIR)) {
             $r = array();
             if ($user->roles & Contact::ROLE_CHAIR) {
@@ -184,81 +221,84 @@ if ($getaction == "pcinfo" && isset($papersel) && $Viewer->privChair) {
             if ($user->roles & Contact::ROLE_ADMIN) {
                 $r[] = "sysadmin";
             }
-            $row->roles = join(",", $r);
+            $row["roles"] = join(" ", $r);
         } else {
-            $row->roles = "";
+            $row["roles"] = "";
         }
         $people[] = $row;
-
-        foreach ((array) $row as $k => $v) {
-            if ($v !== null && $v !== false && $v !== "") {
-                $has->$k = true;
-            }
-        }
     }
 
-    $header = array("first", "last", "email");
-    if (isset($has->preferred_email)) {
+    $header = ["first", "last", "email", "affiliation"];
+    if ($has_country) {
+        $header[] = "country";
+    }
+    if ($has_phone) {
+        $header[] = "phone";
+    }
+    if ($has_disabled) {
+        $header[] = "disabled";
+    }
+    if ($has_preferred_email) {
         $header[] = "preferred_email";
     }
     $header[] = "roles";
-    if (isset($has->tags)) {
+    if ($has_tags) {
         $header[] = "tags";
     }
-    array_push($header, "affiliation", "collaborators", "follow");
-    if (isset($has->phone)) {
-        $header[] = "phone";
-    }
+    $header[] = "collaborators";
+    $header[] = "follow";
     $selection = $header;
-    foreach ($Conf->topic_set() as $t => $tn) {
-        $k = "topic$t";
-        if (isset($has->$k)) {
+    if ($has_topics) {
+        foreach ($Conf->topic_set() as $t => $tn) {
             $header[] = "topic: " . $tn;
-            $selection[] = $k;
+            $selection[] = "topic$t";
         }
     }
-    csv_exit($Conf->make_csvg("pcinfo")->select($selection, $header)->add($people));
+    $Conf->make_csvg("pcinfo")->select($selection, $header)->append($people)->emit();
+    exit;
 }
 
 
 // modifications
 function modify_confirm($j, $ok_message, $ok_message_optional) {
     global $Conf;
-    if (get($j, "ok") && get($j, "warnings")) {
+    if (($j->ok ?? false) && ($j->warnings ?? false)) {
         $Conf->warnMsg("<div>" . join('</div><div style="margin-top:0.5em">', $j->warnings) . "</div>");
     }
-    if (get($j, "ok")
+    if (($j->ok ?? false)
         && $ok_message
-        && (!$ok_message_optional || !get($j, "warnings"))
+        && (!$ok_message_optional || !($j->warnings ?? false))
         && (!isset($j->users) || !empty($j->users))) {
         $Conf->confirmMsg($ok_message);
     }
 }
 
-if ($Viewer->privChair && $Qreq->modifygo && $Qreq->post_ok() && isset($papersel)) {
-    if ($Qreq->modifytype == "disableaccount") {
+if ($Viewer->privChair
+    && $Qreq->fn === "modify"
+    && $Qreq->valid_post()
+    && isset($papersel)) {
+    if ($Qreq->modifyfn == "disableaccount") {
         modify_confirm(UserActions::disable($Viewer, $papersel), "Accounts disabled.", true);
-    } else if ($Qreq->modifytype == "enableaccount") {
+    } else if ($Qreq->modifyfn == "enableaccount") {
         modify_confirm(UserActions::enable($Viewer, $papersel), "Accounts enabled.", true);
-    } else if ($Qreq->modifytype == "sendaccount") {
+    } else if ($Qreq->modifyfn == "sendaccount") {
         modify_confirm(UserActions::send_account_info($Viewer, $papersel), "Account information sent.", false);
     }
-    unset($Qreq->modifygo, $Qreq->modifytype);
-    $Conf->self_redirect($Qreq);
+    unset($Qreq->fn, $Qreq->modifyfn);
+    $Conf->redirect_self($Qreq);
 }
 
 function do_tags($qreq) {
     global $Conf, $Viewer, $papersel;
     // check tags
     $tagger = new Tagger($Viewer);
-    $t1 = array();
-    $errors = array();
-    foreach (preg_split('/[\s,]+/', (string) $qreq->tag) as $t) {
+    $t1 = $errors = [];
+    foreach (preg_split('/[\s,;]+/', (string) $qreq->tag) as $t) {
         if ($t === "") {
             /* nada */
         } else if (!($t = $tagger->check($t, Tagger::NOPRIVATE))) {
-            $errors[] = $tagger->error_html;
-        } else if (TagInfo::base($t) === "pc") {
+            $errors[] = $tagger->error_html();
+        } else if (Tagger::base($t) === "pc") {
             $errors[] = "The “pc” user tag is set automatically for all PC members.";
         } else {
             $t1[] = $t;
@@ -271,50 +311,51 @@ function do_tags($qreq) {
     }
 
     // modify database
-    Dbl::qe("lock tables ContactInfo write, ActionLog write");
     Conf::$no_invalidate_caches = true;
     $users = array();
-    if ($qreq->tagtype === "s") {
+    if ($qreq->tagfn === "s") {
         // erase existing tags
         $likes = array();
         $removes = array();
         foreach ($t1 as $t) {
-            list($tag, $index) = TagInfo::unpack($t);
+            list($tag, $index) = Tagger::unpack($t);
             $removes[] = $t;
             $likes[] = "contactTags like " . Dbl::utf8ci("'% " . sqlq_for_like($tag) . "#%'");
         }
         foreach (Dbl::fetch_first_columns(Dbl::qe("select contactId from ContactInfo where " . join(" or ", $likes))) as $cid) {
-            $users[(int) $cid] = (object) array("id" => (int) $cid, "add_tags" => [], "remove_tags" => $removes);
+            $users[(int) $cid] = (object) ["id" => (int) $cid, "add_tags" => [], "remove_tags" => $removes];
         }
     }
     // account for request
-    $key = $qreq->tagtype === "d" ? "remove_tags" : "add_tags";
+    $key = $qreq->tagfn === "d" ? "remove_tags" : "add_tags";
     foreach ($papersel as $cid) {
         if (!isset($users[(int) $cid])) {
-            $users[(int) $cid] = (object) array("id" => (int) $cid, "add_tags" => [], "remove_tags" => []);
+            $users[(int) $cid] = (object) ["id" => (int) $cid, "add_tags" => [], "remove_tags" => []];
         }
         $users[(int) $cid]->$key = array_merge($users[(int) $cid]->$key, $t1);
     }
     // apply modifications
-    $us = new UserStatus($Viewer, ["no_notify" => true]);
+    $us = new UserStatus($Viewer);
     foreach ($users as $cid => $cj) {
         $us->save($cj);
     }
-    Dbl::qe("unlock tables");
     Conf::$no_invalidate_caches = false;
     $Conf->invalidate_caches(["pc" => true]);
     // report
     if (!$us->has_error()) {
         $Conf->confirmMsg("Tags saved.");
-        unset($qreq->tagact, $qreq->tag);
-        $Conf->self_redirect($qreq);
+        unset($qreq->fn, $qreq->tagfn);
+        $Conf->redirect_self($qreq);
     } else {
         Conf::msg_error($us->error_texts());
     }
 }
 
-if ($Viewer->privChair && $Qreq->tagact && $Qreq->post_ok() && isset($papersel)
-    && preg_match('/\A[ads]\z/', (string) $Qreq->tagtype)) {
+if ($Viewer->privChair
+    && $Qreq->fn === "tag"
+    && $Qreq->valid_post()
+    && isset($papersel)
+    && in_array($Qreq->tagfn, ["a", "d", "s"])) {
     do_tags($Qreq);
 }
 
@@ -333,7 +374,7 @@ if (isset($Qreq->redisplay)) {
         $sv[] = "ulscoresort=" . ListSorter::canonical_short_score_sort($Qreq->scoresort);
     }
     Session_API::setsession($Viewer, join(" ", $sv));
-    $Conf->self_redirect($Qreq);
+    $Conf->redirect_self($Qreq);
 }
 
 if ($Qreq->t === "pc") {
@@ -347,7 +388,7 @@ $Conf->header($title, "users", ["action_bar" => actionBar("account")]);
 
 
 $pl = new ContactList($Viewer, true, $Qreq);
-$pl_text = $pl->table_html($Qreq->t, hoturl("users", ["t" => $Qreq->t]),
+$pl_text = $pl->table_html($Qreq->t, $Conf->hoturl("users", ["t" => $Qreq->t]),
                      $tOpt[$Qreq->t], 'uldisplay.');
 
 
@@ -357,7 +398,7 @@ if (count($tOpt) > 1) {
     echo '<table id="contactsform">
 <tr><td><div class="tlx"><div class="tld is-tla active" id="tla-default">';
 
-    echo Ht::form(hoturl("users"), ["method" => "get"]);
+    echo Ht::form($Conf->hoturl("users"), ["method" => "get"]);
     if (isset($Qreq->sort)) {
         echo Ht::hidden("sort", $Qreq->sort);
     }
@@ -367,7 +408,7 @@ if (count($tOpt) > 1) {
     echo '</div><div class="tld is-tla" id="tla-view">';
 
     // Display options
-    echo Ht::form(hoturl("users"), ["method" => "get"]);
+    echo Ht::form($Conf->hoturl("users"), ["method" => "get"]);
     foreach (array("t", "sort") as $x) {
         if (isset($Qreq[$x]))
             echo Ht::hidden($x, $Qreq[$x]);
@@ -378,7 +419,7 @@ if (count($tOpt) > 1) {
     foreach (array("tags" => "Tags",
                    "aff" => "Affiliations", "collab" => "Collaborators",
                    "topics" => "Topics") as $fold => $text) {
-        if (get($pl->have_folds, $fold) !== null) {
+        if (($pl->have_folds[$fold] ?? null) !== null) {
             $k = array_search($fold, ContactList::$folds) + 1;
             echo Ht::checkbox("show$fold", 1, $pl->have_folds[$fold],
                               ["data-fold-target" => "foldul#$k", "class" => "uich js-foldup"]),
@@ -427,21 +468,21 @@ if (count($tOpt) > 1) {
 
 
 if ($Viewer->privChair && $Qreq->t == "pc") {
-    $Conf->infoMsg('<p><a href="' . hoturl("profile", "u=new&amp;role=pc") . '" class="btn">Create accounts</a></p>Select a PC member’s name to edit their profile or remove them from the PC.');
+    $Conf->infoMsg('<p><a href="' . $Conf->hoturl("profile", "u=new&amp;role=pc") . '" class="btn">Create accounts</a></p>Select a PC member’s name to edit their profile or remove them from the PC.');
 } else if ($Viewer->privChair && $Qreq->t == "all") {
-    $Conf->infoMsg('<p><a href="' . hoturl("profile", "u=new") . '" class="btn">Create accounts</a></p>Select a user to edit their profile.  Select ' . Ht::img("viewas.png", "[Act as]") . ' to view the site as that user would see it.');
+    $Conf->infoMsg('<p><a href="' . $Conf->hoturl("profile", "u=new") . '" class="btn">Create accounts</a></p>Select a user to edit their profile.  Select ' . Ht::img("viewas.png", "[Act as]") . ' to view the site as that user would see it.');
 }
 
 
 if ($pl->any->sel) {
-    echo Ht::form(hoturl_post("users", ["t" => $Qreq->t])),
+    echo Ht::form($Conf->hoturl_post("users", ["t" => $Qreq->t])),
         Ht::hidden("defaultact", "", ["id" => "defaultact"]),
         Ht::hidden_default_submit("default", 1);
     if (isset($Qreq->sort)) {
         echo Ht::hidden("sort", $Qreq->sort);
     }
 }
-echo $pl_text;
+echo Ht::unstash(), $pl_text;
 if ($pl->any->sel) {
     echo "</form>";
 }

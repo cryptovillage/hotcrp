@@ -1,8 +1,10 @@
 <?php
-$ConfSitePATH = preg_replace(',/batch/[^/]+,', '', __FILE__);
-require_once("$ConfSitePATH/lib/getopt.php");
+// updatecontactdb.php -- HotCRP maintenance script
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
-$arg = getopt_rest($argv, "hn:pu", ["help", "name:", "papers", "users", "collaborators"]);
+require_once(preg_replace('/\/batch\/[^\/]+/', '/src/siteloader.php', __FILE__));
+
+$arg = Getopt::rest($argv, "hn:pu", ["help", "name:", "papers", "users", "collaborators"]);
 if (isset($arg["h"]) || isset($arg["help"])
     || count($arg["_"]) > 1
     || (count($arg["_"]) && $arg["_"][0] !== "-" && $arg["_"][0][0] === "-")) {
@@ -18,7 +20,7 @@ if (!$users && !$papers && !$collaborators) {
     $users = $papers = true;
 }
 
-require_once("$ConfSitePATH/src/init.php");
+require_once(SiteLoader::find("src/init.php"));
 if (!$Conf->opt("contactdb_dsn")) {
     fwrite(STDERR, "Conference has no contactdb_dsn\n");
     exit(1);
@@ -51,7 +53,7 @@ if ($users) {
 
     // read current db roles
     Contact::$allow_nonexistent_properties = true;
-    $result = Dbl::ql($Conf->dblink, "select ContactInfo.contactId, email, firstName, lastName, unaccentedName, disabled, roles, password, passwordTime, passwordUseTime, creationTime, lastLogin,
+    $result = Dbl::ql($Conf->dblink, "select ContactInfo.contactId, email, firstName, lastName, unaccentedName, disabled, roles, password, passwordTime, passwordUseTime, lastLogin,
         exists (select * from PaperConflict where contactId=ContactInfo.contactId and conflictType>=" . CONFLICT_AUTHOR . ") __isAuthor__,
         exists (select * from PaperReview where contactId=ContactInfo.contactId) __hasReview__
         from ContactInfo");
@@ -64,14 +66,14 @@ if ($users) {
                 && preg_match('/\Aanonymous\d*\z/', $u->email))) {
             continue;
         }
-        $cdbu = get($cdb_users, $u->email);
+        $cdbu = $cdb_users[$u->email] ?? null;
         $cdbid = $cdbu ? (int) $cdbu->contactDbId : 0;
         if ($cdbu
             && (int) $cdbu->roles === $cdb_roles
             && $cdbu->activity_at) {
             /* skip */;
         } else if ($cdbu && $cdbu->password !== null) {
-            $qv[] = [$cdbid, $confid, $cdb_roles, $u->creationTime];
+            $qv[] = [$cdbid, $confid, $cdb_roles, $u->activity_at];
         } else {
             $cdbid = $u->contactdb_update();
         }

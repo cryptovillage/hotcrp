@@ -1,6 +1,6 @@
 <?php
 // log.php -- HotCRP action log
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 require_once("src/initweb.php");
 if (!$Me->is_manager()) {
@@ -44,7 +44,7 @@ if ($Qreq->p !== "") {
     $Search = new PaperSearch($Me, ["t" => "all", "q" => $Qreq->p]);
     $Search->set_allow_deleted(true);
     $include_pids = $Search->paper_ids();
-    foreach ($Search->warnings as $w) {
+    foreach ($Search->problem_texts() as $w) {
         Ht::warning_at("p", $w);
     }
     if (!empty($include_pids)) {
@@ -57,8 +57,9 @@ if ($Qreq->p !== "") {
         $wheres[] = "(" . join(" or ", $where) . ")";
         $include_pids = array_flip($include_pids);
     } else {
-        if (empty($Search->warnings))
+        if (!$Search->has_problem()) {
             Ht::warning_at("p", "No papers match that search.");
+        }
         $wheres[] = "false";
     }
 }
@@ -70,7 +71,7 @@ if ($Qreq->u !== "") {
         $flags = ContactSearch::F_TAG | ContactSearch::F_USER | ContactSearch::F_ALLOW_DELETED;
         if (substr($word, 0, 1) === "\"") {
             $flags |= ContactSearch::F_QUOTED;
-            $word = preg_replace(',(?:\A"|"\z),', "", $word);
+            $word = preg_replace('/(?:\A"|"\z)/', "", $word);
         }
         $Search = new ContactSearch($flags, $word, $Me);
         foreach ($Search->user_ids() as $id) {
@@ -147,6 +148,7 @@ class LogRow {
 }
 
 class LogRowGenerator {
+    /** @var Conf */
     private $conf;
     private $wheres;
     private $page_size;
@@ -172,7 +174,7 @@ class LogRowGenerator {
         $this->wheres = $wheres;
         $this->page_size = $page_size;
         $this->set_filter(null);
-        $this->users = $conf->pc_members_and_admins();
+        $this->users = $conf->pc_users();
         $this->need_users = [];
     }
 
@@ -359,7 +361,7 @@ class LogRowGenerator {
         unset($this->need_users[0]);
         $this->need_users = array_diff_key($this->need_users, $this->users);
         if (!empty($this->need_users)) {
-            $result = $this->conf->qe("select contactId, firstName, lastName, email, contactTags, roles from ContactInfo where contactId?a", array_keys($this->need_users));
+            $result = $this->conf->qe("select contactId, firstName, lastName, affiliation, email, roles, contactTags, disabled, primaryContactId from ContactInfo where contactId?a", array_keys($this->need_users));
             while (($user = Contact::fetch($result, $this->conf))) {
                 $this->users[$user->contactId] = $user;
                 unset($this->need_users[$user->contactId]);
@@ -368,10 +370,10 @@ class LogRowGenerator {
         }
         if (!empty($this->need_users)) {
             foreach ($this->need_users as $cid => $x) {
-                $user = $this->users[$cid] = new Contact(["contactId" => $cid, "disabled" => true], $this->conf);
+                $user = $this->users[$cid] = new Contact(["contactId" => $cid, "disabled" => 1], $this->conf);
                 $user->disabled = "deleted";
             }
-            $result = $this->conf->qe("select contactId, firstName, lastName, email, 1 disabled from DeletedContactInfo where contactId?a", array_keys($this->need_users));
+            $result = $this->conf->qe("select contactId, firstName, lastName, '' affiliation, email, 1 disabled from DeletedContactInfo where contactId?a", array_keys($this->need_users));
             while (($user = Contact::fetch($result, $this->conf))) {
                 $this->users[$user->contactId] = $user;
                 $user->disabled = "deleted";
@@ -382,7 +384,8 @@ class LogRowGenerator {
     }
 
     /** @param LogRow $row
-     * @param 'contactId'|'destContactId'|'trueContactId' $key */
+     * @param 'contactId'|'destContactId'|'trueContactId' $key
+     * @return list<Contact> */
     function users_for($row, $key) {
         if (!empty($this->need_users)) {
             $this->_make_users();
@@ -545,18 +548,19 @@ if ($Qreq->download) {
             foreach ($xusers as $u1) {
                 foreach ($xdest_users as $u2) {
                     foreach ($pids as $p) {
-                        $csvg->add([$date, $u1, $u2, $via, $p, $action]);
+                        $csvg->add_row([$date, $u1, $u2, $via, $p, $action]);
                     }
                 }
             }
         } else {
-            $csvg->add([
+            $csvg->add_row([
                 $date, join(" ", $xusers), join(" ", $xdest_users),
                 $via, join(" ", $pids), $action
             ]);
         }
     }
-    csv_exit($csvg);
+    $csvg->emit();
+    exit;
 }
 
 if ($first_timestamp) {
@@ -601,31 +605,32 @@ function searchbar(LogRowGenerator $lrg, $page) {
         $dplaceholder = $Conf->unparse_time((int) $first_timestamp);
     }
 
-    echo Ht::form(hoturl("log"), ["method" => "get", "id" => "searchform"]);
-    if ($Qreq->forceShow)
+    echo Ht::form(hoturl("log"), ["method" => "get", "id" => "searchform", "class" => "clearfix"]);
+    if ($Qreq->forceShow) {
         echo Ht::hidden("forceShow", 1);
+    }
     echo '<div class="d-inline-block" style="padding-right:2rem">',
         '<div class="', Ht::control_class("q", "entryi medium"),
         '"><label for="q">Concerning action(s)</label><div class="entry">',
+        Ht::feedback_at("q"),
         Ht::entry("q", $Qreq->q, ["id" => "q", "size" => 40]),
-        Ht::render_messages_at("q"),
         '</div></div><div class="', Ht::control_class("p", "entryi medium"),
         '"><label for="p">Concerning paper(s)</label><div class="entry">',
-        Ht::entry("p", $Qreq->p, ["id" => "p", "class" => "need-suggest papersearch", "autocomplete" => "off", "size" => 40]),
-        Ht::render_messages_at("p"),
+        Ht::feedback_at("p"),
+        Ht::entry("p", $Qreq->p, ["id" => "p", "class" => "need-suggest papersearch", "autocomplete" => "off", "size" => 40, "spellcheck" => false]),
         '</div></div><div class="', Ht::control_class("u", "entryi medium"),
         '"><label for="u">Concerning user(s)</label><div class="entry">',
+        Ht::feedback_at("u"),
         Ht::entry("u", $Qreq->u, ["id" => "u", "size" => 40]),
-        Ht::render_messages_at("u"),
         '</div></div><div class="', Ht::control_class("n", "entryi medium"),
         '"><label for="n">Show</label><div class="entry">',
         Ht::entry("n", $Qreq->n, ["id" => "n", "size" => 4, "placeholder" => 50]),
         '  records at a time',
-        Ht::render_messages_at("n"),
+        Ht::feedback_at("n"),
         '</div></div><div class="', Ht::control_class("date", "entryi medium"),
         '"><label for="date">Starting at</label><div class="entry">',
+        Ht::feedback_at("date"),
         Ht::entry("date", $date, ["id" => "date", "size" => 40, "placeholder" => $dplaceholder]),
-        Ht::render_messages_at("date"),
         '</div></div></div>',
         Ht::submit("Show"),
         Ht::submit("download", "Download", ["class" => "ml-3"]),
@@ -676,14 +681,16 @@ function searchbar(LogRowGenerator $lrg, $page) {
 // render rows
 $user_html = [];
 
+/** @param Contact $user */
 function set_user_html($user, $qreq_n) {
     global $Conf, $Me, $user_html;
     if (($pc = $Conf->pc_member_by_id($user->contactId))) {
         $user = $pc;
     }
-    $t = Text::name_html($user);
     if ($user->disabled === "deleted") {
-        $t = '<del>' . $t . ' &lt;' . htmlspecialchars($user->email) . '&gt;</del>';
+        $t = '<del>' . $user->name_h(NAME_E) . '</del>';
+    } else {
+        $t = $user->name_h(NAME_P);
     }
     $dt = null;
     if (($viewable = $user->viewable_tags($Me))) {
@@ -711,6 +718,7 @@ function set_user_html($user, $qreq_n) {
     return $t;
 }
 
+/** @param list<Contact> $users */
 function render_users($users, $via) {
     global $Conf, $Qreq, $Me, $user_html;
     if (empty($users) && $via < 0) {
@@ -718,15 +726,19 @@ function render_users($users, $via) {
     }
     $all_pc = true;
     $ts = [];
-    usort($users, "Contact::compare");
+    $last_user = null;
+    usort($users, $Conf->user_comparator());
     foreach ($users as $user) {
+        if ($user === $last_user) {
+            continue;
+        }
         if ($all_pc
             && (!isset($user->roles) || !($user->roles & Contact::ROLE_PCLIKE))) {
             $all_pc = false;
         }
         if ($user->disabled === "deleted") {
             if ($user->email) {
-                $t = '<del>' . Text::name_html($user) . ' &lt;' . htmlspecialchars($user->email) . '&gt;</del>';
+                $t = '<del>' . $user->name_h(NAME_E) . '</del>';
             } else {
                 $t = '<del>[deleted user ' . $user->contactId . ']</del>';
             }
@@ -741,6 +753,7 @@ function render_users($users, $via) {
             }
         }
         $ts[] = $t;
+        $last_user = $user;
     }
     if (count($ts) <= 3) {
         return join(", ", $ts);

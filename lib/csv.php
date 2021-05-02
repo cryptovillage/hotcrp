@@ -1,10 +1,9 @@
 <?php
 // csv.php -- HotCRP CSV parsing functions
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 if (!function_exists("gmp_init")) {
-    global $ConfSitePATH;
-    require_once("$ConfSitePATH/lib/polyfills.php");
+    require_once(SiteLoader::find("lib/polyfills.php"));
 }
 
 class CsvRow implements ArrayAccess, IteratorAggregate, Countable, JsonSerializable {
@@ -19,14 +18,16 @@ class CsvRow implements ArrayAccess, IteratorAggregate, Countable, JsonSerializa
         $this->csvp = $csvp;
     }
     function offsetExists($offset) {
-        if (!array_key_exists($offset, $this->a)) {
-            $offset = $this->csvp->column($offset);
+        if (is_string($offset)
+            && ($i = $this->csvp->column($offset)) >= 0) {
+            $offset = $i;
         }
         return isset($this->a[$offset]);
     }
     function& offsetGet($offset) {
-        if (!array_key_exists($offset, $this->a)) {
-            $offset = $this->csvp->column($offset, true);
+        if (is_string($offset)
+            && ($i = $this->csvp->column($offset, true)) >= 0) {
+            $offset = $i;
         }
         $x = null;
         if (isset($this->a[$offset])) {
@@ -35,20 +36,24 @@ class CsvRow implements ArrayAccess, IteratorAggregate, Countable, JsonSerializa
         return $x;
     }
     function offsetSet($offset, $value) {
-        if (!array_key_exists($offset, $this->a)
+        if (is_string($offset)
             && ($i = $this->csvp->column($offset, true)) >= 0) {
             $offset = $i;
         }
         $this->a[$offset] = $value;
     }
     function offsetUnset($offset) {
-        if (!array_key_exists($offset, $this->a)) {
-            $offset = $this->csvp->column($offset);
+        if (is_string($offset)
+            && ($i = $this->csvp->column($offset)) >= 0) {
+            $offset = $i;
         }
         unset($this->a[$offset]);
     }
     function getIterator() {
-        return new ArrayIterator($this->as_map());
+        foreach ($this->a as $i => $v) {
+            $offset = is_int($i) ? $this->csvp->column_at($i) : $i;
+            yield $offset => $v;
+        }
     }
     /** @return int */
     function count() {
@@ -58,7 +63,7 @@ class CsvRow implements ArrayAccess, IteratorAggregate, Countable, JsonSerializa
         return $this->as_map();
     }
     /** @return list<string> */
-    function as_array() {
+    function as_list() {
         return $this->a;
     }
     /** @return array<int|string,string> */
@@ -67,21 +72,35 @@ class CsvRow implements ArrayAccess, IteratorAggregate, Countable, JsonSerializa
     }
 }
 
-class CsvParser {
+class CsvParser implements Iterator {
+    /** @var ?string */
+    private $filename;
     /** @var list<string|list<string>> */
     private $lines;
     /** @var int */
     private $lpos = 0;
+    /** @var int */
     private $type;
     private $typefn;
-    /** @var false|list<string> */
-    private $header = false;
+    /** @var list<string> */
+    private $header = [];
+    /** @var list<string|int> */
+    private $xheader = [];
     /** @var array<string,int> */
     private $hmap = [];
-    private $comment_chars = false;
+    /** @var ?string */
+    private $comment_chars;
     private $comment_function;
+    /** @var GMP */
     private $used;
+    /** @var int */
     private $nused = 0;
+    /** @var int */
+    private $_rewind_pos = 0;
+    /** @var ?CsvRow */
+    private $_current;
+    /** @var ?int */
+    private $_current_pos = 0;
 
     const TYPE_COMMA = 1;
     const TYPE_PIPE = 2;
@@ -89,11 +108,12 @@ class CsvParser {
     const TYPE_TAB = 4;
     const TYPE_DOUBLEBAR = 8;
     const TYPE_GUESS = 7;
+    const TYPE_HEADER = 16;
 
     /** @param string $str
      * @return list<string> */
     static public function split_lines($str) {
-        $b = array();
+        $b = [];
         foreach (preg_split('/([^\r\n]*(?:\z|\r\n?|\n))/', $str, 0, PREG_SPLIT_DELIM_CAPTURE) as $line) {
             if ($line !== "")
                 $b[] = $line;
@@ -105,12 +125,16 @@ class CsvParser {
      * @param int $type */
     function __construct($str, $type = self::TYPE_COMMA) {
         $this->lines = is_array($str) ? $str : self::split_lines($str);
-        $this->set_type($type);
+        $this->set_type($type & ~self::TYPE_HEADER);
         $this->used = gmp_init("0");
+        if ($type & self::TYPE_HEADER) {
+            $this->set_header($this->next_list());
+        }
     }
 
+    /** @param int $type */
     private function set_type($type) {
-        $this->type = $type;
+        $this->type = $type ? : self::TYPE_COMMA;
         if ($this->type === self::TYPE_COMMA) {
             $this->typefn = "parse_comma";
         } else if ($this->type === self::TYPE_BAR) {
@@ -124,6 +148,12 @@ class CsvParser {
         }
     }
 
+    /** @param ?string $fn */
+    function set_filename($fn) {
+        $this->filename = $fn;
+    }
+
+    /** @param string $s */
     function set_comment_chars($s) {
         $this->comment_chars = $s;
     }
@@ -132,6 +162,7 @@ class CsvParser {
         $this->comment_function = $f;
     }
 
+    /** @return list<string> */
     function header() {
         return $this->header;
     }
@@ -139,14 +170,13 @@ class CsvParser {
     /** @param list<string>|CsvRow $header */
     function set_header($header) {
         if ($header && $header instanceof CsvRow) {
-            $header = $header->as_array();
+            $header = $header->as_list();
         }
         $this->header = $header;
 
         // The column map defaults to mapping header field names to field indexes.
         // Exceptions:
-        // - Field names that could be mistaken for field indexes are ignored
-        //   (so “0” will never be used as a field name; “2019” might be).
+        // - Empty field names are ignored.
         // - If all field names are case-insensitive, then lower-case versions
         //   are also available (“PaperID” -> “paperid”).
         // - Field names that contain spaces are also available with underscores
@@ -156,10 +186,8 @@ class CsvParser {
             $has_lchmap = true;
             foreach ($header as $i => $s) {
                 $s = (string) $s;
-                if ($s !== ""
-                    && (!ctype_digit($s)
-                        || ($s[0] === "0" && $s !== "0")
-                        || (int) $s > count($header))) {
+                if ($s !== "") {
+                    $hmap[$s] = $i;
                     if ($has_lchmap) {
                         $lcs = strtolower($s);
                         if (!isset($lchmap[$lcs])) {
@@ -168,11 +196,6 @@ class CsvParser {
                             $has_lchmap = false;
                         }
                     }
-                    $hmap[$s] = $i;
-                }
-                $hmap[$i] = $i;
-                if ($has_lchmap) {
-                    $lchmap[$i] = $i;
                 }
             }
             if ($has_lchmap) {
@@ -182,9 +205,7 @@ class CsvParser {
             foreach ($hmap as $s => $i) {
                 if (strpos($s, " ") !== false) {
                     $s = str_replace(" ", "_", simplify_whitespace($s));
-                    if ($s !== ""
-                        && !ctype_digit($s)
-                        && !isset($this->hmap[$s])) {
+                    if ($s !== "" && !isset($this->hmap[$s])) {
                         $this->hmap[$s] = $i;
                     }
                 }
@@ -193,13 +214,22 @@ class CsvParser {
         } else {
             $this->hmap = [];
         }
+
+        $this->xheader = [];
+        foreach ($this->header ?? [] as $i => $v) {
+            $this->xheader[] = $v !== "" ? $v : $i;
+        }
+
+        $this->_rewind_pos = $this->lpos;
     }
 
     /** @param string $dst
-     * @param string $src */
+     * @param int|string $src
+     * @return bool */
     function add_synonym($dst, $src) {
-        if (!isset($this->hmap[$dst]) && isset($this->hmap[$src])) {
-            $this->hmap[$dst] = $this->hmap[$src];
+        if (!isset($this->hmap[$dst])
+            && (is_int($src) || isset($this->hmap[$src]))) {
+            $this->hmap[$dst] = is_int($src) ? $src : $this->hmap[$src];
             return true;
         } else {
             return false;
@@ -209,12 +239,10 @@ class CsvParser {
     /** @param int|string $offset
      * @return int */
     function column($offset, $mark_use = false) {
-        if (isset($this->hmap[$offset])) {
-            $offset = $this->hmap[$offset];
-        } else if (!is_int($offset) && $offset >= 0) {
-            $offset = -1;
+        if (is_string($offset)) {
+            $offset = $this->hmap[$offset] ?? -1;
         }
-        if ($offset !== -1 && $mark_use) {
+        if ($offset >= 0 && $mark_use) {
             gmp_setbit($this->used, $offset);
         }
         return $offset;
@@ -223,31 +251,34 @@ class CsvParser {
     /** @param int|string $offset
      * @return bool */
     function has_column($offset) {
-        $c = $this->column($offset);
+        $c = is_int($offset) ? $offset : ($this->hmap[$offset] ?? -1);
         return $c >= 0 && $c < count($this->header);
     }
 
     /** @param int|string $offset
      * @return bool */
     function column_used($offset) {
-        $c = $this->column($offset);
+        $c = is_int($offset) ? $offset : ($this->hmap[$offset] ?? -1);
         return $c >= 0 && gmp_testbit($this->used, $c);
     }
 
     /** @param int|string $offset
      * @return int|string */
     function column_name($offset) {
-        $c = $this->column($offset);
-        if ($c >= 0 && $c < count($this->header)) {
-            $h = $this->header[$c];
-            if ((string) $h !== "") {
-                return (string) $h;
-            } else {
-                return (string) $c;
-            }
+        if (is_string($offset)) {
+            $offset = $this->hmap[$offset] ?? -1;
+        }
+        if ($offset >= 0 && ($h = $this->header[$offset] ?? "") !== "") {
+            return $h;
         } else {
             return $offset;
         }
+    }
+
+    /** @param int $offset
+     * @return int|string */
+    function column_at($offset) {
+        return $this->xheader[$offset] ?? $offset;
     }
 
     /** @return int */
@@ -255,12 +286,13 @@ class CsvParser {
         return $this->nused;
     }
 
-    /** @return array|false */
+    /** @param ?array $a
+     * @return ?array */
     function as_map($a) {
-        if ($this->header && is_array($a)) {
+        if (!empty($this->header) && is_array($a)) {
             $b = [];
             foreach ($a as $i => $v) {
-                $offset = get_s($this->header, $i);
+                $offset = $this->header[$i] ?? "";
                 $b[$offset === "" ? $i : $offset] = $v;
             }
             return $b;
@@ -282,50 +314,74 @@ class CsvParser {
         return $len;
     }
 
+    /** @return ?string */
+    function filename() {
+        return $this->filename;
+    }
+
     /** @return int */
     function lineno() {
         return $this->lpos;
     }
 
-    /** @return array|false */
-    function next() {
-        return $this->next_map();
+    /** @return string */
+    function landmark() {
+        if (($this->filename ?? "") !== "") {
+            return "line {$this->lpos}";
+        } else {
+            return "{$this->filename}:{$this->lpos}";
+        }
     }
 
-    /** @return list<string>|false */
-    function next_array() {
-        while ($this->lpos < count($this->lines)) {
+    /** @return string */
+    function landmark_html() {
+        return htmlspecialchars($this->landmark());
+    }
+
+    /** @return bool */
+    private function skip_empty() {
+        $nl = count($this->lines);
+        while ($this->lpos !== $nl) {
             $line = $this->lines[$this->lpos];
-            ++$this->lpos;
             if (is_array($line)) {
-                $a = $line;
+                return true;
             } else if ($line === "" || $line[0] === "\n" || $line[0] === "\r") {
-                continue;
-            } else if ($this->comment_chars
+                // skip
+            } else if ($this->comment_chars !== null
                        && strpos($this->comment_chars, $line[0]) !== false) {
                 if ($this->comment_function) {
                     call_user_func($this->comment_function, $line, $this);
                 }
-                continue;
             } else {
-                $fn = $this->typefn;
-                $a = $this->$fn($line);
+                return true;
             }
-            $this->nused = max($this->nused, count($a));
-            return $a;
+            ++$this->lpos;
         }
         return false;
     }
 
-    /** @return CsvRow|false */
-    function next_row() {
-        $a = $this->next_array();
-        return $a === false ? false : new CsvRow($this, $a);
+    /** @return ?list<string> */
+    function next_list() {
+        if ($this->skip_empty()) {
+            $line = $this->lines[$this->lpos];
+            ++$this->lpos;
+            $a = is_array($line) ? $line : $this->{$this->typefn}($line);
+            $this->nused = max($this->nused, count($a));
+            return $a;
+        } else {
+            return null;
+        }
     }
 
-    /** @return array|false */
+    /** @return ?CsvRow */
+    function next_row() {
+        $a = $this->next_list();
+        return $a !== null ? new CsvRow($this, $a) : null;
+    }
+
+    /** @return ?array */
     function next_map() {
-        return $this->as_map($this->next_array());
+        return $this->as_map($this->next_list());
     }
 
     /** @param null|false|string|list<string> $line */
@@ -462,40 +518,91 @@ class CsvParser {
         }
         return $a;
     }
+
+    /** @return CsvRow */
+    function current() {
+        if ($this->_current === null) {
+            $this->_current = $this->next_row();
+        }
+        return $this->_current;
+    }
+
+    /** @return int */
+    function key() {
+        return $this->_current_pos;
+    }
+
+    /** @return void */
+    function next() {
+        if ($this->_current === null) {
+            $this->next_list();
+        }
+        $this->skip_empty();
+        $this->_current = null;
+        $this->_current_pos = $this->lpos;
+    }
+
+    /** @return void */
+    function rewind() {
+        $this->lpos = $this->_rewind_pos;
+        $this->skip_empty();
+        $this->_current = null;
+        $this->_current_pos = $this->lpos;
+    }
+
+    /** @return bool */
+    function valid() {
+        return $this->lpos !== count($this->lines);
+    }
 }
 
 class CsvGenerator {
     const TYPE_COMMA = 0;
     const TYPE_PIPE = 1;
     const TYPE_TAB = 2;
+    const TYPE_STRING = 3;
     const FLAG_TYPE = 3;
-    const FLAG_ALWAYS_QUOTE = 4;
-    const FLAG_CRLF = 8;
-    const FLAG_CR = 16;
+    const FLAG_ALWAYS_QUOTE = 8;
+    const FLAG_CRLF = 16;
+    const FLAG_CR = 32;
     const FLAG_LF = 0;
-    const FLAG_ITEM_COMMENTS = 32;
+    const FLAG_ITEM_COMMENTS = 64;
     const FLAG_HEADERS = 256;
-    const FLAG_FLUSHED = 512;
+    const FLAG_HTTP_HEADERS = 512;
+    const FLAG_FLUSHED = 1024;
 
+    /** @var int */
     private $type;
+    /** @var int */
     private $flags;
+    /** @var string */
     private $headerline = "";
+    /** @var list<string> */
     private $lines = [];
+    /** @var int */
     private $lines_length = 0;
     private $stream;
     private $stream_filename;
+    /** @var int */
     private $stream_length = 0;
     private $selection;
     private $selection_is_names = false;
+    /** @var string */
     private $lf = "\n";
+    /** @var string */
     private $comment = "# ";
+    /** @var ?bool */
     private $inline;
     private $filename;
 
+    /** @param string $text
+     * @return string */
     static function always_quote($text) {
         return '"' . str_replace('"', '""', $text) . '"';
     }
 
+    /** @param string $text
+     * @return string */
     static function quote($text, $quote_empty = false) {
         if ($text === "") {
             return $quote_empty ? '""' : $text;
@@ -506,6 +613,8 @@ class CsvGenerator {
         }
     }
 
+    /** @param list<string> $array
+     * @return string */
     static function quote_join($array, $quote_empty = false) {
         $x = [];
         foreach ($array as $t) {
@@ -515,7 +624,9 @@ class CsvGenerator {
     }
 
 
+    /** @param int $flags */
     function __construct($flags = self::TYPE_COMMA) {
+        assert($flags === ($flags & 255));
         $this->type = $flags & self::FLAG_TYPE;
         $this->flags = $flags & 255;
         if ($this->flags & self::FLAG_CRLF) {
@@ -525,26 +636,28 @@ class CsvGenerator {
         }
     }
 
+    /** @param list<string>|array<string,string> $selection
+     * @param null|false|true|list<string> $header
+     * @return $this */
     function select($selection, $header = null) {
         assert($this->lines_length === 0 && !($this->flags & self::FLAG_FLUSHED));
+        assert(($this->flags & self::FLAG_TYPE) !== self::TYPE_STRING);
         if ($header === false || $header === []) {
             $this->selection = $selection;
         } else if ($header === true) {
-            $this->add($selection);
+            $this->add_row($selection);
             $this->selection = $selection;
         } else if ($header !== null) {
             assert(is_array($selection) && !is_associative_array($selection)
                    && is_array($header) && !is_associative_array($header)
                    && count($selection) === count($header));
-            $this->add($header);
+            $this->add_row($header);
             $this->selection = $selection;
         } else if (is_associative_array($selection)) {
-            assert($header === null);
-            $this->add(array_values($selection));
+            $this->add_row(array_values($selection));
             $this->selection = array_keys($selection);
         } else {
-            assert($header === null);
-            $this->add($selection);
+            $this->add_row($selection);
             $this->selection = $selection;
         }
         $this->selection_is_names = true;
@@ -561,12 +674,18 @@ class CsvGenerator {
         return $this;
     }
 
+    /** @param string $filename
+     * @return $this */
     function set_filename($filename) {
         $this->filename = $filename;
+        return $this;
     }
 
+    /** @param bool $inline
+     * @return $this */
     function set_inline($inline) {
         $this->inline = $inline;
+        return $this;
     }
 
 
@@ -626,8 +745,16 @@ class CsvGenerator {
         return $this;
     }
 
+    /** @param list<string> $texts
+     * @return $this */
+    function append_strings($texts) {
+        foreach ($texts as $t) {
+            $this->add_string($t);
+        }
+        return $this;
+    }
+
     private function _flush_stream() {
-        global $Now;
         if ($this->stream === null) {
             $this->stream = false;
             if (($dir = Filer::docstore_tmpdir() ?? tempdir())) {
@@ -635,7 +762,7 @@ class CsvGenerator {
                     $dir .= "/";
                 }
                 for ($i = 0; $i !== 100; ++$i) {
-                    $fn = $dir . "csvtmp-$Now-" . mt_rand(0, 99999999) . ".csv";
+                    $fn = $dir . "csvtmp-" . time() . "-" . mt_rand(0, 99999999) . ".csv";
                     if (($this->stream = @fopen($fn, "xb"))) {
                         $this->stream_filename = $fn;
                         break;
@@ -644,7 +771,24 @@ class CsvGenerator {
             }
         }
         if ($this->stream !== false) {
-            $this->stream_length += $this->flush($this->stream);
+            $n = 0;
+            if ($this->headerline !== "") {
+                $n += fwrite($this->stream, $this->headerline);
+                $this->flags |= self::FLAG_FLUSHED;
+            }
+            if (!empty($this->lines)) {
+                if ($this->lines_length <= 10000000) {
+                    $n += fwrite($this->stream, join("", $this->lines));
+                } else {
+                    foreach ($this->lines as $line) {
+                        $n += fwrite($this->stream, $line);
+                    }
+                }
+            }
+            $this->headerline = "";
+            $this->lines = [];
+            $this->lines_length = 0;
+            $this->stream_length += $n;
         }
     }
 
@@ -661,22 +805,12 @@ class CsvGenerator {
         return $this;
     }
 
-    /** @return $this */
-    function add($row) {
-        if (is_string($row)) {
-            error_log("unexpected CsvGenerator::add(string): " . json_encode(debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS)));
-            $this->add_string($row);
-            return $this;
-        } else if (empty($row)) {
-            return $this;
-        }
-        reset($row);
-        if (is_array(current($row)) || is_object(current($row))) {
-            foreach ($row as $x) {
-                $this->add($x);
-            }
-        } else {
+    /** @param list<string|int|float>|array<string,string|int|float> $row
+     * @return $this */
+    function add_row($row) {
+        if (!empty($row)) {
             $is_array = is_array($row);
+            assert(is_array($row));
             if (!$is_array) {
                 $row = (array) $row;
             }
@@ -718,6 +852,15 @@ class CsvGenerator {
         return $this;
     }
 
+    /** @param list<list<string|int|float>>|list<array<string,string|int|float>> $rows
+     * @return $this */
+    function append($rows) {
+        foreach ($rows as $row) {
+            $this->add_row($row);
+        }
+        return $this;
+    }
+
     /** @param int $flags
      * @return $this */
     function sort($flags = SORT_REGULAR) {
@@ -734,16 +877,19 @@ class CsvGenerator {
     }
 
 
-    function download_headers() {
+    /** @return string */
+    function mimetype_with_charset() {
         if ($this->is_csv()) {
-            header("Content-Type: text/csv; charset=utf-8; header=" . ($this->flags & self::FLAG_HEADERS ? "present" : "absent"));
+            return "text/csv; charset=utf-8; header=" . ($this->flags & self::FLAG_HEADERS ? "present" : "absent");
         } else {
-            header("Content-Type: text/plain; charset=utf-8");
+            return "text/plain; charset=utf-8";
         }
-        $inline = $this->inline;
-        if ($inline === null) {
-            $inline = Mimetype::disposition_inline($this->is_csv() ? "text/csv" : "text/plain");
-        }
+    }
+
+    function export_headers() {
+        assert(($this->flags & self::FLAG_HTTP_HEADERS) === 0);
+        $this->flags |= self::FLAG_HTTP_HEADERS;
+        $inline = $this->inline ?? Mimetype::disposition_inline($this->is_csv() ? "text/csv" : "text/plain");
         $filename = $this->filename;
         if (!$filename) {
             $filename = "data" . $this->extension();
@@ -753,41 +899,15 @@ class CsvGenerator {
         header("X-Content-Type-Options: nosniff");
     }
 
-    /** @return int */
-    function flush($stream = null) {
-        $n = 0;
-        if ($stream === null) {
-            $stream = fopen("php://output", "wb");
+    function emit() {
+        if (($this->flags & self::FLAG_HTTP_HEADERS) === 0) {
+            $this->export_headers();
         }
-        if ($this->headerline !== "") {
-            $n += fwrite($stream, $this->headerline);
-            $this->flags |= self::FLAG_FLUSHED;
-        }
-        if (!empty($this->lines)) {
-            if ($this->lines_length <= 10000000) {
-                $n += fwrite($stream, join("", $this->lines));
-            } else {
-                foreach ($this->lines as $line) {
-                    $n += fwrite($stream, $line);
-                }
-            }
-        }
-        $this->headerline = "";
-        $this->lines = [];
-        $this->lines_length = 0;
-        return $n;
-    }
-
-    function download() {
-        global $zlib_output_compression;
         if ($this->stream) {
-            $this->flush($this->stream);
-            Filer::download_file($this->stream_filename);
+            $this->_flush_stream();
+            Filer::download_file($this->stream_filename, $this->mimetype_with_charset());
         } else {
-            if (!($this->flags & self::FLAG_FLUSHED) && !$zlib_output_compression) {
-                header("Content-Length: " . $this->lines_length);
-            }
-            $this->flush();
+            Filer::download_string($this->unparse(), $this->mimetype_with_charset());
         }
     }
 }

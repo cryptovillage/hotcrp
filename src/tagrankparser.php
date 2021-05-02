@@ -1,6 +1,6 @@
 <?php
 // tagrankparser.php -- HotCRP offline rank parsing
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class TagRankParser {
     /** @var Contact */
@@ -23,12 +23,13 @@ class TagRankParser {
         } else {
             $csv = new CsvParser($text, CsvParser::TYPE_GUESS);
             $csv->set_comment_chars("%#");
+            $csv->set_filename($filename);
         }
         $csva = [["paper", "action", "tag", "landmark", "message"]];
 
         if (!$csv->header()) {
-            if (!($req = $csv->next_array())) {
-                $csva[] = ["", "error", "", $filename, "Empty file."];
+            if (!($req = $csv->next_list())) {
+                $csva[] = ["", "error", "", $csv->filename(), "Empty file."];
                 return $csva;
             }
             if (!preg_grep('/\A(?:paper|pid|tag|index|action)\z/', $req)) {
@@ -48,18 +49,12 @@ class TagRankParser {
         $tagger = new Tagger($this->user);
         $tag = $this->tag;
         $curIndex = 0;
-        while (($row = $csv->next_row()) !== false) {
+        while (($row = $csv->next_row())) {
             if (empty($row) || !isset($row["paper"]) || !isset($row["action"])) {
                 continue;
             }
 
-            if ($filename === false) {
-                $landmark = "";
-            } else if ($filename === null || $filename === "") {
-                $landmark = "line " . $csv->lineno();
-            } else {
-                $landmark = $filename . ":" . $csv->lineno();
-            }
+            $landmark = $filename !== false ? $csv->landmark() : "";
             $idxs = trim($row["action"]);
             $pid = trim($row["paper"]);
             if ($idxs === "tag") {
@@ -67,14 +62,14 @@ class TagRankParser {
                     $tag = $t;
                     $curIndex = 0;
                 } else {
-                    $settings[] = [null, null, $landmark, "Bad tag: $tagger->error_html", null];
+                    $settings[] = [null, null, $landmark, "Bad tag: " . $tagger->error_html(), null];
                 }
             } else if ($pid === "tag") {
                 if (($t = $tagger->check($idxs, Tagger::NOVALUE))) {
                     $tag = $t;
                     $curIndex = 0;
                 } else {
-                    $settings[] = [null, null, $landmark, "Bad tag: $tagger->error_html", null];
+                    $settings[] = [null, null, $landmark, "Bad tag: " . $tagger->error_html(), null];
                 }
             } else {
                 if ($idxs === "X" || $idxs === "x" || $idxs === "clear") {

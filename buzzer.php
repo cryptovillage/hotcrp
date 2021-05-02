@@ -6,7 +6,6 @@
 require_once("src/initweb.php");
 
 function kiosk_manager(Contact $user, Qrequest $qreq) {
-    global $Now;
     $kiosks = (array) ($user->conf->setting_json("__tracker_kiosk") ? : array());
     uasort($kiosks, function ($a, $b) {
         return $a->update_at - $b->update_at;
@@ -14,7 +13,7 @@ function kiosk_manager(Contact $user, Qrequest $qreq) {
     $kchange = false;
     // delete old kiosks
     while (!empty($kiosks)
-           && (count($kiosks) > 12 || current($kiosks)->update_at <= $Now - 172800)) {
+           && (count($kiosks) > 12 || current($kiosks)->update_at <= Conf::$now - 172800)) {
         array_shift($kiosks);
         $kchange = true;
         reset($kiosks);
@@ -22,13 +21,13 @@ function kiosk_manager(Contact $user, Qrequest $qreq) {
     // look for new kiosks
     $kiosk_keys = [null, null];
     foreach ($kiosks as $k => $kj) {
-        if ($kj->update_at >= $Now - 7200)
+        if ($kj->update_at >= Conf::$now - 7200)
             $kiosk_keys[$kj->show_papers ? 1 : 0] = $k;
     }
     for ($i = 0; $i <= 1; ++$i) {
         if (!$kiosk_keys[$i]) {
             $key = hotcrp_random_password();
-            $kiosks[$key] = (object) ["update_at" => $Now, "show_papers" => !!$i];
+            $kiosks[$key] = (object) ["update_at" => Conf::$now, "show_papers" => !!$i];
             $kiosk_keys[$i] = $kchange = $key;
         }
     }
@@ -37,11 +36,11 @@ function kiosk_manager(Contact $user, Qrequest $qreq) {
         $user->conf->save_setting("__tracker_kiosk", 1, $kiosks);
     }
     // maybe sign out to kiosk
-    if ($qreq->signout_to_kiosk && $qreq->post_ok()) {
+    if ($qreq->signout_to_kiosk && $qreq->valid_post()) {
         $user = LoginHelper::logout($user, false);
         ensure_session(ENSURE_SESSION_REGENERATE_ID);
-        $user->set_capability("tracker_kiosk", $kiosk_keys[$qreq->buzzer_showpapers ? 1 : 0]);
-        $user->conf->self_redirect($qreq);
+        $key = $kiosk_keys[$qreq->buzzer_showpapers ? 1 : 0];
+        $user->conf->redirect_self($qreq, ["__PATH__" => $key]);
     }
     return $kiosk_keys;
 }
@@ -49,10 +48,9 @@ if ($Me->is_track_manager()) {
     $kiosk_keys = kiosk_manager($Me, $Qreq);
 }
 
-function kiosk_lookup($key) {
-    global $Conf, $Now;
-    $kiosks = (array) ($Conf->setting_json("__tracker_kiosk") ? : []);
-    if (isset($kiosks[$key]) && $kiosks[$key]->update_at >= $Now - 604800) {
+function kiosk_lookup(Conf $conf, $key) {
+    $kiosks = (array) ($conf->setting_json("__tracker_kiosk") ? : []);
+    if (isset($kiosks[$key]) && $kiosks[$key]->update_at >= Conf::$now - 604800) {
         return $kiosks[$key];
     } else {
         return null;
@@ -60,12 +58,12 @@ function kiosk_lookup($key) {
 }
 
 $kiosk = null;
-if (!$Me->has_email()
-    && ($key = $Qreq->path_component(0))
-    && ($kiosk = kiosk_lookup($key))) {
-    $Me->set_capability("tracker_kiosk", $key);
-} else if (($key = $Me->capability("tracker_kiosk"))) {
-    $kiosk = kiosk_lookup($key);
+if (($key = $Qreq->path_component(0))
+    && ($kiosk = kiosk_lookup($Conf, $key))) {
+    $Me->set_capability("@kiosk", $key);
+    CapabilityInfo::set_default_cap_param("kiosk-{$key}", true);
+} else if (($key = $Me->capability("@kiosk"))) {
+    $kiosk = kiosk_lookup($Conf, $key);
 }
 if ($kiosk) {
     $Me->tracker_kiosk_state = $kiosk->show_papers ? 2 : 1;
@@ -86,7 +84,7 @@ $Conf->stash_hotcrp_pc($Me, true);
 echo '<div id="tracker-table" class="demargin" style="margin-top:1em"></div>';
 echo "<audio id=\"tracker-sound\" crossorigin=\"anonymous\" preload=\"auto\"><source src=\"", Ht::$img_base, "buzzer.mp3\"></audio>";
 
-echo Ht::form(hoturl_post("buzzer"));
+echo Ht::form($Conf->hoturl_post("buzzer"));
 echo '<table style="margin-top:3em"><tr>';
 
 // mute button
@@ -132,7 +130,7 @@ if ($Me->is_track_manager()) {
 $buzzer_status["no_discussion"] = $no_discussion . '</div>';
 echo Ht::unstash();
 echo $Conf->make_script_file("scripts/buzzer.js");
-echo Ht::unstash_script('start_buzzer_page(' . json_encode_browser($buzzer_status) . ')');
+echo Ht::unstash_script('hotcrp.start_buzzer_page(' . json_encode_browser($buzzer_status) . ')');
 
 echo "</tr></table></form>\n";
 $Conf->footer();

@@ -1,6 +1,6 @@
 <?php
 // src/settings/s_topics.php -- HotCRP settings > submission form page
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class Topics_SettingRenderer {
     static function render(SettingValues $sv) {
@@ -16,7 +16,7 @@ class Topics_SettingRenderer {
         }
         Dbl::free($result);
 
-        echo "<h3 class=\"form-h\" id=\"topics\">Topics</h3>\n";
+        $sv->render_section("Topics", "topics");
         echo "<p>Authors select the topics that apply to their submissions. PC members can indicate topics they’re interested in or search using the “topic:” keyword. Use a colon to create topic groups, as in “Systems: Correctness” and “Systems: Performance”.";
         if ($sv->conf->has_topics()) {
             echo " To delete an existing topic, remove its name.";
@@ -42,9 +42,9 @@ class Topics_SettingRenderer {
                     Ht::entry("top$tid", $tname, ["size" => 80, "class" => "need-autogrow wide" . ($sv->has_problem_at("top$tid") ? " has-error" : ""), "aria-label" => "Topic name"]),
                     '</td>';
                 if (!empty($interests)) {
-                    $tinterests = get($interests, $tid, array());
-                    echo '<td class="fx plr padls">', (get($tinterests, 0) ? '<span class="topic-2">' . $tinterests[0] . "</span>" : ""), "</td>",
-                        '<td class="fx plr padls">', (get($tinterests, 1) ? '<span class="topic2">' . $tinterests[1] . "</span>" : ""), "</td>";
+                    $tinterests = $interests[$tid] ?? [];
+                    echo '<td class="fx plr padls">', ($tinterests[0] ?? null ? '<span class="topic-2">' . $tinterests[0] . "</span>" : ""), "</td>",
+                        '<td class="fx plr padls">', ($tinterests[1] ?? null ? '<span class="topic2">' . $tinterests[1] . "</span>" : ""), "</td>";
                 }
             }
             echo '</tbody></table>',
@@ -64,7 +64,7 @@ class Topics_SettingParser extends SettingParser {
 
     private function check_topic($t) {
         $t = simplify_whitespace($t);
-        if ($t === "" || !ctype_digit($t)) {
+        if (!preg_match('/\A(?:\d+\z|[-+,;:]|–|—)/', $t)) {
             return $t;
         } else {
             return false;
@@ -76,7 +76,7 @@ class Topics_SettingParser extends SettingParser {
             foreach (explode("\n", $sv->reqv("topnew")) as $x) {
                 $t = $this->check_topic($x);
                 if ($t === false) {
-                    $sv->error_at("topnew", "Topic name “" . htmlspecialchars($x) . "” is reserved. Please choose another name.");
+                    $sv->error_at("topnew", "Topic name “" . htmlspecialchars(trim($x)) . "” is reserved. Please choose another name.");
                 } else if ($t !== "") {
                     $this->new_topics[] = [$t]; // NB array of arrays
                 }
@@ -87,7 +87,9 @@ class Topics_SettingParser extends SettingParser {
             if (($x = $sv->reqv("top$tid")) !== null) {
                 $t = $this->check_topic($x);
                 if ($t === false) {
-                    $sv->error_at("top$tid", "Topic name “" . htmlspecialchars($x) . "” is reserved. Please choose another name.");
+                    if ($this->check_topic($tname)) {
+                        $sv->error_at("top$tid", "Topic name “" . htmlspecialchars($x) . "” is reserved. Please choose another name.");
+                    }
                 } else if ($t === "") {
                     $this->deleted_topics[] = $tid;
                 } else if ($tname !== $t) {
@@ -96,16 +98,15 @@ class Topics_SettingParser extends SettingParser {
             }
         }
         if (!$sv->has_error()) {
-            foreach (["TopicArea", "PaperTopic", "TopicInterest"] as $t) {
-                $sv->need_lock[$t] = true;
-            }
+            $sv->request_write_lock("TopicArea", "PaperTopic", "TopicInterest");
             return true;
         }
     }
 
     function save(SettingValues $sv, Si $si) {
-        if ($this->new_topics)
+        if ($this->new_topics) {
             $sv->conf->qe("insert into TopicArea (topicName) values ?v", $this->new_topics);
+        }
         if ($this->deleted_topics) {
             $sv->conf->qe("delete from TopicArea where topicId?a", $this->deleted_topics);
             $sv->conf->qe("delete from PaperTopic where topicId?a", $this->deleted_topics);
@@ -116,11 +117,11 @@ class Topics_SettingParser extends SettingParser {
                 $sv->conf->qe("update TopicArea set topicName=? where topicId=?", $t, $tid);
             }
         }
-        $sv->conf->invalidate_topics();
-        $has_topics = $sv->conf->fetch_ivalue("select exists (select * from TopicArea)");
-        $sv->save("has_topics", $has_topics ? 1 : null);
         if ($this->new_topics || $this->deleted_topics || $this->changed_topics) {
-            $sv->changes[] = "topics";
+            $has_topics = $sv->conf->fetch_ivalue("select exists (select * from TopicArea)");
+            $sv->save("has_topics", $has_topics ? 1 : null);
+            $sv->mark_diff("topics");
+            $sv->mark_invalidate_caches(["autosearch" => true]);
         }
     }
 }

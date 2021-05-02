@@ -1,14 +1,13 @@
 <?php
 // cleandocstore.php -- HotCRP maintenance script
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
-$ConfSitePATH = preg_replace(',/batch/[^/]+,', '', __FILE__);
-require_once("$ConfSitePATH/lib/getopt.php");
+require_once(preg_replace('/\/batch\/[^\/]+/', '/src/siteloader.php', __FILE__));
 
-$arg = getopt_rest($argv, "hn:c:Vm:du:q", ["help", "name:", "count:", "verbose", "match:",
-    "dry-run", "max-usage:", "quiet", "silent", "keep-temp", "docstore"]);
+$arg = Getopt::rest($argv, "hn:c:Vm:du:U:q", ["help", "name:", "count:", "verbose", "match:",
+    "dry-run", "max-usage:", "min-usage:", "quiet", "silent", "keep-temp", "docstore"]);
 foreach (["c" => "count", "V" => "verbose", "m" => "match", "d" => "dry-run",
-          "u" => "max-usage", "q" => "quiet"] as $s => $l) {
+          "u" => "max-usage", "U" => "min-usage", "q" => "quiet"] as $s => $l) {
     if (isset($arg[$s]) && !isset($arg[$l]))
         $arg[$l] = $arg[$s];
 }
@@ -17,22 +16,41 @@ if (isset($arg["silent"])) {
 }
 if (isset($arg["h"]) || isset($arg["help"])) {
     fwrite(STDOUT, "Usage: php batch/cleandocstore.php [-c COUNT] [-V] [-m MATCH] [-d|--dry-run]
-             [-u USAGELIMIT] [--keep-temp] [--docstore] [DOCSTORES...]\n");
+             [-u USAGEHI] [-U USAGELOW] [--keep-temp] [--docstore] [DOCSTORES...]\n");
     exit(0);
 }
-if (isset($arg["count"]) && !ctype_digit($arg["count"])) {
-    fwrite(STDERR, "batch/cleandocstore.php: `-c` expects integer\n");
+if (isset($arg["count"])) {
+    if (ctype_digit($arg["count"])) {
+        $arg["count"] = intval($arg["count"]);
+    } else {
+        fwrite(STDERR, "batch/cleandocstore.php: `-c` expects integer\n");
+        exit(1);
+    }
+}
+foreach (["max-usage", "min-usage"] as $k) {
+    if (isset($arg[$k])) {
+        if (is_numeric($arg[$k])
+            && ($f = floatval($arg[$k])) >= 0
+            && $f <= 1) {
+            $arg[$k] = $f;
+        } else {
+            fwrite(STDERR, "batch/cleandocstore.php: `--{$k}` expects fraction between 0 and 1\n");
+            exit(1);
+        }
+    }
+}
+if (($arg["max-usage"] ?? 1) < ($arg["min-usage"] ?? 0)) {
+    fwrite(STDERR, "batch/cleandocstore.php: `--max-usage` cannot be less than `--min-usage`\n");
     exit(1);
 }
 
-require_once("$ConfSitePATH/src/init.php");
+require_once(SiteLoader::find("src/init.php"));
 
 class Batch_CleanDocstore {
     /** @var list<?DocumentFileTree> */
     public $ftrees = [];
 
     function fparts_random_match() {
-        global $Now;
         $fmatches = [];
         for ($i = 0; $i !== count($this->ftrees); ++$i) {
             if (!($ftree = $this->ftrees[$i])) {
@@ -45,7 +63,7 @@ class Batch_CleanDocstore {
                 $fm = $ftree->random_match();
                 if ($fm->is_complete()
                     && (($fm->treeid & 1) === 0
-                        || max($fm->atime(), $fm->mtime()) < $Now - 86400)) {
+                        || max($fm->atime(), $fm->mtime()) < Conf::$now - 86400)) {
                     ++$n;
                     $fmatches[] = $fm;
                 } else {
@@ -57,21 +75,21 @@ class Batch_CleanDocstore {
             }
         }
         usort($fmatches, function ($a, $b) {
-            global $Now;
             // week-old temporary files should be removed first
             $at = $a->atime();
-            if (($a->treeid & 1) && $at < $Now - 604800) {
-                $at = 1;
-            }
             $bt = $b->atime();
-            if (($b->treeid & 1) && $bt < $Now - 604800) {
-                $bt = 1;
-            }
-            if ($at !== false && $bt !== false) {
-                return $at < $bt ? -1 : ($at == $bt ? 0 : 1);
-            } else {
+            if ($at === false || $bt === false) {
                 return $at ? -1 : ($bt ? 1 : 0);
             }
+            $aage = Conf::$now - $at;
+            if ($a->treeid & 1) {
+                $aage = $aage > 604800 ? 100000000 : $aage * 2;
+            }
+            $bage = Conf::$now - $bt;
+            if ($b->treeid & 1) {
+                $bage = $bage > 604800 ? 100000000 : $bage * 2;
+            }
+            return $bage <=> $aage;
         });
         if (empty($fmatches)) {
             return null;
@@ -127,34 +145,31 @@ class Batch_CleanDocstore {
         preg_match('{\A((?:/[^/%]*(?=/|\z))+)}', $confdp, $m);
         $usage_directory = $m[1];
 
-        $count = isset($arg["count"]) ? intval($arg["count"]) : 10;
+        $count = $arg["count"] ?? 10;
         $verbose = isset($arg["verbose"]);
         $dry_run = isset($arg["dry-run"]);
         $keep_temp = isset($arg["keep-temp"]);
         $usage_threshold = null;
-        $hash_matcher = new DocumentHashMatcher(get($arg, "match"));
+        $hash_matcher = new DocumentHashMatcher($arg["match"] ?? null);
 
-        if (isset($arg["max-usage"])) {
-            if (!is_numeric($arg["max-usage"])
-                || (float) $arg["max-usage"] < 0
-                || (float) $arg["max-usage"] > 1) {
-                fwrite(STDERR, "batch/cleandocstore.php: `-u` expects fraction between 0 and 1\n");
-                return 1;
-            }
+        if (isset($arg["max-usage"]) || isset($arg["min-usage"])) {
             $ts = disk_total_space($usage_directory);
             $fs = disk_free_space($usage_directory);
             if ($ts === false || $fs === false) {
                 fwrite(STDERR, "$usage_directory: cannot evaluate free space\n");
                 return 1;
+            } else if ($fs >= $ts * (1 - ($arg["max-usage"] ?? $arg["min-usage"]))) {
+                if (!isset($arg["quiet"])) {
+                    fwrite(STDOUT, $usage_directory . ": free space sufficient\n");
+                }
+                return 0;
             }
-            $want_fs = $ts * (1 - (float) $arg["max-usage"]);
+            $want_fs = $ts * (1 - ($arg["min-usage"] ?? $arg["max-usage"]));
             $usage_threshold = $want_fs - $fs;
-            if (!isset($arg["count"])) {
-                $count = 5000;
-            }
+            $count = $arg["count"] ?? 5000;
         }
 
-        foreach (array_merge([$confdp], get($arg, "_", [])) as $i => $dp) {
+        foreach (array_merge([$confdp], $arg["_"] ?? []) as $i => $dp) {
             if (!str_starts_with($dp, "/") || strpos($dp, "%") === false) {
                 fwrite(STDERR, "batch/cleandocstore.php: Bad docstore pattern.\n");
                 return 1;
@@ -189,14 +204,11 @@ class Batch_CleanDocstore {
             ++$ndone;
         }
 
-        if ($verbose && $usage_threshold !== null && $bytesremoved >= $usage_threshold) {
-            fwrite(STDOUT, $usage_directory . ": free space above threshold\n");
-        }
         if (!isset($arg["quiet"])) {
             fwrite(STDOUT, $usage_directory . ": " . ($dry_run ? "would remove " : "removed ") . plural($nsuccess, "file") . ", " . plural($bytesremoved, "byte") . "\n");
         }
         if ($nsuccess == 0) {
-            fwrite(STDERR, "Can't find anything to delete.\n");
+            fwrite(STDERR, "Nothing to delete\n");
         }
         return $nsuccess && $nsuccess == $ndone ? 0 : 1;
     }

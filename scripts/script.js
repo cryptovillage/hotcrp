@@ -1,11 +1,7 @@
 // script.js -- HotCRP JavaScript library
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
-var siteurl, siteurl_base_path,
-    siteurl_postvalue, siteurl_suffix, siteurl_defaults,
-    siteurl_absolute_base, siteurl_cookie_params, assetsurl,
-    hotcrp_paperid, hotcrp_status, hotcrp_user,
-    hotcrp_want_override_conflict;
+var siteinfo, hotcrp, hotcrp_status;
 
 function $$(id) {
     return document.getElementById(id);
@@ -73,8 +69,9 @@ if (!Element.prototype.closest) {
 
 if (!String.prototype.startsWith) {
     String.prototype.startsWith = function (search, pos) {
-        pos = !pos || pos < 0 ? 0 : +pos;
-        return this.substring(pos, pos + search.length) === search;
+        pos = pos > 0 ? pos|0 : 0;
+        return this.length >= pos + search.length
+            && this.substring(pos, pos + search.length) === search;
     };
 }
 if (!String.prototype.endsWith) {
@@ -82,7 +79,8 @@ if (!String.prototype.endsWith) {
         if (this_len === undefined || this_len > this.length) {
             this_len = this.length;
         }
-        return this.substring(this_len - search.length, this_len) === search;
+        return this_len >= search.length
+            && this.substring(this_len - search.length, this_len) === search;
     };
 }
 
@@ -227,10 +225,10 @@ $(document).ajaxError(function (event, jqxhr, settings, httperror) {
         } catch (e) {
         }
     }
-    if (!data || !data.user_error) {
+    if ((!data || !data.user_error) && jqxhr.status != 502) {
         var msg = url_absolute(settings.url) + " API failure: ";
-        if (hotcrp_user && hotcrp_user.email)
-            msg += "user " + hotcrp_user.email + ", ";
+        if (siteinfo.user && siteinfo.user.email)
+            msg += "user " + siteinfo.user.email + ", ";
         msg += jqxhr.status;
         if (httperror)
             msg += ", " + httperror;
@@ -250,32 +248,52 @@ $(document).ajaxComplete(function (event, jqxhr, settings) {
 $.ajaxPrefilter(function (options, originalOptions, jqxhr) {
     if (options.global === false)
         return;
-    var f = options.success;
-    function onerror(jqxhr, status, errormsg) {
-        if (f) {
-            var rjson;
-            if (/application\/json/.test(jqxhr.getResponseHeader("Content-Type") || "")
-                && jqxhr.responseText) {
-                try {
-                    rjson = JSON.parse(jqxhr.responseText);
-                } catch (e) {
+    function onsuccess(data, status, errormsg) {
+        if (typeof data === "object"
+            && data.sessioninfo
+            && siteinfo.user.cid == data.sessioninfo.cid
+            && options.url.startsWith(siteinfo.site_relative)
+            && (siteinfo.site_relative !== "" || !/^[a-z]+:|^\//.test(options.url))) {
+            siteinfo.postvalue = data.sessioninfo.postvalue;
+            $("form").each(function () {
+                var m = /^([^#]*[&?;]post=)([^&?;#]*)/.exec(this.action);
+                if (m) {
+                    this.action = m[1].concat(siteinfo.postvalue, this.action.substring(m[0].length));
                 }
-            }
-            if (!rjson
-                || typeof rjson !== "object"
-                || rjson.ok !== false)
-                rjson = {ok: false};
-            if (!rjson.error)
-                rjson.error = jqxhr_error_message(jqxhr, status, errormsg);
-            f(rjson, jqxhr, status);
+                if (this.elements.post) {
+                    this.elements.post.value = siteinfo.postvalue;
+                }
+            })
         }
     }
-    if (!options.error)
-        options.error = onerror;
-    else if ($.isArray(options.error))
-        options.error.push(onerror);
-    else
-        options.error = [options.error, onerror];
+    function onerror(jqxhr, status, errormsg) {
+        var rjson, i;
+        if (/application\/json/.test(jqxhr.getResponseHeader("Content-Type") || "")
+            && jqxhr.responseText) {
+            try {
+                rjson = JSON.parse(jqxhr.responseText);
+            } catch (e) {
+            }
+        }
+        if (!rjson
+            || typeof rjson !== "object"
+            || rjson.ok !== false)
+            rjson = {ok: false};
+        if (!rjson.error)
+            rjson.error = jqxhr_error_message(jqxhr, status, errormsg);
+        for (i = 0; i !== success.length; ++i)
+            success[i](rjson, jqxhr, status);
+    }
+    var success = options.success || [], error = options.error;
+    if (!$.isArray(success))
+        success = [success];
+    options.success = [onsuccess];
+    if (success.length)
+        Array.prototype.push.apply(options.success, success);
+    options.error = [];
+    if (error)
+        Array.prototype.push.apply(options.error, $.isArray(error) ? error : [error]);
+    options.error.push(onerror);
     if (options.timeout == null)
         options.timeout = 10000;
     if (options.dataType == null)
@@ -679,6 +697,32 @@ function unparse_duration(d, include_msec) {
     return neg ? "-" + t : t;
 }
 
+function unparse_byte_size(n) {
+    if (n > 999949999)
+        return (Math.round(n / 10000000) / 100) + "GB";
+    else if (n > 999499)
+        return (Math.round(n / 100000) / 10) + "MB";
+    else if (n > 9949)
+        return Math.round(n / 1000) + "kB";
+    else if (n > 0)
+        return (Math.max(Math.round(n / 100), 1) / 10) + "kB";
+    else
+        return "0B";
+}
+
+function unparse_byte_size_binary(n) {
+    if (n > 1073689395)
+        return (Math.round(n / 10737418.24) / 100) + "GiB";
+    else if (n > 1048063)
+        return (Math.round(n / 104857.6) / 10) + "MiB";
+    else if (n > 10188)
+        return Math.round(n / 1024) + "KiB";
+    else if (n > 0)
+        return (Math.max(Math.round(n / 102.4), 1) / 10) + "KiB";
+    else
+        return "0B";
+}
+
 var strnatcmp = (function () {
 try {
     var collator = new Intl.Collator(undefined, {sensitivity: "case", numeric: true});
@@ -741,10 +785,13 @@ function event_key(evt) {
     } else if ((x = evt.charCode)) {
         return charCode_map[x] || String.fromCharCode(x);
     } else if ((x = evt.keyCode)) {
-        if (keyCode_map[x])
+        if (keyCode_map[x]) {
             return keyCode_map[x];
-        else if ((x >= 48 && x <= 57) || (x >= 65 && x <= 90))
+        } else if ((x >= 48 && x <= 57) || (x >= 65 && x <= 90)) {
             return String.fromCharCode(x);
+        } else {
+            return "";
+        }
     } else {
         return "";
     }
@@ -817,13 +864,13 @@ wstorage.json = function (is_session, key) {
     return x ? JSON.parse(x) : false;
 };
 wstorage.site = function (is_session, key, value) {
-    if (siteurl_base_path !== "/")
-        key = siteurl_base_path + key;
+    if (siteinfo.base !== "/")
+        key = siteinfo.base + key;
     return wstorage(is_session, key, value);
 };
 wstorage.site_json = function (is_session, key) {
-    if (siteurl_base_path !== "/")
-        key = siteurl_base_path + key;
+    if (siteinfo.base !== "/")
+        key = siteinfo.base + key;
     return wstorage.json(is_session, key);
 };
 
@@ -841,8 +888,10 @@ function hoturl_add(url, component) {
 function hoturl_find(x, page_component) {
     var m;
     for (var i = 0; i < x.v.length; ++i)
-        if ((m = page_component.exec(x.v[i])))
-            return [i, m[1]];
+        if ((m = page_component.exec(x.v[i]))) {
+            m[0] = i;
+            return m;
+        }
     return null;
 }
 
@@ -860,12 +909,12 @@ function hoturl_clean(x, page_component, allow_fail) {
 
 function hoturl(page, options) {
     var i, m, v, anchor = "", want_forceShow;
-    if (siteurl == null || siteurl_suffix == null) {
-        siteurl = siteurl_suffix = "";
-        log_jserror("missing siteurl");
+    if (siteinfo.site_relative == null || siteinfo.suffix == null) {
+        siteinfo.site_relative = siteinfo.suffix = "";
+        log_jserror("missing siteinfo");
     }
 
-    var x = {t: page + siteurl_suffix};
+    var x = {t: page};
     if (typeof options === "string") {
         if (options.charAt(0) === "?")
             options = options.substring(1);
@@ -880,14 +929,14 @@ function hoturl(page, options) {
             v = options[i];
             if (v == null)
                 /* skip */;
-            else if (i === "anchor")
+            else if (i === "anchor" /* XXX deprecated */ || i === "#")
                 anchor = "#" + v;
             else
                 x.v.push(encodeURIComponent(i) + "=" + encodeURIComponent(v));
         }
     }
     if (page.substring(0, 3) === "api" && !hoturl_find(x, /^base=/))
-        x.v.push("base=" + encodeURIComponent(siteurl));
+        x.v.push("base=" + encodeURIComponent(siteinfo.site_relative));
 
     if (page === "paper") {
         hoturl_clean(x, /^p=(\d+)$/);
@@ -897,12 +946,18 @@ function hoturl(page, options) {
             want_forceShow = true;
         }
     } else if (page === "review") {
-        hoturl_clean(x, /^r=(\d+[A-Z]+)$/);
+        hoturl_clean(x, /^p=(\d+)$/);
+        if (x.last !== false
+            && (m = hoturl_find(x, /^r=(\d+)([A-Z]+|r\d+|rnew)$/))
+            && x.t.endsWith("/" + m[1])) {
+            x.t += m[2];
+            x.v.splice(m[0], 1);
+        }
     } else if (page === "help") {
         hoturl_clean(x, /^t=(\w+)$/);
     } else if (page.substring(0, 3) === "api") {
         if (page.length > 3) {
-            x.t = "api" + siteurl_suffix;
+            x.t = "api";
             x.v.push("fn=" + page.substring(4));
         }
         hoturl_clean(x, /^p=(\d+)$/, true);
@@ -912,22 +967,29 @@ function hoturl(page, options) {
         hoturl_clean(x, /^file=([^&]+)$/);
     }
 
-    if (hotcrp_want_override_conflict && want_forceShow
+    if (siteinfo.suffix !== "") {
+        if ((i = x.t.indexOf("/")) > 0) {
+            x.t = x.t.substring(0, i).concat(siteinfo.suffix, x.t.substring(i));
+        } else {
+            x.t += siteinfo.suffix;
+        }
+    }
+
+    if (siteinfo.want_override_conflict && want_forceShow
         && !hoturl_find(x, /^forceShow=/))
         x.v.push("forceShow=1");
-
-    if (siteurl_defaults)
-        x.v.push(serialize_object(siteurl_defaults));
+    if (siteinfo.defaults)
+        x.v.push(serialize_object(siteinfo.defaults));
     if (x.v.length)
         x.t += "?" + x.v.join("&");
-    return siteurl + x.t + anchor;
+    return siteinfo.site_relative + x.t + anchor;
 }
 
 function hoturl_post(page, options) {
     if (typeof options === "string")
-        options += (options ? "&" : "") + "post=" + siteurl_postvalue;
+        options += (options ? "&" : "") + "post=" + siteinfo.postvalue;
     else
-        options = $.extend({post: siteurl_postvalue}, options);
+        options = $.extend({post: siteinfo.postvalue}, options);
     return hoturl(page, options);
 }
 
@@ -960,25 +1022,50 @@ function url_absolute(url, loc) {
 }
 
 function hoturl_absolute_base() {
-    if (!siteurl_absolute_base)
-        siteurl_absolute_base = url_absolute(siteurl_base_path);
-    return siteurl_absolute_base;
+    if (!siteinfo.absolute_base)
+        siteinfo.absolute_base = url_absolute(siteinfo.base);
+    return siteinfo.absolute_base;
 }
 
-function hoturl_go(page, options) {
-    window.location = hoturl(page, options);
+function hidden_input(name, value, attr) {
+    var input = document.createElement("input");
+    input.type = "hidden";
+    input.name = name;
+    input.value = value;
+    if (attr) {
+        for (var k in attr)
+            input.setAttribute(k, attr[k]);
+    }
+    return input;
 }
 
 function hoturl_post_go(page, options) {
-    var $form = $('<form method="POST" enctype="multipart/form-data" accept-charset="UTF-8"><input type="hidden" name="____empty____" value="1"></form>');
-    $form[0].action = hoturl_post(page, options);
-    $form.appendTo(document.body);
-    $form.submit();
+    var form = document.createElement("form");
+    form.setAttribute("method", "post");
+    form.setAttribute("enctype", "multipart/form-data");
+    form.setAttribute("accept-charset", "UTF-8");
+    form.action = hoturl_post(page, options);
+    form.appendChild(hidden_input("____empty____", "1"));
+    document.body.appendChild(form);
+    form.submit();
+}
+
+function hoturl_get_form(action) {
+    var form = document.createElement("form");
+    form.setAttribute("method", "get");
+    form.setAttribute("accept-charset", "UTF-8");
+    var m = action.match(/^([^?#]*)((?:\?[^#]*)?)((?:\#.*)?)$/);
+    form.action = m[1];
+    var re = /([^?&=;]*)=([^&=;]*)/g, mm;
+    while ((mm = re.exec(m[2])) !== null) {
+        form.appendChild(hidden_input(urldecode(mm[1]), urldecode(mm[2])));
+    }
+    return form;
 }
 
 
 // render_xmsg
-function render_xmsg(status, msg) {
+function render_xmsg(msg, status) {
     if (typeof msg === "string")
         msg = msg === "" ? [] : [msg];
     if (msg.length === 0)
@@ -992,38 +1079,105 @@ function render_xmsg(status, msg) {
     return '<div class="msg msg-' + status + '">' + msg + '</div>';
 }
 
+function render_feedback(msg, status) {
+    if (typeof msg === "string")
+        msg = msg === "" ? [] : [msg];
+    if (msg.length === 0)
+        return '';
+    if (status === 0 || status === 1 || status === 2)
+        status = ["note", "warning", "error"][status];
+    var t = [], i;
+    for (var i = 0; i !== msg.length; ++i) {
+        var tag = msg[i].indexOf('<p') < 0 ? 'p' : 'div';
+        t.push('<' + tag + ' class="feedback is-' + status + '">' + msg[i] + '</' + tag + '>');
+    }
+    return t.join('');
+}
+
+function render_feedback_near(msg, status, e) {
+    var x, c, m, $j;
+    if (status === 0 || status === 1 || status === 2)
+        status = ["note", "warning", "error"][status];
+    else
+        status = "note";
+    if (status === "warning" || status === "error")
+        addClass(e, "has-" + status);
+    if (hasClass(e, "entryi") && ($j = $(e).find(".entry")).length) {
+        e = $j[0];
+    } else if (!hasClass(e, "f-i")) {
+        return false;
+    }
+    c = e.firstChild;
+    while (c && c.nodeType === 1 && (c.tagName === "LABEL" || hasClass(c, "feedback")))
+        c = c.nextSibling;
+    m = render_feedback(msg, status);
+    c ? $(c).before(m) : $(e).prepend(m);
+    return true;
+}
+
 
 // ui
 var handle_ui = (function ($) {
 var callbacks = {};
+function collect_callbacks(cbs, c, etype) {
+    for (var j = 0; j !== c.length; j += 2) {
+        if (!c[j] || c[j] === etype)
+            cbs.push(c[j + 1]);
+    }
+}
+function call_callbacks(cbs, element, event) {
+    for (var i = 1; i < cbs.length; ++i) {
+        var pi = typeof cbs[i] === "function" ? 0 : cbs[i].priority;
+        for (var j = 0; j !== i; ++j) {
+            var pj = typeof cbs[j] === "function" ? 0 : cbs[j].priority;
+            if (pi > pj) {
+                break;
+            }
+        }
+        if (j !== i) {
+            var del = cbs.splice(i, 1);
+            cbs.splice(j, 0, del[0]);
+        }
+    }
+    for (var i = 0; i !== cbs.length && !event.isImmediatePropagationStopped(); ++i) {
+        var f = typeof cbs[i] === "function" ? cbs[i] : cbs[i].callback;
+        f.call(element, event);
+    }
+}
 function handle_ui(event) {
     var e = event.target;
     if ((e && (hasClass(e, "ui") || hasClass(e, "uin")))
         || (this.tagName === "A" && hasClass(this, "ui"))) {
         event.preventDefault();
     }
-    var k = classList(this);
+    var k = classList(this), cbs = null;
     for (var i = 0; i < k.length; ++i) {
         var c = callbacks[k[i]];
         if (c) {
-            for (var j = 0; j < c.length; ++j) {
-                c[j].call(this, event);
-            }
+            cbs = cbs || [];
+            collect_callbacks(cbs, c, event.type);
         }
     }
+    cbs && cbs.length && call_callbacks(cbs, this, event);
 }
-handle_ui.on = function (className, callback) {
+handle_ui.on = function (className, callback, priority) {
+    var dot = className.indexOf("."), type = null;
+    if (dot >= 0) {
+        type = className.substring(0, dot);
+        className = className.substring(dot + 1);
+    }
     callbacks[className] = callbacks[className] || [];
-    callbacks[className].push(callback);
+    callbacks[className].push(type);
+    callbacks[className].push(priority == null ? callback : {callback: callback, priority: priority});
 };
 handle_ui.trigger = function (className, event) {
     var c = callbacks[className];
     if (c) {
         if (typeof event === "string")
             event = $.Event(event); // XXX IE8: `new Event` is not supported
-        for (var j = 0; j < c.length; ++j) {
-            c[j].call(this, event);
-        }
+        var cbs = [];
+        collect_callbacks(cbs, c, event.type);
+        cbs.length && call_callbacks(cbs, this, event);
     }
 };
 return handle_ui;
@@ -1092,6 +1246,7 @@ function form_highlight(form, elt) {
 
 function hiliter_children(form) {
     form = $(form)[0];
+    addClass(form, "want-diff-alert");
     form_highlight(form);
     $(form).on("change input", "input, select, textarea", function () {
         if (!hasClass(this, "ignore-diff") && !hasClass(form, "ignore-diff"))
@@ -1320,7 +1475,7 @@ return function (content, bubopt) {
     else if (typeof bubopt === "string")
         bubopt = {color: bubopt};
 
-    var nearpos = null, dirspec = bubopt.dir, dir = null,
+    var nearpos = null, dirspec = bubopt.anchor, dir = null,
         color = bubopt.color ? " " + bubopt.color : "";
 
     var bubdiv = $('<div class="bubble' + color + '" style="margin:0"><div class="bubtail bubtail0' + color + '" style="width:0;height:0"></div><div class="bubcontent"></div><div class="bubtail bubtail1' + color + '" style="width:0;height:0"></div></div>')[0];
@@ -1546,7 +1701,7 @@ return function (content, bubopt) {
             if (typeof epos === "string" || epos.tagName || epos.jquery) {
                 epos = $(epos);
                 if (dirspec == null && epos[0])
-                    dirspec = epos[0].getAttribute("data-tooltip-dir");
+                    dirspec = epos[0].getAttribute("data-tooltip-anchor");
                 epos = epos.geometry(true);
             }
             for (i = 0; i < 4; ++i)
@@ -1562,7 +1717,7 @@ return function (content, bubopt) {
         at: function (x, y, reference) {
             return bubble.near({top: y, left: x}, reference);
         },
-        dir: function (dir) {
+        anchor: function (dir) {
             dirspec = dir;
             return bubble;
         },
@@ -1649,8 +1804,8 @@ function prepare_info(elt, info) {
     }
     if (info.builder && builders[info.builder])
         info = builders[info.builder].call(elt, info) || info;
-    if (info.dir == null || elt.hasAttribute("data-tooltip-dir"))
-        info.dir = elt.getAttribute("data-tooltip-dir") || "v";
+    if (info.anchor == null || elt.hasAttribute("data-tooltip-anchor"))
+        info.anchor = elt.getAttribute("data-tooltip-anchor") || "v";
     if (info.type == null || elt.hasAttribute("data-tooltip-type"))
         info.type = elt.getAttribute("data-tooltip-type");
     if (info.className == null || elt.hasAttribute("data-tooltip-class"))
@@ -1687,7 +1842,7 @@ function show_tooltip(info) {
 
     function show_bub() {
         if (content && !bub) {
-            bub = make_bubble(content, {color: "tooltip " + info.className, dir: info.dir});
+            bub = make_bubble(content, {color: "tooltip " + info.className, anchor: info.anchor});
             near = info.near || info.element;
             bub.near(near).hover(tt.enter, tt.exit);
         } else if (content) {
@@ -1861,8 +2016,9 @@ return function () {
 function popup_skeleton(options) {
     var hc = new HtmlCollector, $d = null;
     options = options || {};
+    var near = options.near || options.anchor;
     hc.push('<div class="modal" role="dialog"><div class="modal-dialog'
-        + (!options.anchor || options.anchor === window ? " modal-dialog-centered" : "")
+        + (!near || near === window ? " modal-dialog-centered" : "")
         + (options.style ? '" style="' + escape_entities(options.style) : '')
         + '" role="document"><div class="modal-content"><form enctype="multipart/form-data" accept-charset="UTF-8"'
         + (options.form_class ? ' class="' + options.form_class + '"' : '')
@@ -1876,16 +2032,19 @@ function popup_skeleton(options) {
     function show_errors(data) {
         var form = $d.find("form")[0],
             dbody = $d.find(".popup-body"),
-            m = render_xmsg(2, data.error);
-        $d.find(".msg-error").remove();
-        dbody.length ? dbody.prepend(m) : $d.find("h2").after(m);
-        for (var f in data.errf || {}) {
-            var e = form[f];
-            if (e) {
-                var x = $(e).closest(".entryi, .f-i");
-                (x.length ? x : $(e)).addClass("has-error");
+            messages = "", mx, i, e, x;
+        $d.find(".msg-error, .feedback").remove();
+        for (i in data.message_list || []) {
+            mx = data.message_list[i];
+            if (mx.field && (e = form[mx.field])) {
+                x = e.closest(".entryi, .f-i");
+                if (render_feedback_near(mx.message, mx.status, x || e)) {
+                    continue;
+                }
             }
+            messages += render_xmsg(mx.message, mx.status);
         }
+        dbody.length ? dbody.prepend(messages) : $d.find("h2").after(messages);
         return $d;
     }
     function close() {
@@ -1917,7 +2076,7 @@ function popup_skeleton(options) {
             if (f.getAttribute("method") === "post"
                 && !/post=/.test(f.getAttribute("action"))
                 && !/^(?:[a-z]*:|\/\/)/.test(f.getAttribute("action"))) {
-                $(f).prepend('<input type="hidden" name="post" value="' + escape_entities(siteurl_postvalue) + '">');
+                $(f).prepend(hidden_input("post", siteinfo.postvalue));
             }
         }
         for (var k in {minWidth: 1, maxWidth: 1, width: 1}) {
@@ -1932,7 +2091,7 @@ function popup_skeleton(options) {
             show();
         }
         if (visible !== false) {
-            popup_near($d, options.anchor || window);
+            popup_near($d, near || window);
             $d.find(".need-autogrow").autogrow();
             $d.find(".need-suggest").each(suggest);
             $d.find(".need-tooltip").each(tooltip);
@@ -1942,7 +2101,7 @@ function popup_skeleton(options) {
     return hc;
 }
 
-function popup_near(elt, anchor) {
+function popup_near(elt, near) {
     tooltip.erase();
     if (elt.jquery)
         elt = elt[0];
@@ -1952,7 +2111,7 @@ function popup_near(elt, anchor) {
     addClass(bgelt, "show");
     addClass(document.body, "modal-open");
     if (!hasClass(elt, "modal-dialog-centered")) {
-        var anchorPos = $(anchor).geometry(),
+        var anchorPos = $(near).geometry(),
             wg = $(window).geometry(),
             po = $(bgelt).offset(),
             y = (anchorPos.top + anchorPos.bottom - elt.offsetHeight) / 2;
@@ -1977,7 +2136,12 @@ function popup_near(elt, anchor) {
 }
 
 function override_deadlines(callback) {
-    var self = this, hc = popup_skeleton({anchor: this});
+    var self = this, hc;
+    if (typeof callback === "object" && "sidebarTarget" in callback) {
+        hc = popup_skeleton({near: callback.sidebarTarget});
+    } else {
+        hc = popup_skeleton({near: this});
+    }
     hc.push('<p>' + (this.getAttribute("data-override-text") || "Are you sure you want to override the deadline?") + '</p>');
     hc.push_actions([
         '<button type="button" name="bsubmit" class="btn-primary"></button>',
@@ -1994,7 +2158,7 @@ function override_deadlines(callback) {
                 callback();
             } else {
                 var form = self.closest("form");
-                $(form).append('<input type="hidden" name="' + (self.getAttribute("data-override-submit") || "") + '" value="1"><input type="hidden" name="override" value="1">');
+                $(form).append(hidden_input(self.getAttribute("data-override-submit") || "", "1")).append(hidden_input("override", "1"));
                 addClass(form, "submitting");
                 form.submit();
             }
@@ -2004,6 +2168,21 @@ function override_deadlines(callback) {
 }
 handle_ui.on("js-override-deadlines", override_deadlines);
 
+function form_submitter(form, event) {
+    if (event && event.originalEvent && event.originalEvent.submitter) {
+        return event.originalEvent.submitter.name || null;
+    } else if (form.hotcrpSubmitter
+               && form.hotcrpSubmitter[1] >= (new Date).getTime() - 10) {
+        return form.hotcrpSubmitter[0];
+    } else {
+        return null;
+    }
+}
+
+handle_ui.on("js-mark-submit", function () {
+    var f = this.closest("form");
+    f && (f.hotcrpSubmitter = [this.name, (new Date).getTime()]);
+});
 
 
 // initialization
@@ -2029,8 +2208,10 @@ function display_main(is_initial) {
 
     if (!is_initial
         && Math.abs(browser_now - dl.now) >= 300000
-        && (x = $$("msg-clock-drift")))
+        && (x = $$("msg-clock-drift"))) {
+        removeClass(x, "hidden");
         x.innerHTML = '<div class="msg msg-warning">The HotCRP server’s clock is more than 5 minutes off from your computer’s clock. If your computer’s clock is correct, you should update the server’s clock.</div>';
+    }
 
     // See also the version in `Conf`
     dlname = "";
@@ -2177,7 +2358,7 @@ function tracker_html(tr) {
     if (wstorage.site(true, "hotcrp-tracking-hide-" + tr.trackerid))
         return "";
     t = '<div class="has-tracker tracker-holder tracker-'
-        + (tr.papers && tr.papers[tr.paper_offset].pid == hotcrp_paperid ? "match" : "nomatch")
+        + (tr.papers && tr.papers[tr.paper_offset].pid == siteinfo.paperid ? "match" : "nomatch")
         + (tr.tracker_here ? " tracker-active" : "");
     if (tr.listinfo || tr.listid)
         t += ' has-hotlist" data-hotlist="' + escape_entities(tr.listinfo || tr.listid);
@@ -2190,7 +2371,7 @@ function tracker_html(tr) {
         t += '<div class="' + logo_class + '">' + logo + '</div>';
     var rows = [], i, wwidth = $(window).width();
     if (!tr.papers || !tr.papers[0]) {
-        rows.push('<td><a href=\"' + siteurl + tr.url + '\">Discussion list</a></td>');
+        rows.push('<td><a href=\"' + text_to_html(siteinfo.site_relative + tr.url) + '\">Discussion list</a></td>');
     } else {
         for (i = tr.paper_offset; i < tr.papers.length; ++i)
             rows.push(tracker_paper_columns(tr, i, wwidth));
@@ -2290,8 +2471,8 @@ function tracker_refresh() {
     if (dl.tracker_here) {
         var ts = wstorage.site_json(true, "hotcrp-tracking"),
             req = "track=" + ts[1], reqdata = {};
-        if (hotcrp_paperid)
-            req += "%20" + hotcrp_paperid + "&p=" + hotcrp_paperid;
+        if (siteinfo.paperid)
+            req += "%20" + siteinfo.paperid + "&p=" + siteinfo.paperid;
         if (ts[2])
             req += "&tracker_start_at=" + ts[2];
         if (ts[3])
@@ -2311,8 +2492,8 @@ handle_ui.on("js-tracker", function (event) {
     function push_tracker(hc, tr) {
         hc.push('<div class="lg tracker-group" data-index="' + trno + '" data-trackerid="' + tr.trackerid + '">', '</div>');
         hc.push('<input type="hidden" name="tr' + trno + '-id" value="' + escape_entities(tr.trackerid) + '">');
-        if (tr.trackerid === "new" && hotcrp_paperid)
-            hc.push('<input type="hidden" name="tr' + trno + '-p" value="' + hotcrp_paperid + '">');
+        if (tr.trackerid === "new" && siteinfo.paperid)
+            hc.push('<input type="hidden" name="tr' + trno + '-p" value="' + siteinfo.paperid + '">');
         if (tr.listinfo)
             hc.push('<input type="hidden" name="tr' + trno + '-listinfo" value="' + escape_entities(tr.listinfo) + '">');
         hc.push('<div class="entryi"><label for="htctl-tr' + trno + '-name">Name</label><div class="entry"><input id="htctl-tr' + trno + '-name" type="text" name="tr' + trno + '-name" size="30" class="want-focus need-autogrow" value="' + escape_entities(tr.name || "") + (tr.is_new ? '" placeholder="New tracker' : '" placeholder="Unnamed') + '"></div></div>');
@@ -2372,8 +2553,8 @@ handle_ui.on("js-tracker", function (event) {
             visibility: wstorage.site(false, "hotcrp-tracking-visibility"),
             listinfo: document.body.getAttribute("data-hotlist")
         }, $myg = $(this).closest("div.lg"), hc = new HtmlCollector;
-        if (hotcrp_paperid)
-            tr.papers = [{pid: hotcrp_paperid}];
+        if (siteinfo.paperid)
+            tr.papers = [{pid: siteinfo.paperid}];
         push_tracker(hc, tr);
         focus_within($(hc.render()).insertBefore($myg));
         $myg.remove();
@@ -2482,7 +2663,7 @@ handle_ui.on("js-tracker", function (event) {
         start();
     } else {
         $.post(hoturl_post("api/trackerconfig"),
-               {"tr1-id": "new", "tr1-listinfo": document.body.getAttribute("data-hotlist"), "tr1-p": hotcrp_paperid, "tr1-vis": wstorage.site(false, "hotcrp-tracking-visibility")},
+               {"tr1-id": "new", "tr1-listinfo": document.body.getAttribute("data-hotlist"), "tr1-p": siteinfo.paperid, "tr1-vis": wstorage.site(false, "hotcrp-tracking-visibility")},
                make_submit_success({}, "new"));
     }
 });
@@ -2519,9 +2700,9 @@ var comet_store = (function () {
             x = {};
         if (!x.updated_at
             || x.updated_at + 10 < now_sec()
-            || (x.tracker_status != dl.tracker_status && x.at < dl.now))
+            || (dl && x.tracker_status != dl.tracker_status && x.at < dl.now))
             x.expired = true;
-        else if (x.tracker_status != dl.tracker_status)
+        else if (dl && x.tracker_status != dl.tracker_status)
             x.fresh = true;
         else if (x.at == stored_at)
             x.owned = true;
@@ -2645,7 +2826,7 @@ function load(dlx, is_initial) {
         window.hotcrp_status = dl = dlx;
     dl.load = dl.load || now_sec();
     dl.perm = dl.perm || {};
-    dl.myperm = dl.perm[hotcrp_paperid] || {};
+    dl.myperm = dl.perm[siteinfo.paperid] || {};
     dl.rev = dl.rev || {};
     dl.tracker_status = dl.tracker_status || "off";
     if (dl.tracker
@@ -2710,7 +2891,7 @@ function reload() {
     reload_timeout = true;
     var options = hotcrp_deadlines.options || {};
     if (hotcrp_deadlines)
-        options.p = hotcrp_paperid;
+        options.p = siteinfo.paperid;
     options.fn = "status";
     $.ajax(hoturl("api", options), {
         method: "GET", timeout: 30000, success: load_success
@@ -2749,7 +2930,7 @@ var hotcrp_load = (function ($) {
 
 
 function fold_storage() {
-    if (!this || this === window) {
+    if (!this || this === window || this === hotcrp) {
         $(".need-fold-storage").each(fold_storage);
     } else {
         removeClass(this, "need-fold-storage");
@@ -2788,8 +2969,9 @@ function fold(elt, dofold, foldnum) {
 
     // find element
     if (elt && ($.isArray(elt) || elt.jquery)) {
-        for (i = 0; i < elt.length; i++)
+        for (i = 0; i < elt.length; i++) {
             fold(elt[i], dofold, foldnum);
+        }
         return false;
     } else if (typeof elt == "string") {
         elt = $$("fold" + elt) || $$(elt);
@@ -2812,11 +2994,6 @@ function fold(elt, dofold, foldnum) {
             elt.className = elt.className.replace(opentxt, closetxt);
         } else {
             elt.className = elt.className.replace(closetxt, opentxt);
-        }
-        var focused = document.activeElement;
-        if ((!focused || !hasClass(focused, "keep-focus"))
-            && (isopen || !focus_within(elt))) {
-            refocus_within(elt);
         }
 
         // check for session
@@ -2856,7 +3033,7 @@ function foldup(event, opts) {
         }
         opts.n = parseInt(m[2]) || 0;
         if (!("f" in opts) && m[3] !== "") {
-            if (this.tagName === "INPUT" && this.type === "checkbox" && m[3] === "u") {
+            if (m[3] === "u" && this.tagName === "INPUT" && this.type === "checkbox") {
                 opts.f = this.checked;
             } else {
                 opts.f = m[3] === "c";
@@ -2864,20 +3041,23 @@ function foldup(event, opts) {
         }
     }
     var foldname = "fold" + (opts.n || "");
-    while (e
-           && (!e.id || e.id.substr(0, 4) != "fold")
-           && !hasClass(e, "has-fold")
-           && (opts.n == null
-               || (!hasClass(e, foldname + "c")
-                   && !hasClass(e, foldname + "o")))) {
+    while (e && ((!hasClass(e, "has-fold") && (!e.id || !e.id.startsWith("fold")))
+                 || (opts.n != null && !hasClass(e, foldname + "c") && !hasClass(e, foldname + "o")))) {
         e = e.parentNode;
     }
     if (!e) {
         return true;
     }
-    if (opts.n == null && (m = e.className.match(/\bfold(\d*)[oc]\b/))) {
-        opts.n = +m[1];
-        foldname = "fold" + (opts.n || "");
+    if (opts.n == null) {
+        x = classList(e);
+        for (var i = 0; i !== x.length; ++i) {
+            if (x[i].substring(0, 4) === "fold"
+                && (m = x[i].match(/^fold(\d*)[oc]$/))
+                && (opts.n == null || +m[1] < opts.n)) {
+                opts.n = +m[1];
+                foldname = "fold" + (opts.n || "");
+            }
+        }
     }
     if (!("f" in opts)
         && (this.tagName === "INPUT" || this.tagName === "SELECT")) {
@@ -2893,7 +3073,7 @@ function foldup(event, opts) {
         }
         if (value !== null) {
             var values = (e.getAttribute("data-" + foldname + "-values") || "").split(/\s+/);
-            opts.f = values.indexOf(this.value) < 0;
+            opts.f = values.indexOf(value) < 0;
         }
     }
     dofold = !hasClass(e, foldname + "c");
@@ -2915,11 +3095,14 @@ function foldup(event, opts) {
 }
 
 handle_ui.on("js-foldup", foldup);
-$(document).on("fold unfold", ".js-fold-focus", function (event, opts) {
-    focus_within(this, (opts.f ? ".fn" : ".fx") + (opts.n || "") + " *");
+$(document).on("unfold", ".js-unfold-focus", function (event, opts) {
+    opts.nofocus || focus_within(this, ".fx" + (opts.n || "") + " *");
+});
+$(document).on("fold", ".js-fold-focus", function (event, opts) {
+    opts.nofocus || focus_within(this, ".fn" + (opts.n || "") + " *");
 });
 $(function () {
-    $(".uich.js-foldup").each(function () { foldup.call(this, null); });
+    $(".uich.js-foldup").each(function () { foldup.call(this, null, {nofocus: true}); });
 });
 
 
@@ -2940,7 +3123,7 @@ handle_ui.on("js-aufoldup", function (event) {
 handle_ui.on("js-click-child", function (event) {
     var a = $(this).find("a")[0]
         || $(this).find("input[type=checkbox], input[type=radio]")[0];
-    if (a && event.target !== a) {
+    if (a && event.target !== a && !a.disabled) {
         var newEvent = new MouseEvent("click", {
             button: event.button, buttons: event.buttons,
             ctrlKey: event.ctrlKey, shiftKey: event.shiftKey,
@@ -3033,9 +3216,8 @@ function jump_hash(hash, focus) {
         return true;
     }
     // find destination element
-    if (hash
-        && (e = document.getElementById(hash))
-        && (p = e.closest(".papeg, .rveg, .f-i, .form-g, .entryi, .checki"))) {
+    e = hash ? document.getElementById(hash) : null;
+    if (e && (p = e.closest(".papeg, .rveg, .f-i, .form-g, .entryi, .checki"))) {
         var eg = $(e).geometry(), pg = $(p).geometry(), wh = $(window).height();
         if ((eg.width <= 0 && eg.height <= 0)
             || (pg.top <= eg.top && eg.top - pg.top <= wh * 0.75)) {
@@ -3045,6 +3227,8 @@ function jump_hash(hash, focus) {
             focus_at(e);
             return true;
         }
+    } else if (e && hasClass(e, "need-anchor-unfold")) {
+        foldup.call(e, null, {f: false});
     }
     return false;
 }
@@ -3075,11 +3259,11 @@ $(document).on("keypress", "input.js-autosubmit", function (event) {
     if (event_modkey(event) || event_key(event) !== "Enter") {
         return;
     }
-    var $f = $(event.target).closest("form"),
-        type = $f.data("autosubmitType"),
-        defaulte = $f[0] ? $f[0]["default"] : null;
+    var f = event.target.closest("form"),
+        type = $(f).data("autosubmitType"),
+        defaulte = f ? f.elements["default"] : null;
     if (defaulte && type) {
-        $f[0].defaultact.value = type;
+        f.elements.defaultact.value = type;
         event.target.blur();
         defaulte.click();
     }
@@ -3091,6 +3275,15 @@ $(document).on("keypress", "input.js-autosubmit", function (event) {
 
 handle_ui.on("js-submit-mark", function (event) {
     $(this).closest("form").data("submitMark", event.target.value);
+});
+
+handle_ui.on("js-keydown-enter-submit", function (event) {
+    if (event.type === "keydown"
+        && !(event_modkey(event) & (event_modkey.SHIFT | event_modkey.ALT))
+        && event_key(event) === "Enter") {
+        $(event.target.closest("form")).trigger("submit");
+        event.preventDefault();
+    }
 });
 
 
@@ -3203,22 +3396,22 @@ handle_ui.on("js-assignment-autosave", function (event) {
 
 (function () {
 var email_info = [], email_info_at = 0;
-handle_ui.on("js-email-populate", function () {
+handle_ui.on("input.js-email-populate", function (event) {
     var self = this,
         v = self.value.toLowerCase().trim(),
         f = this.closest("form"),
         fn = null, ln = null, nn = null, af = null, placeholder = false;
     if (this.name === "email" || this.name === "uemail") {
-        fn = f.firstName;
-        ln = f.lastName;
-        af = f.affiliation;
+        fn = f.elements.firstName;
+        ln = f.elements.lastName;
+        af = f.elements.affiliation;
         placeholder = true;
-    } else if (this.name.substring(0, 7) === "auemail") {
-        var idx = this.name.substring(7);
-        nn = f["auname" + idx];
-        af = f["auaff" + idx];
-    } else if (this.name.substring(0, 16) === "newcontact_email") {
-        nn = f["newcontact_name" + this.name.substring(16)];
+    } else if (this.name.substring(0, 13) === "authors:email") {
+        var idx = this.name.substring(13);
+        nn = f.elements["authors:name" + idx];
+        af = f.elements["authors:affiliation" + idx];
+    } else if (this.name.substring(0, 14) === "contacts:email") {
+        nn = f.elements["contacts:name" + this.name.substring(14)];
     }
     if (!fn && !ln && !nn && !af)
         return;
@@ -3253,13 +3446,25 @@ handle_ui.on("js-email-populate", function () {
         function handle(e, v) {
             if (placeholder)
                 e.setAttribute("placeholder", v);
-            else if (e.value === "" || e.value === e.defaultValue)
-                e.value = e.defaultValue = v;
+            else if (e.defaultValue === "") {
+                if (e.value !== "" && e.getAttribute("data-populated-value") !== e.value) {
+                    addClass(e, "stop-populate");
+                    e.removeAttribute("data-populated-value");
+                } else if (e.value === "" || !hasClass(e, "stop-populate")) {
+                    e.value = v;
+                    e.setAttribute("data-populated-value", v);
+                    removeClass(e, "stop-populate");
+                }
+            }
         }
         fn && handle(fn, data.firstName || "");
         ln && handle(ln, data.lastName || "");
         nn && handle(nn, data.name || "");
         af && handle(af, data.affiliation || "");
+        if (hasClass(self, "want-potential-conflict")) {
+            $(f).find(".potential-conflict").html(data.potential_conflict || "");
+            $(f).find(".potential-conflict-container").toggleClass("hidden", !data.potential_conflict);
+        }
         self.setAttribute("data-populated-email", v);
     }
 
@@ -3272,7 +3477,12 @@ handle_ui.on("js-email-populate", function () {
                && (v < email_info[i] || v > email_info[i + 1].lemail))
             i += 2;
         if (i === email_info.length) {
-            $.ajax(hoturl_post("api/user", {email: v}), {
+            var args = {email: v};
+            if (hasClass(this, "want-potential-conflict")) {
+                args.potential_conflict = 1;
+                args.p = siteinfo.paperid;
+            }
+            $.ajax(hoturl_post("api/user", args), {
                 method: "GET", success: success
             });
         } else if (v === email_info[i + 1].lemail) {
@@ -3288,7 +3498,7 @@ handle_ui.on("js-email-populate", function () {
 
 handle_ui.on("js-request-review-preview-email", function (event) {
     var f = this.closest("form"),
-        a = {p: hotcrp_paperid, template: "requestreview"},
+        a = {p: siteinfo.paperid, template: "requestreview"},
         self = this;
     function fv(field, defaultv) {
         var x = f[field] && f[field].value.trim();
@@ -3322,6 +3532,99 @@ handle_ui.on("js-request-review-preview-email", function (event) {
     event.stopPropagation();
 });
 
+// autoassignment
+(function () {
+function make_pcsel_members(tag) {
+    if (tag === "__flip__")
+        return function () { return !this.checked; };
+    else if (tag === "all")
+        return function () { return true; };
+    else if (tag === "none")
+        return function () { return false; };
+    else {
+        tag = " " + tag.toLowerCase() + "#";
+        return function () {
+            var tlist = hotcrp_pc_tags[this.name.substr(3)] || "";
+            return tlist.indexOf(tag) >= 0;
+        };
+    }
+}
+function pcsel_tag(event) {
+    var $g = $(this).closest(".js-radio-focus"), e;
+    if (this.tagName === "A") {
+        $g.find("input[type=radio]").first().click();
+        var tag = this.hash.substring(4),
+            f = make_pcsel_members(tag),
+            full = true;
+        if (tag !== "all" && tag !== "none" && tag !== "__flip__"
+            && !hasClass(this, "font-weight-bold")) {
+            $g.find("input").each(function () {
+                if (this.name.startsWith("pcc") && !this.checked)
+                    return (full = false);
+            });
+        }
+        $g.find("input").each(function () {
+            if (this.name.startsWith("pcc")) {
+                var on = f.call(this);
+                if (full || on)
+                    this.checked = on;
+            }
+        });
+        event.preventDefault();
+    }
+    var tags = [], functions = {}, isall = true;
+    $g.find("a.js-pcsel-tag").each(function () {
+        var tag = this.hash.substring(4);
+        if (tag !== "none") {
+            tags.push(tag);
+            functions[tag] = make_pcsel_members(tag);
+        }
+    });
+    $g.find("input").each(function () {
+        if (this.name.startsWith("pcc") && !this.checked) {
+            isall = false;
+            for (var i = 0; i < tags.length; ) {
+                if (functions[tags[i]].call(this))
+                    tags.splice(i, 1);
+                else
+                    ++i;
+            }
+            return isall || tags.length !== 0;
+        }
+    });
+    $g.find("a.js-pcsel-tag").each(function () {
+        var tag = this.hash.substring(4);
+        if ($.inArray(tag, tags) >= 0 && (tag === "all" || !isall))
+            addClass(this, "font-weight-bold");
+        else
+            removeClass(this, "font-weight-bold");
+    });
+}
+handle_ui.on("js-pcsel-tag", pcsel_tag);
+
+handle_ui.on("badpairs", function () {
+    if (this.value !== "none") {
+        var x = $$("badpairs");
+        x.checked || x.click();
+    }
+});
+
+handle_ui.on(".js-badpairs-row", function () {
+    var tbody = $("#bptable > tbody"), n = tbody.children().length;
+    if (hasClass(this, "more")) {
+        ++n;
+        tbody.append('<tr><td class="rentry nw">or &nbsp;</td><td class="lentry"><span class="select"><select name="bpa' + n + '" class="badpairs"></select></span> &nbsp;and&nbsp; <span class="select"><select name="bpb' + n + '" class="badpairs"></select></span></td></tr>');
+        var options = tbody.find("select").first().html();
+        tbody.find("select[name=bpa" + n + "], select[name=bpb" + n + "]").html(options).val("none");
+    } else if (n > 1) {
+        --n;
+        tbody.children().last().remove();
+    }
+    return false;
+});
+
+})();
+
 
 // author entry
 var row_order_ui = (function ($) {
@@ -3337,6 +3640,12 @@ function row_order_change(e, delta, action) {
     var max_rows = +$tbody.attr("data-max-rows") || 0,
         min_rows = Math.max(+$tbody.attr("data-min-rows") || 0, 1),
         autogrow = $tbody.attr("data-row-order-autogrow");
+
+    var defaults = {};
+    $tbody.find("input, select, textarea").each(function () {
+        if (this.name)
+            defaults[this.name] = input_default_value(this);
+    });
 
     if (action < 0) {
         tooltip.erase();
@@ -3384,16 +3693,37 @@ function row_order_change(e, delta, action) {
         --action;
     }
 
+    var changes = [];
     for (var i = 1; i <= trs.length; ++i) {
-        var $tr = $(trs[i - 1]), td0h = $($tr[0].firstChild).html();
+        var $tr = $(trs[i - 1]),
+            td0h = $($tr[0].firstChild).html(),
+            new_index = null;
         if (td0h !== i + "." && /^(?:\d+|\$).$/.test(td0h))
             $($tr[0].firstChild).html(i + ".");
         $tr.find("input, select, textarea").each(function () {
-            var m = /^(.*?)(?:\d+|\$)$/.exec(this.getAttribute("name"));
-            if (m && m[2] != i)
-                this.setAttribute("name", m[1] + i);
+            var m = /^(.*?)(\d+|\$)$/.exec(this.getAttribute("name"));
+            if (m && new_index === null) {
+                if (m[2] === '$') {
+                    var f = this.closest("form");
+                    new_index = 1;
+                    while (f.elements[m[1] + new_index])
+                        ++new_index;
+                } else
+                    new_index = i;
+            }
+            if (m && m[2] != new_index) {
+                this.name = m[1] + new_index;
+                if (this.name in defaults) {
+                    if (input_is_checkboxlike(this))
+                        this.setAttribute("data-default-checked", defaults[this.name] ? "true" : "false");
+                    else
+                        this.setAttribute("data-default-value", defaults[this.name]);
+                }
+                changes.push(this);
+            }
         });
     }
+    $(changes).trigger("change");
 }
 
 function row_order_ui(event) {
@@ -3460,33 +3790,46 @@ function make_outline_flasher(elt, rgba, duration) {
 }
 
 function setajaxcheck(elt, rv) {
+    var f, i, e, mx, reset;
     if (typeof elt == "string")
         elt = $$(elt);
     else if (elt.jquery)
         elt = elt[0];
     if (!elt)
         return;
-    if (rv && !rv.ok && rv.errf) {
-        var i, e, f = elt.closest("form");
-        for (i in rv.errf)
-            if (f && (e = f.elements[i])) {
-                elt = e;
-                break;
-            }
-    }
     make_outline_flasher(elt);
-    if (!rv || (!rv.ok && !rv.error))
-        rv = {error: "Error"};
-    if (rv.ok && !rv.warning)
+    var t = "", i, status = 0;
+    if (rv && rv.message_list) {
+        f = elt.closest("form");
+        for (var i = 0; i !== rv.message_list.length; ++i) {
+            mx = rv.message_list[i];
+            t += render_feedback(mx.message, mx.status);
+            status = Math.max(status, mx.status);
+            if (f && mx.field && (e = f.elements[mx.field]) && !reset) {
+                elt = reset = e;
+            }
+        }
+    }
+    if (t === "") {
+        if (rv && rv.error) {
+            t = rv.error;
+            status = 2;
+        } else if (rv && rv.warning) {
+            t = rv.warning;
+            status = rv.ok ? 1 : 2;
+        } else if (!rv || !rv.ok) {
+            t = "Error";
+            status = 2;
+        }
+    }
+    if (status === 0)
         make_outline_flasher(elt, "0, 200, 0");
-    else if (rv.ok)
+    else if (status === 1)
         make_outline_flasher(elt, "133, 92, 4");
     else
         elt.style.outline = "5px solid red";
-    if (rv.error)
-        make_bubble(rv.error, "errorbubble").near(elt).removeOn(elt, "input change click hide");
-    else if (rv.warning)
-        make_bubble(rv.warning, "warningbubble").near(elt).removeOn(elt, "input change click hide focus blur");
+    if (t)
+        make_bubble(t, status === 2 ? "errorbubble" : "warningbubble").near(elt).removeOn(elt, "input change click hide" + (status === 2 ? "" : " focus blur"));
 }
 
 function link_urls(t) {
@@ -3598,24 +3941,7 @@ return render_text;
 })($);
 
 
-// abstract
-$(function () {
-    function check_abstract_height() {
-        var want_hidden = $("#foldpaper").hasClass("fold6c");
-        if (want_hidden) {
-            var $ab = $(".abstract");
-            if ($ab.length && $ab.height() > $ab.closest(".paperinfo-abstract").height() - $ab.position().top)
-                want_hidden = false;
-        }
-        $("#foldpaper").toggleClass("fold7c", want_hidden);
-    }
-    if ($(".paperinfo-abstract").length) {
-        check_abstract_height();
-        $("#foldpaper").on("fold unfold renderText", check_abstract_height);
-        $(window).on("resize", check_abstract_height);
-    }
-});
-
+// left menus
 var add_pslitem = (function () {
 var pslcard, observer, linkmap;
 function observer_fn(entries) {
@@ -3642,17 +3968,55 @@ return function (id, name, elt) {
         if (name === false) {
             observer && observer.unobserve($$(id));
             $(pslcard).find("a[href='#" + id + "']").remove();
-        } else {
+        } else if (typeof id === "string") {
             var $psli = $('<li class="pslitem ui js-click-child"><a href="#' + id + '" class="x hover-child">' + name + '</a></li>');
             $psli.appendTo(pslcard);
             elt = elt || $$(id);
             linkmap && linkmap.set(elt, $psli[0]);
             observer && observer.observe(elt);
             return $psli[0];
+        } else {
+            pslcard.appendChild(id);
         }
     }
 };
 })();
+
+handle_ui.on("js-leftmenu", function (event) {
+    var nav = this.closest("nav"), list = nav.firstChild;
+    while (list.tagName !== "UL") {
+        list = list.nextSibling;
+    }
+    var liststyle = window.getComputedStyle(list);
+    if (liststyle.display === "none") {
+        addClass(nav, "leftmenu-open");
+        event.preventDefault();
+    } else if (liststyle.display === "block") {
+        removeClass(nav, "leftmenu-open");
+        event.preventDefault();
+    } else if (this.href === "") {
+        event.preventDefault();
+    }
+});
+
+
+// abstract
+$(function () {
+    function check_abstract_height() {
+        var want_hidden = $("#foldpaper").hasClass("fold6c");
+        if (want_hidden) {
+            var $ab = $(".abstract");
+            if ($ab.length && $ab.height() > $ab.closest(".paperinfo-abstract").height() - $ab.position().top)
+                want_hidden = false;
+        }
+        $("#foldpaper").toggleClass("fold7c", want_hidden);
+    }
+    if ($(".paperinfo-abstract").length) {
+        check_abstract_height();
+        $("#foldpaper").on("fold unfold renderText", check_abstract_height);
+        $(window).on("resize", check_abstract_height);
+    }
+});
 
 
 // reviews
@@ -3669,7 +4033,7 @@ handle_ui.on("js-review-tokens", function () {
                         location.assign(location.href);
                     }
                 } else {
-                    $d.find("h2").after(render_xmsg(2, data.error || "Internal error."));
+                    $d.find("h2").after(render_xmsg(data.error || "Internal error.", 2));
                 }
             });
         return false;
@@ -3687,7 +4051,7 @@ handle_ui.on("js-review-tokens", function () {
 window.review_form = (function ($) {
 var formj, form_order;
 var rtype_info = {
-    "-3": ["−" /* &minus; */, "Refused"], "-2": ["A", "Author"],
+    "-3": ["−" /* &minus; */, "Declined"], "-2": ["A", "Author"],
     "-1": ["C", "Conflict"], 1: ["E", "External review"],
     2: ["P", "PC review"], 3: ["2", "Secondary review"],
     4: ["1", "Primary review"], 5: ["M", "Metareview"]
@@ -3699,7 +4063,7 @@ tooltip.add_builder("rf-score", function (info) {
         && (score = fieldj.score_info.parse($self.find("span.sv").text())))
         info = $.extend({
             content: fieldj.options[score - 1],
-            dir: "l", near: $self.find("span")[0]
+            anchor: "w", near: $self.find("span")[0]
         }, info);
     return info;
 });
@@ -3722,7 +4086,7 @@ tooltip.add_builder("rf-description", function (info) {
                      si < vo.length; ++si)
                     d += "<div class=\"od\"><strong class=\"rev_num " + fieldj.score_info.className(vo[si]) + "\">" + fieldj.score_info.unparse(vo[si]) + ".</strong>&nbsp;" + escape_entities(fieldj.options[vo[si] - 1]) + "</div>";
             }
-            info = $.extend({content: d, dir: "l"}, info);
+            info = $.extend({content: d, anchor: "w"}, info);
         }
     }
     return info;
@@ -3735,7 +4099,7 @@ function score_header_tooltips($j) {
 
 function render_review_body(rrow) {
     var view_order = $.grep(form_order, function (f) {
-        if (f.options && f.allow_empty)
+        if (f.options && !f.required)
             return f.uid in rrow;
         else
             return !!rrow[f.uid];
@@ -3758,8 +4122,8 @@ function render_review_body(rrow) {
             x = "au";
         }
         if (x != "au") {
-            t += '<div class="revvis">(' +
-                (({secret: "secret", admin: "shown only to chairs",
+            t += '<div class="field-visibility">(' +
+                (({secret: "secret", admin: "administrators only",
                    pc: "hidden from authors", audec: "hidden from authors until decision"})[x] || x) +
                 ')</div>';
         }
@@ -3774,7 +4138,7 @@ function render_review_body(rrow) {
                 f.score_info.unparse_revnum(x) + ' </span><span class="revscoredesc">' +
                 escape_entities(f.options[x - 1]) + '</span></p>';
         } else {
-            t += '<p class="revv revnoscore">' + (f.allow_empty ? "No entry" : "Unknown") + '</p>';
+            t += '<p class="revv revnoscore">' + (f.required ? "Unknown" : "No entry") + '</p>';
         }
 
         t += '</div>';
@@ -3800,7 +4164,7 @@ function unparse_ratings(ratings, user_rating, editable) {
     var ct = ratings_counts(ratings);
 
     var rating_names = ["Good review", "Needs work", "Too short", "Too vague",
-                        "Too narrow", "Not constructive", "Not correct"];
+                        "Too narrow", "Disrespectful", "Not correct"];
     var t = [];
     t.push('<span class="revrating-group flag fn">'
            + (editable ? '<a href="" class="qq ui js-revrating-unfold">' : '<a href="' + hoturl("help", {t: "revrate"}) + '" class="qq">')
@@ -3884,11 +4248,11 @@ handle_ui.on("js-revrating", function () {
                 $rr.find(".revrating-choice").each(function () {
                     var bit = this.getAttribute("data-revrating-bit");
                     if (ct[bit]) {
-                        this.lastChild.innerText = " " + ct[bit];
+                        this.lastChild.textContent = " " + ct[bit];
                         removeClass(this, "fx");
                         removeClass(this, "revrating-unused");
                     } else {
-                        this.lastChild.innerText = "";
+                        this.lastChild.textContent = "";
                         bit >= 2 && addClass(this, "fx");
                         addClass(this, "revrating-unused");
                     }
@@ -3918,27 +4282,27 @@ function revrating_key(event) {
 
 function add_review(rrow) {
     var hc = new HtmlCollector,
-        rid = rrow.ordinal ? rrow.pid + "" + rrow.ordinal : "" + rrow.rid,
-        rlink = "r=" + rid + (hotcrp_want_override_conflict ? "&forceShow=1" : ""),
+        rid = rrow.pid + (rrow.ordinal || "r" + rrow.rid),
+        rlink = "p=".concat(rrow.pid, "&r=", rid),
         has_user_rating = false, i, ratekey, selected;
+    if (siteinfo.want_override_conflict)
+        rlink += "&forceShow=1";
 
     i = rrow.ordinal ? '" data-review-ordinal="' + rrow.ordinal : '';
-    hc.push('<article id="r' + rid + '" class="pcard revcard has-fold '
-            + (rrow.folded ? "fold20c" : "fold20o")
-            + '" data-pid="' + rrow.pid
-            + '" data-rid="' + rrow.rid + i + '">', '</article>');
+    hc.push('<article id="r'.concat(rid,
+                '" class="pcard revcard need-anchor-unfold has-fold ',
+                rrow.folded ? "fold20c" : "fold20o", '" data-pid="', rrow.pid,
+                '" data-rid="', rrow.rid, i, '">'), '</article>');
 
     // HEADER
     hc.push('<header class="revcard-head">', '</header>');
 
     // review description
     var rdesc = rrow.subreview ? "Subreview" : "Review";
-    if (rrow.draft) {
+    if (rrow.draft)
         rdesc = "Draft " + rdesc;
-    }
-    if (rrow.ordinal) {
+    if (rrow.ordinal)
         rdesc += " #" + rid;
-    }
 
     // edit/text links
     if (rrow.folded) {
@@ -4035,7 +4399,7 @@ var vismap = {rev: "hidden from authors",
               pc: "hidden from authors and external reviewers",
               admin: "shown only to administrators"};
 var cmts = {}, newcmt, has_unload = false, resp_rounds = {},
-    twiddle_start = hotcrp_user && hotcrp_user.cid ? hotcrp_user.cid + "~" : "###";
+    twiddle_start = siteinfo.user && siteinfo.user.cid ? siteinfo.user.cid + "~" : "###";
 
 function unparse_tag(tag, strip_value) {
     var pos;
@@ -4140,7 +4504,7 @@ function render_editing(hc, cj) {
         msgx.push(resp_rounds[cj.response].instrux);
     }
     if (cj.response
-        && !hotcrp_status.myperm.act_author) {
+        && !hotcrp_status.myperm.is_author) {
         msgx.push('You aren’t a contact for this paper, but as an administrator you can edit the authors’ response.');
     } else if (cj.review_token
                && hotcrp_status.myperm.review_tokens
@@ -4148,9 +4512,9 @@ function render_editing(hc, cj) {
         msgx.push('You have a review token for this paper, so your comment will be anonymous.');
     } else if (!cj.response
                && cj.author_email
-               && hotcrp_user.email
-               && cj.author_email.toLowerCase() != hotcrp_user.email.toLowerCase()) {
-        if (hotcrp_status.myperm.act_author)
+               && siteinfo.user.email
+               && cj.author_email.toLowerCase() != siteinfo.user.email.toLowerCase()) {
+        if (hotcrp_status.myperm.is_author)
             msg = "You didn’t write this comment, but as a fellow author you can edit it.";
         else
             msg = "You didn’t write this comment, but as an administrator you can edit it.";
@@ -4176,7 +4540,7 @@ function render_editing(hc, cj) {
         fmtnote += (fmtnote ? ' <span class="barsep">·</span> ' : "") + '<a href="" class="ui js-togglepreview" data-format="' + (fmt.format || 0) + '">Preview</a>';
     }
     fmtnote && hc.push('<div class="formatdescription">' + fmtnote + '</div>');
-    hc.push_pop('<textarea name="text" class="reviewtext cmttext suggest-emoji need-suggest c" rows="5" cols="60" placeholder="Leave a comment"></textarea>');
+    hc.push_pop('<textarea name="text" class="w-text cmttext suggest-emoji need-suggest c" rows="5" cols="60" placeholder="Leave a comment"></textarea>');
 
     hc.push('<div class="cmteditinfo fold2o fold3c">', '</div>');
 
@@ -4249,20 +4613,21 @@ function render_editing(hc, cj) {
     hc.pop();
 
     // actions: [btnbox], [wordcount] || cancel, save/submit
-    hc.push('<div class="reviewtext aabig aab aabr">', '</div>');
+    hc.push('<div class="w-text aabig aab mt-3">', '</div>');
     bnote = edit_allowed(cj) ? "" : '<div class="hint">(admin only)</div>';
     if (btnbox.length)
-        hc.push('<div class="aabut aabl"><div class="btnbox">' + btnbox.join("") + '</div></div>');
+        hc.push('<div class="aabut"><div class="btnbox">' + btnbox.join("") + '</div></div>');
     if (cj.response && resp_rounds[cj.response].words > 0)
-        hc.push('<div class="aabut aabl"><div class="words"></div></div>');
+        hc.push('<div class="aabut"><div class="words"></div></div>');
+    hc.push('<div class="aabr">', '</div>');
+    hc.push('<div class="aabut"><button type="button" name="cancel">Cancel</button></div>');
     if (cj.response) {
         // XXX allow_administer
         hc.push('<div class="aabut"><button type="button" name="bsubmit" class="btn-primary">Submit</button>' + bnote + "</div>");
     } else {
         hc.push('<div class="aabut"><button type="button" name="bsubmit" class="btn-primary">Save</button>' + bnote + "</div>");
     }
-    hc.push('<div class="aabut"><button type="button" name="cancel">Cancel</button></div>');
-    hc.pop();
+    hc.pop_n(2);
 }
 
 function visibility_change() {
@@ -4323,7 +4688,7 @@ function activate_editing($c, cj) {
             $c.find(".has-editable-attachments .entry").append(render_edit_attachment(i, cj.docs[i]));
     }
 
-    if (!cj.visiblity || cj.blind) {
+    if (!cj.visibility || cj.blind) {
         $c.find("input[name=blind]").prop("checked", true);
     }
 
@@ -4347,7 +4712,7 @@ function activate_editing($c, cj) {
 
 function render_edit_attachment(i, doc) {
     var hc = new HtmlCollector;
-    hc.push('<div class="has-document compact" data-document-name="cmtdoc_' + doc.docid + '_' + i + '">', '</div>');
+    hc.push('<div class="has-document compact" data-dtype="-2" data-document-name="cmtdoc_' + doc.docid + '_' + i + '">', '</div>');
     hc.push('<div class="document-file">', '</div>');
     render_attachment_link(hc, doc);
     hc.pop();
@@ -4356,22 +4721,15 @@ function render_edit_attachment(i, doc) {
 }
 
 function render_attachment_link(hc, doc) {
-    hc.push('<a href="' + text_to_html(siteurl + doc.siteurl) + '" class="q">', '</a>');
+    hc.push('<a href="' + text_to_html(siteinfo.site_relative + doc.siteurl) + '" class="q">', '</a>');
     if (doc.mimetype === "application/pdf") {
-        hc.push('<img src="' + assetsurl + 'images/pdf.png" alt="[PDF]" class="sdlimg">');
+        hc.push('<img src="' + siteinfo.assets + 'images/pdf.png" alt="[PDF]" class="sdlimg">');
     } else {
-        hc.push('<img src="' + assetsurl + 'images/generic.png" alt="[Attachment]" class="sdlimg">');
+        hc.push('<img src="' + siteinfo.assets + 'images/generic.png" alt="[Attachment]" class="sdlimg">');
     }
     hc.push(' ' + text_to_html(doc.unique_filename || doc.filename || "Attachment"));
     if (doc.size != null) {
-        hc.push(' <span class="dlsize">(', 'kB)</span>');
-        if (doc.size > 921)
-            hc.push(Math.round(doc.size / 1024));
-        else if (doc.size > 0)
-            hc.push(Math.max(Math.round(doc.size / 102.4), 1) / 10);
-        else
-            hc.push("0");
-        hc.pop();
+        hc.push(' <span class="dlsize">(' + unparse_byte_size(doc.size) + ')</span>');
     }
     hc.pop();
 }
@@ -4408,17 +4766,21 @@ function make_save_callback($c) {
                 has_unload = false;
                 var form = $c.find("form")[0];
                 form.method = "post";
-                var arg = {editcomment: 1, p: hotcrp_paperid};
+                var arg = {editcomment: 1, p: siteinfo.paperid};
                 if ($c.c.cid)
                     arg.c = $c.c.cid;
                 form.action = hoturl_post("paper", arg);
                 form.submit();
             }
-            var error = data.msg || data.error;
+            var error = data.message || data.error;
             if (!/^<div/.test(error))
-                error = render_xmsg(2, error);
+                error = render_xmsg(error, 2);
             $c.find(".cmtmsg").html(error);
             $c.find("button, input[type=file]").prop("disabled", false);
+            $c.find("input[name=draft]").remove();
+            if (data.deleted) {
+                $c.c.cid = false;
+            }
             return;
         }
         var cid = cj_cid($c.c),
@@ -4433,9 +4795,9 @@ function make_save_callback($c) {
         }
         if (data.cmt) {
             save_change_id($c, cid, cj_cid(data.cmt));
-            render_cmt($c, data.cmt, editing_response, data.msg);
+            render_cmt($c, data.cmt, editing_response, data.message || data.msg);
         } else {
-            $c.closest(".cmtg").html(data.msg);
+            $c.closest(".cmtg").html(data.message || data.msg);
         }
     };
 }
@@ -4463,7 +4825,7 @@ function save_editor(elt, action, really) {
     $f.find("input[name=draft]").remove();
     var $ready = $f.find("input[name=ready]");
     if ($ready.length && !$ready[0].checked) {
-        $f.children("div").append('<input type="hidden" name="draft" value="1">');
+        $f.children("div").append(hidden_input("draft", "1"));
     }
     $c.find("button").prop("disabled", true);
     // work around a Safari bug with FormData
@@ -4471,14 +4833,14 @@ function save_editor(elt, action, really) {
         if (this.files.length === 0)
             this.disabled = true;
     });
-    var arg = {p: hotcrp_paperid};
+    var arg = {p: siteinfo.paperid};
     if ($c.c.cid) {
         arg.c = $c.c.cid;
     }
     if (really) {
         arg.override = 1;
     }
-    if (hotcrp_want_override_conflict) {
+    if (siteinfo.want_override_conflict) {
         arg.forceShow = 1;
     }
     if (action === "delete") {
@@ -4526,8 +4888,9 @@ function submit_editor(evt) {
 }
 
 function render_cmt($c, cj, editing, msg) {
-    var hc = new HtmlCollector, hcid = new HtmlCollector, t, chead, i;
-    cmts[cj_cid(cj)] = cj;
+    var hc = new HtmlCollector, hcid = new HtmlCollector, t, chead, i,
+        cid = cj_cid(cj);
+    cmts[cid] = cj;
     if (cj.is_new && !editing) {
         var ide = $c[0].closest(".cmtid");
         if (!hasClass(ide, "cmtcard")
@@ -4585,20 +4948,14 @@ function render_cmt($c, cj, editing, msg) {
     hc.pop_collapse();
 
     // text
-    hc.push('<div class="cmtv">', '</div>');
     hc.push('<div class="cmtmsg">', '</div>');
     if (msg) {
         hc.push(msg);
     }
-    if (cj.response && cj.draft && cj.text) {
-        hc.push('<div class="msg msg-warning"><strong>This response is a draft.</strong>', '</div>');
-        if (cj.submittable) {
-            hc.push_pop(' It will not be shown to reviewers unless you <a href="" class="ui js-submit-comment">submit it unchanged</a>.');
-        } else {
-            hc.push_pop(' It will not be shown to reviewers.');
-        }
-    }
     hc.pop();
+    if (cj.response && cj.draft && cj.text) {
+        hc.push('<p class="feedback is-warning">Reviewers can’t see this draft response.</p>');
+    }
     if (editing) {
         render_editing(hc, cj);
     } else {
@@ -4614,25 +4971,34 @@ function render_cmt($c, cj, editing, msg) {
     // render
     $c.find("textarea, input[type=text]").unautogrow();
     $c.html(hc.render());
+    if (cj.response) {
+        t = (cj.draft ? "Draft " : "") + (cj.response == "1" ? "" : cj.response + " ") + "Response";
+        var $chead_name = chead.find(".cmtcard-header-name");
+        if ($chead_name.html() !== t) {
+            $chead_name.html(t);
+            if ((i = add_pslitem(cid)))
+                $(i).find("a").html(t);
+        }
+    }
 
     // fill body
     if (editing) {
         activate_editing($c, cj);
     } else {
-        (cj.response ? chead.parent() : $c).find("a.cmteditor").click(edit_this);
         if (cj.text !== false) {
             render_cmt_text(cj.format, cj.text || "", cj.response,
                             $c.find(".cmttext"), chead);
-        } else {
-            t = '<div class="is-warning">⚠️ ';
+        } else if (cj.response) {
+            t = '<p class="feedback is-warning">';
             if (cj.word_count)
                 t += cj.word_count + "-word draft";
             else
                 t += "Draft";
             t += " " + (cj.response == "1" ? "" : cj.response + " ") +
-                "response not shown</div>";
+                "response not shown</p>";
             $c.find(".cmttext").html(t);
         }
+        (cj.response ? chead.parent() : $c).find("a.cmteditor").click(edit_this);
     }
 
     return $c;
@@ -4652,7 +5018,7 @@ function render_cmt_text(format, value, response, textj, chead) {
         if (wc > wlimit) {
             chead && chead.find(".words").addClass("wordsover");
             wc = count_words_split(value, wlimit);
-            textj.addClass("has-overlong").removeClass(fmt).prepend('<div class="overlong-underlay"><div class="overlong-allowed ' + fmt + '"></div><div class="overlong-mark"></div></div><div class="overlong-content ' + fmt + '"></div>');
+            textj.addClass("has-overlong overlong-collapsed").removeClass(fmt).prepend('<div class="overlong-divider"><div class="overlong-allowed ' + fmt + '"></div><div class="overlong-mark"><div class="overlong-expander"><button class="ui js-overlong-expand" aria-expanded="false">Show full-length response</button></div></div></div><div class="overlong-content ' + fmt + '"></div>');
             textj.find(".overlong-allowed").html(render_text(format, wc[0]).content);
             textj = textj.find(".overlong-content");
         }
@@ -4662,7 +5028,7 @@ function render_cmt_text(format, value, response, textj, chead) {
 
 handle_ui.on("js-submit-comment", function () {
     var $c = $cmt(this);
-    $.ajax(hoturl_post("api/comment", {p: hotcrp_paperid, c: $c.c.cid}), {
+    $.ajax(hoturl_post("api/comment", {p: siteinfo.paperid, c: $c.c.cid}), {
         method: "POST", data: {override: 1, response: $c.c.response, text: $c.c.text},
         success: make_save_callback($c)
     });
@@ -4683,7 +5049,7 @@ function add(cj, editing) {
                 $c = $('<div id="ccactions" class="pcard cmtcard"><div class="cmtcard-body"><div class="aab aabig"></div></div></div>').appendTo(".pcontainer");
             }
             if (!$c.find("a[href='#" + cid + "']").length) {
-                t = '<div class="aabut"><a href="#' + cid + '" class="btn ui js-edit-comment">Add ';
+                t = '<div class="aabut"><a href="#' + cid + '" class="btn uic js-edit-comment">Add ';
                 if (cj.response) {
                     t += (cj.response == "1" ? "" : cj.response + " ") + "response";
                 } else {
@@ -4706,16 +5072,16 @@ function add(cj, editing) {
                 t = '<article' + idattr + ' response pcard cmtcard">';
                 if (cj.text !== false) {
                     cdesc = (cj.response == "1" ? "" : cj.response + " ") + "Response";
+                    if (cj.draft)
+                        cdesc = "Draft " + cdesc;
                     t += '<header class="cmtcard-head"><h2><span class="cmtcard-header-name">' +
                         cdesc + '</span></h2></header>';
                 }
-                tx = '</article>';
+                j = $(t + '<div class="cmtcard-body cmtg"></div></article>').insertAfter($c);
             } else {
-                t = '<div id="cc' + cid + '" class="pcard cmtcard">';
+                $c = $('<div id="cc' + cid + '" class="pcard cmtcard"><div class="cmtcard-body"></div></div>').insertAfter($c);
                 cdesc = "Comment";
-                tx = '</div>';
             }
-            $c = $(t + '<div class="cmtcard-body"></div>' + tx).insertAfter($c);
             if (cdesc) {
                 add_pslitem(cj.response ? cid : "cc" + cid, cdesc);
             }
@@ -4724,14 +5090,15 @@ function add(cj, editing) {
             if ($psl.length === 1 && $psl.find("a").text() === "Comment")
                 $psl.find("a").text("Comments");
         }
-        if (cj.response) {
-            j = $('<div class="cmtg"></div>');
-        } else {
-            j = $('<article' + idattr + ' cmtg"></article>');
+        if (!cj.response) {
+            j = $('<article' + idattr + ' cmtg"></article>').appendTo($c.find(".cmtcard-body"));
         }
-        j.appendTo($c.find(".cmtcard-body"));
     }
-    if (editing == null && cj.response && cj.draft && cj.editable) {
+    if (cj.response) {
+        j = j.find(".cmtcard-body");
+    }
+    if (editing == null && cj.response && cj.draft && cj.editable
+        && hotcrp_status.myperm && hotcrp_status.myperm.is_author) {
         editing = true;
     }
     if (!newcmt && cid === "cnew") {
@@ -4782,6 +5149,12 @@ return {
     }
 };
 })(jQuery);
+
+handle_ui.on("js-overlong-expand", function () {
+    var e = this.closest(".has-overlong");
+    addClass(e, "overlong-expanded");
+    removeClass(e, "overlong-collapsed");
+});
 
 
 // previewing
@@ -4851,9 +5224,9 @@ function nextprev_shortcut(evt, key) {
             walk = $j.closest(".cmtcard")[0];
         walk = walk[siblingdir];
         if (walk && !walk.hasAttribute("id") && $(walk).hasClass("cmtcard"))
-            walk = $(walk).find(".cmtg")[jdir]()[0];
+            walk = $(walk).find(".cmtid")[jdir]()[0];
     } else {
-        $j = $(".cmtcard[id], .revcard[id], .cmtcard > .cmtcard-body > .cmtg[id]");
+        $j = $(".cmtid, .revcard[id]");
         walk = $j[jdir]()[0];
     }
     if (walk && walk.hasAttribute("id"))
@@ -5016,7 +5389,7 @@ demand_load.make = function (executor) {
 };
 
 demand_load.pc = demand_load.make(function (resolve, reject) {
-    $.get(hoturl("api/pc", {p: hotcrp_paperid}), null, function (v) {
+    $.get(hoturl("api/pc", {p: siteinfo.paperid}), null, function (v) {
         var pc = v && v.ok && v.pc;
         (pc ? resolve : reject)(pc);
     });
@@ -5042,20 +5415,47 @@ demand_load.search_completion = demand_load.make(function (resolve, reject) {
     });
 });
 
-demand_load.tags = demand_load.make(function (resolve, reject) {
-    if (hotcrp_user.is_pclike)
+demand_load.alltag_info = demand_load.make(function (resolve, reject) {
+    if (siteinfo.user.is_pclike)
         $.get(hoturl("api/alltags"), null, function (v) {
-            var tlist = (v && v.tags) || [];
-            tlist.sort(strnatcmp);
-            resolve(tlist);
+            resolve(v && v.tags ? v : {tags: []});
         });
     else
-        resolve([]);
+        resolve({tags: []});
+})
+
+demand_load.tags = demand_load.make(function (resolve, reject) {
+    demand_load.alltag_info().then(function (v) { resolve(v.tags); });
 });
 
+(function () {
+    function filter_tags(tags, filter, remove) {
+        if (filter) {
+            var result = [];
+            for (var i = 0; i !== tags.length; ++i) {
+                if (!filter[tags[i].toLowerCase()] === remove)
+                    result.push(tags[i]);
+            }
+            return result;
+        } else
+            return remove ? tags : [];
+    }
+    demand_load.editable_tags = demand_load.make(function (resolve, reject) {
+        demand_load.alltag_info().then(function (v) {
+            resolve(filter_tags(v.tags, v.readonly_tagmap, true));
+        });
+    });
+    demand_load.sitewide_editable_tags = demand_load.make(function (resolve, reject) {
+        demand_load.alltag_info().then(function (v) {
+            resolve(filter_tags(filter_tags(v.tags, v.sitewide_tagmap, false),
+                                v.readonly_tagmap, true));
+        });
+    });
+})();
+
 demand_load.mentions = demand_load.make(function (resolve, reject) {
-    if (hotcrp_user.is_pclike)
-        $.get(hoturl("api/mentioncompletion", {p: hotcrp_paperid}), null, function (v) {
+    if (siteinfo.user.is_pclike)
+        $.get(hoturl("api/mentioncompletion", {p: siteinfo.paperid}), null, function (v) {
             var tlist = ((v && v.mentioncompletion) || []).map(completion_item);
             tlist.sort(function (a, b) { return strnatcmp(a.s, b.s); });
             resolve(tlist);
@@ -5065,7 +5465,7 @@ demand_load.mentions = demand_load.make(function (resolve, reject) {
 });
 
 demand_load.emoji_codes = demand_load.make(function (resolve, reject) {
-    $.get(assetsurl + "scripts/emojicodes.json", null, function (v) {
+    $.get(siteinfo.assets + "scripts/emojicodes.json", null, function (v) {
         if (!v || !v.emoji)
             v = {emoji: []};
         if (!v.lists)
@@ -5182,7 +5582,9 @@ demand_load.emoji_completion = function (start) {
             code = sel[i];
             if (!v.completion[code]) {
                 v.completion[code] = {
-                    s: ":" + code + ":", r: v.emoji[code], no_space: true,
+                    s: ":" + code + ":",
+                    r: v.emoji[code],
+                    no_space: true,
                     sh: '<span class="nw">' + v.emoji[code] + " :" + code + ":</span>"
                 };
             }
@@ -5195,7 +5597,7 @@ demand_load.emoji_completion = function (start) {
 
 
 tooltip.add_builder("votereport", function (info) {
-    var pid = $(this).attr("data-pid") || hotcrp_paperid,
+    var pid = $(this).attr("data-pid") || siteinfo.paperid,
         tag = $(this).attr("data-tag");
     if (pid && tag)
         info.content = demand_load.make(function (resolve) {
@@ -5243,6 +5645,7 @@ function make_suggestions(precaret, postcaret, options) {
     // * `options.filter_length`: Integer. Ignore completion items that don’t
     //    match the first `prefix.length + filter_length` characters of
     //    the match region.
+    // * `options.prepend`: Show this before each item.
     //
     // Completion items:
     // * `item.s`: Completion string -- mandatory.
@@ -5294,9 +5697,9 @@ function make_suggestions(precaret, postcaret, options) {
                     || (lregion.length >= fl
                         && ltext.substr(0, fl) === lregion.substr(0, fl)))) {
                 if (can_highlight
-                    && ltext.substr(0, lregion.length) === lregion) {
+                    && ltext.substr(0, lregion.length) === lregion
+                    && (best === null || ltext.length === lregion.length)) {
                     best = res.length;
-                    can_highlight = false;
                 }
                 res.push(titem);
             }
@@ -5322,7 +5725,7 @@ function suggest() {
         wasnav = 0;
     }
 
-    function render_item(titem) {
+    function render_item(titem, prepend) {
         var node = document.createElement("div");
         titem = completion_item(titem);
         node.className = titem.no_space ? "suggestion s9nsp" : "suggestion";
@@ -5330,18 +5733,26 @@ function suggest() {
             node.setAttribute("data-replacement", titem.r);
         if (titem.sh)
             node.innerHTML = titem.sh;
-        else if (titem.d || titem.dh) {
+        else if (titem.d || titem.dh || prepend) {
+            if (prepend) {
+                var s9p = document.createElement("span");
+                s9p.className = "s9p";
+                s9p.appendChild(document.createTextNode(prepend));
+                node.appendChild(s9p);
+            }
             var s9t = document.createElement("span");
             s9t.className = "s9t";
             s9t.appendChild(document.createTextNode(titem.s));
             node.appendChild(s9t);
-            var s9d = document.createElement("span");
-            s9d.className = "s9d";
-            if (titem.dh)
-                s9d.innerHTML = titem.dh;
-            else
-                s9d.appendChild(document.createTextNode(titem.d))
-            node.appendChild(s9d);
+            if (titem.d || titem.dh) {
+                var s9d = document.createElement("span");
+                s9d.className = "s9d";
+                if (titem.dh)
+                    s9d.innerHTML = titem.dh;
+                else
+                    s9d.appendChild(document.createTextNode(titem.d))
+                node.appendChild(s9d);
+            }
         } else
             node.appendChild(document.createTextNode(titem.s));
         return node;
@@ -5356,7 +5767,7 @@ function suggest() {
 
         hiding = false;
         if (!hintdiv) {
-            hintdiv = make_bubble({dir: "nw", color: "suggest"});
+            hintdiv = make_bubble({anchor: "nw", color: "suggest"});
             hintdiv.self().on("mousedown", function (evt) { evt.preventDefault(); })
                 .on("click", ".suggestion", click)
                 .on("mousemove", ".suggestion", hover);
@@ -5385,7 +5796,7 @@ function suggest() {
             div = document.createElement("div");
             div.className = "suggesttable suggesttable" + (i + 1);
             for (i = 0; i !== clist.length; ++i)
-                div.appendChild(render_item(clist[i], i === cinfo.highlight));
+                div.appendChild(render_item(clist[i], cinfo.prepend));
             hintdiv.html(div);
         } else {
             div = hintdiv.content_node();
@@ -5430,8 +5841,12 @@ function suggest() {
             text = complete_elt.getAttribute("data-replacement");
         else if (complete_elt.firstChild.nodeType === Node.TEXT_NODE)
             text = complete_elt.textContent;
-        else
-            text = complete_elt.firstChild.textContent;
+        else {
+            var n = complete_elt.firstChild;
+            while (n && n.className !== "s9t")
+                n = n.nextSibling;
+            text = n.textContent;
+        }
 
         var poss = hintdiv.self().data("autocompletePos");
         var val = elt.value;
@@ -5583,11 +5998,27 @@ suggest.add_builder("tags", function (elt) {
     }
 });
 
+suggest.add_builder("editable-tags", function (elt) {
+    var x = completion_split(elt), m, n;
+    if (x && (m = x[0].match(/(?:^|\s)(#?)([^#\s]*)$/))) {
+        n = x[1].match(/^([^#\s]*)((?:#[-+]?(?:\d+\.?|\.\d)\d*)?)/);
+        return demand_load.editable_tags().then(make_suggestions(m[2], n[1], {suffix: n[2]}));
+    }
+});
+
+suggest.add_builder("sitewide-editable-tags", function (elt) {
+    var x = completion_split(elt), m, n;
+    if (x && (m = x[0].match(/(?:^|\s)(#?)([^#\s]*)$/))) {
+        n = x[1].match(/^([^#\s]*)((?:#[-+]?(?:\d+\.?|\.\d)\d*)?)/);
+        return demand_load.sitewide_editable_tags().then(make_suggestions(m[2], n[1], {suffix: n[2]}));
+    }
+});
+
 suggest.add_builder("papersearch", function (elt) {
     var x = completion_split(elt), m, n;
     if (x && (m = x[0].match(/.*?(?:^|[^\w:])((?:tag|r?order):\s*#?|#|(?:show|hide):\s*(?:#|tag:|tagval:|tagvalue:))([^#\s()]*)$/))) {
         n = x[1].match(/^([^#\s()]*)/);
-        return demand_load.tags().then(make_suggestions(m[2], n[1]));
+        return demand_load.tags().then(make_suggestions(m[2], n[1], {prepend: m[1]}));
     } else if (x && (m = x[0].match(/.*?(\b(?:has|ss|opt|dec|round|topic|style|color|show|hide):)([^"\s()]*|"[^"]*)$/))) {
         n = x[1].match(/^([^\s()]*)/);
         return demand_load.search_completion().then(make_suggestions(m[2], n[1], {prefix: m[1]}));
@@ -5627,8 +6058,8 @@ function comment_completion_q(elt) {
 // review preferences
 function setfollow() {
     var $self = $(this);
-    $.post(hoturl_post("api/follow", {p: $self.attr("data-pid") || hotcrp_paperid}),
-           {following: this.checked, reviewer: $self.data("reviewer") || hotcrp_user.email},
+    $.post(hoturl_post("api/follow", {p: $self.attr("data-pid") || siteinfo.paperid}),
+           {following: this.checked, reviewer: $self.data("reviewer") || siteinfo.user.email},
            function (rv) {
                setajaxcheck($self[0], rv);
                rv.ok && ($self[0].checked = rv.following);
@@ -5699,7 +6130,7 @@ var add_revpref_ajax = (function () {
 window.paperlist_tag_ui = (function () {
 
 function tag_canonicalize(tag) {
-    return tag && /^~[^~]/.test(tag) ? hotcrp_user.cid + tag : tag;
+    return tag && /^~[^~]/.test(tag) ? siteinfo.user.cid + tag : tag;
 }
 
 function tagvalue_parse(s) {
@@ -5737,9 +6168,9 @@ function tagannorow_fill(row, anno) {
         } else {
             row.removeAttribute("data-tags");
         }
-        var heading = anno.heading === null ? "" : anno.heading;
-        var $g = $(row).find(".plheading-group").attr({"data-format": anno.format || 0, "data-title": heading});
-        $g.text(heading === "" ? heading : heading + " ");
+        var legend = anno.legend === null ? "" : anno.legend;
+        var $g = $(row).find(".plheading-group").attr({"data-format": anno.format || 0, "data-title": legend});
+        $g.text(legend === "" ? legend : legend + " ");
         anno.format && render_text.on.call($g[0]);
         // `plheading-count` is taken care of in `searchbody_postreorder`
     }
@@ -5892,18 +6323,16 @@ function href_sorter(href, newval) {
 }
 
 function sorter_toggle_reverse(sorter, toggle) {
-    var xsorter = sorter.replace(/[ +]+reverse\b/, "");
+    var xsorter = sorter.replace(/[ +]+(?:reverse|down)\b/, "");
     if (toggle == null)
         toggle = xsorter == sorter;
-    return xsorter + (toggle ? " reverse" : "");
+    return xsorter + (toggle ? " down" : "");
 }
 
 function search_sort_success(tbl, data_href, data) {
     var ids = data.ids;
-    if (!ids && data.hotlist) {
-        var hotlist = JSON.parse(data.hotlist);
-        ids = decode_session_list_ids(hotlist.ids);
-    }
+    if (!ids && data.hotlist)
+        ids = new Hotlist(data.hotlist).ids();
     if (!ids)
         return;
     reorder(tbl, ids, data.groups, true);
@@ -5962,7 +6391,8 @@ function search_sort_url(self, href) {
     var hrefm = /^([^?#]*(?:search|reviewprefs|manualassign)(?:\.php)?)(\?[^#]*)/.exec(href),
         api = hrefm[2], e;
     if ((e = document.getElementById("showforce"))) {
-        api = api.replace(/&forceShow=[^&#;]*/, "") + "&forceShow=" + (e.checked ? 1 : 0);
+        var v = e.type === "checkbox" ? (e.checked ? 1 : 0) : e.value;
+        api = api.replace(/&forceShow=[^&#;]*/, "") + "&forceShow=" + v;
     }
     if (!/[&?]q=/.test(api)) {
         api += "&q=";
@@ -6129,7 +6559,7 @@ function taganno_success(rv) {
                 ++annoi;
             }
             if (annoi === rv.anno.length && tagval === false) {
-                groups.push({pos: pos, tag: rv.tag, tagval: 2147483646, heading: "Untagged"});
+                groups.push({pos: pos, tag: rv.tag, tagval: 2147483646, legend: "Untagged"});
                 ++annoi;
             }
         }
@@ -6155,21 +6585,21 @@ handle_ui.on("js-annotate-order", function () {
             var $row = $(hc.render());
             $row.appendTo($d.find(".tagannos"));
             $d.find(".modal-dialog").scrollIntoView({atBottom: true, marginBottom: "auto"});
-            $row.find("input[name='heading_n" + last_newannoid + "']").focus();
+            $row.find("input[name='legend_n" + last_newannoid + "']").focus();
         } else {
             var anno = [];
             for (var i = 0; i < annos.length; ++i) {
-                var heading = $d.find("input[name='heading_" + annos[i].annoid + "']").val();
+                var legend = $d.find("input[name='legend_" + annos[i].annoid + "']").val();
                 var tagval = $d.find("input[name='tagval_" + annos[i].annoid + "']").val();
                 var deleted = $d.find("input[name='deleted_" + annos[i].annoid + "']").val();
-                if (heading != annos[i].heading || tagval != annos[i].tagval || deleted)
-                    anno.push({annoid: annos[i].annoid, heading: heading, tagval: tagval, deleted: !!deleted});
+                if (legend != annos[i].legend || tagval != annos[i].tagval || deleted)
+                    anno.push({annoid: annos[i].annoid, legend: legend, tagval: tagval, deleted: !!deleted});
             }
             for (i = 1; i <= last_newannoid; ++i) {
-                heading = $d.find("input[name='heading_n" + i + "']").val();
+                legend = $d.find("input[name='legend_n" + i + "']").val();
                 tagval = $d.find("input[name='tagval_n" + i + "']").val();
-                if (heading != "" || tagval != 0)
-                    anno.push({annoid: "new", heading: heading, tagval: tagval});
+                if (legend != "" || tagval != 0)
+                    anno.push({annoid: "n" + i, legend: legend, tagval: tagval});
             }
             $.post(hoturl_post("api/taganno", {tag: mytag}),
                    {anno: JSON.stringify(anno)}, make_onsave($d));
@@ -6179,19 +6609,19 @@ handle_ui.on("js-annotate-order", function () {
     function ondeleteclick() {
         var $div = $(this).closest(".form-g"), annoid = $div.attr("data-anno-id");
         $div.find("input[name='tagval_" + annoid + "']").after("[deleted]").remove();
-        $div.append('<input type="hidden" name="deleted_' + annoid + '" value="1">');
-        $div.find("input[name='heading_" + annoid + "']").prop("disabled", true);
+        $div.append(hidden_input("deleted_" + annoid, "1"));
+        $div.find("input[name='legend_" + annoid + "']").prop("disabled", true);
         tooltip.erase.call(this);
         $(this).remove();
         return false;
     }
     function make_onsave($d) {
         return function (rv) {
-            setajaxcheck($d.find("button[name=save]"), rv);
             if (rv.ok) {
                 taganno_success(rv);
                 $d.close($d);
-            }
+            } else
+                $d.show_errors(rv);
         };
     }
     function add_anno(hc, anno) {
@@ -6199,10 +6629,10 @@ handle_ui.on("js-annotate-order", function () {
         if (annoid == null)
             annoid = "n" + (last_newannoid += 1);
         hc.push('<div class="form-g" data-anno-id="' + annoid + '">', '</div>');
-        hc.push('<div class="entryi"><label for="htctl-taganno-' + annoid + '-d">Heading</label><input id="htctl-taganno-' + annoid + '-d" name="heading_' + annoid + '" type="text" placeholder="none" size="32" class="need-autogrow"></div>');
+        hc.push('<div class="entryi"><label for="htctl-taganno-' + annoid + '-d">Legend</label><input id="htctl-taganno-' + annoid + '-d" name="legend_' + annoid + '" type="text" placeholder="none" size="32" class="need-autogrow"></div>');
         hc.push('<div class="entryi"><label for="htctl-taganno-' + annoid + '-tagval">Tag value</label><div class="entry"><input id="htctl-taganno-' + annoid + '-tagval" name="tagval_' + annoid + '" type="text" size="5">', '</div></div>');
         if (anno.annoid)
-            hc.push(' <a class="ui closebtn delete-link need-tooltip" href="" aria-label="Delete heading">x</a>');
+            hc.push(' <a class="ui closebtn delete-link need-tooltip" href="" aria-label="Delete group">x</a>');
         hc.pop_n(2);
     }
     function show_dialog(rv) {
@@ -6218,11 +6648,11 @@ handle_ui.on("js-annotate-order", function () {
             add_anno(hc, annos[i]);
         }
         hc.pop();
-        hc.push('<div class="g"><button type="button" name="add">Add heading</button></div>');
+        hc.push('<div class="g"><button type="button" name="add">Add group</button></div>');
         hc.push_actions(['<button type="submit" name="save" class="btn-primary">Save changes</button>', '<button type="button" name="cancel">Cancel</button>']);
         $d = hc.show();
         for (var i = 0; i < annos.length; ++i) {
-            $d.find("input[name='heading_" + annos[i].annoid + "']").val(annos[i].heading);
+            $d.find("input[name='legend_" + annos[i].annoid + "']").val(annos[i].legend);
             $d.find("input[name='tagval_" + annos[i].annoid + "']").val(tagvalue_unparse(annos[i].tagval));
         }
         $d.on("click", "button", clickh).on("click", "a.delete-link", ondeleteclick);
@@ -6262,8 +6692,9 @@ function make_tag_save_callback(elt) {
 
 function set_tags_callback(evt, data) {
     var si = analyze_rows(data.pid);
-    if (highlight_entries && rowanal[si].entry)
+    if (highlight_entries && rowanal[si].entry) {
         setajaxcheck(rowanal[si].entry, {ok: true});
+    }
     row_move(si);
 }
 
@@ -6418,7 +6849,7 @@ function tag_dragto(l) {
 
     // create dragger
     if (!dragger) {
-        dragger = make_bubble({color: "edittagbubble dark", dir: "1!*"});
+        dragger = make_bubble({color: "edittagbubble dark", anchor: "e!*"});
         window.disable_tooltip = true;
     }
 
@@ -6470,15 +6901,17 @@ function calculate_shift(si, di) {
     if (simax != si && rowanal[simax].tagvalue)
         sdelta += rowanal[simax].tagvalue - rowanal[si].tagvalue;
 
-    var newval = -Infinity, delta = 0, si_moved = false;
     for (i = 0; i < rowanal.length; ++i)
         rowanal[i].newvalue = rowanal[i].tagvalue;
+
+    var newval = -Infinity, delta = 0, si_moved = false;
     function adjust_newval(j) {
         return newval === false ? newval : newval + (rowanal[j].tagvalue - rowanal[si].tagvalue);
     }
 
     for (i = 0; i < rowanal.length; ++i) {
         if (rowanal[i].tagvalue === false) {
+            // In untagged territory
             if (i == 0)
                 newval = 1;
             else if (rowanal[i - 1].tagvalue === false)
@@ -6508,12 +6941,13 @@ function calculate_shift(si, di) {
         } else if (i == si) {
             delta -= sdelta;
             continue;
-        } else if (i >= si && i <= simax)
+        } else if (i >= si && i <= simax) {
             continue;
-        else if (i == di && !si_moved) {
+        } else if (i == di && !si_moved) {
             for (j = si; j <= simax; ++j)
                 rowanal[j].newvalue = adjust_newval(j);
-            delta += sdelta;
+            if (i == 0 || rowanal[i].tagvalue - rowanal[i - 1].tagvalue > 0.0001)
+                delta += sdelta;
             newval = rowanal[simax].newvalue;
             --i;
             si_moved = true;
@@ -6685,7 +7119,7 @@ function check_version(url, versionstr) {
     }
     function updatecb(json) {
         if (json && json.updates && window.JSON)
-            jQuery.get(siteurl + "checkupdates.php",
+            jQuery.get(siteinfo.site_relative + "checkupdates.php",
                        {data: JSON.stringify(json)}, updateverifycb);
         else if (json && json.status)
             wstorage.site(false, "hotcrp_version_check", {at: now_msec(), version: versionstr});
@@ -6703,7 +7137,7 @@ function check_version(url, versionstr) {
     });
     handle_ui.on("js-check-version-ignore", function () {
         var id = $(this).data("versionId");
-        $.post(siteurl + "checkupdates.php", {ignore: id, post: siteurl_postvalue});
+        $.post(siteinfo.site_relative + "checkupdates.php", {ignore: id, post: siteinfo.postvalue});
         $("#softwareupdate_" + id).hide();
     });
 }
@@ -6777,16 +7211,16 @@ function render_assignment_selector() {
     var prow = prownear(this),
         conflict = hasClass(this, "conflict"),
         sel = document.createElement("select"),
-        rts = [0, "None", 4, "Primary", 3, "Secondary", 2, "Optional", 5, "Metareview", -1, "Conflict"],
+        rts = ["0", "None", "4", "Primary", "3", "Secondary", "2", "Optional", "5", "Metareview", "-1", "Conflict"],
         asstext = this.getAttribute("data-assignment"),
         revtype, i = asstext.indexOf(" ");
     sel.name = "assrev" + prow.getAttribute("data-pid") + "u" + asstext.substring(0, i);
-    revtype = +asstext.substring(i + 1);
+    revtype = asstext.substring(i + 1);
     sel.setAttribute("data-default-value", revtype);
     sel.className = "uich js-assign-review";
     sel.tabIndex = 2;
     for (var i = 0; i < rts.length; i += 2) {
-        if (!conflict || rts[i] < 1) {
+        if (!conflict || rts[i] === "0" || rts[i] === "-1" || rts[i] === "conflict") {
             var opt = document.createElement("option");
             opt.value = rts[i];
             opt.text = rts[i + 1];
@@ -6808,7 +7242,7 @@ function set(f, $j, text) {
     else {
         if (elt.className == "")
             elt.className = "fx" + f.foldnum;
-        if (f.title && (!f.column || text == "Loading")) {
+        if (f.title && (f.as_row || text == "Loading")) {
             if (text.charAt(0) == "<" && (m = /^((?:<(?:div|p|ul|ol|li)[^>]*>)+)([\s\S]*)$/.exec(text)))
                 text = m[1] + '<em class="plx">' + f.title + ':</em> ' + m[2];
             else
@@ -6825,7 +7259,7 @@ handle_ui.on("js-plinfo-edittags", function () {
         if (!rv.ok || !rv.pid || rv.pid != pid)
             return;
         $(div).html('<em class="plx">Tags:</em> '
-            + '<textarea name="tags ' + rv.pid + '" style="vertical-align:top;max-width:70%;margin-bottom:2px" cols="120" rows="1" class="want-focus need-suggest tags" data-tooltip-dir="v"></textarea>'
+            + '<textarea name="tags ' + rv.pid + '" style="vertical-align:top;max-width:70%;margin-bottom:2px" cols="120" rows="1" class="want-focus need-suggest tags" data-tooltip-anchor="v"></textarea>'
             + ' &nbsp;<button type="button" name="tagsave ' + rv.pid + '">Save</button>'
             + ' &nbsp;<button type="button" name="tagcancel ' + rv.pid + '">Cancel</button>');
         var $ta = $(div).find("textarea");
@@ -6854,7 +7288,7 @@ handle_ui.on("js-plinfo-edittags", function () {
         if (focused)
             focus_within($(div).closest("tr")[0]);
     }
-    $.post(hoturl_post("api/settags", {p: pid, forceShow: 1}), start);
+    $.post(hoturl_post("api/settags", {p: pid, forceShow: 1}), start); // XXX should be GET
 });
 
 
@@ -6867,8 +7301,6 @@ function add_field(f) {
         --j;
     field_order.splice(j, 0, f);
     fields[f.name] = f;
-    if (f.name === "authors")
-        fields.au = fields.anonau = fields.aufull = f;
     if (/^(?:#|tag:|tagval:)\S+$/.test(f.name))
         $(window).on("hotcrptags", make_tag_column_callback(f));
     if (f.foldnum === true) {
@@ -6887,7 +7319,7 @@ function foldmap(type) {
 function field_index(f) {
     var i, index = 0;
     for (i = 0; i !== field_order.length && field_order[i] !== f; ++i)
-        if (!field_order[i].column === !f.column && !field_order[i].missing)
+        if (!field_order[i].as_row === !f.as_row && !field_order[i].missing)
             ++index;
     return index;
 }
@@ -6921,7 +7353,7 @@ function pidxrow(pid) {
 }
 
 function pidfield(pid, f, index) {
-    var row = f.column ? pidrow(pid) : pidxrow(pid);
+    var row = f.as_row ? pidxrow(pid) : pidrow(pid);
     if (row && index == null)
         index = field_index(f);
     return $(row ? row.childNodes[index] : null);
@@ -6936,7 +7368,7 @@ function make_tagmap() {
         for (i = 0; i !== tl.length; ++i) {
             t = tl[i].toLowerCase();
             if (t.charAt(0) === "~" && t.charAt(1) !== "~")
-                t = hotcrp_user.cid + t;
+                t = siteinfo.user.cid + t;
             p = t.indexOf("*");
             t = t.replace(/([^-A-Za-z_0-9])/g, "\\$1");
             if (p === 0)
@@ -6944,7 +7376,7 @@ function make_tagmap() {
             else if (p > 0)
                 x.push(t.replace('\\*', '.*'));
             else if (t === "any")
-                x.push('(?:' + (hotcrp_user.cid || 0) + '~.*|~~.*|(?!\\d+~).*)');
+                x.push('(?:' + (siteinfo.user.cid || 0) + '~.*|~~.*|(?!\\d+~).*)');
             else
                 x.push(t);
         }
@@ -6955,7 +7387,7 @@ function make_tagmap() {
         for (i = 0; i !== tl.length; ++i) {
             t = tl[i].toLowerCase();
             tagmap[t] = (tagmap[t] || 0) | 2;
-            t = hotcrp_user.cid + "~" + t;
+            t = siteinfo.user.cid + "~" + t;
             tagmap[t] = (tagmap[t] || 0) | 2;
         }
         if ($.isEmptyObject(tagmap))
@@ -6969,7 +7401,7 @@ function compute_row_tagset(tagstr, editable) {
     var t = [], tags = (tagstr || "").split(/ /);
     for (var i = 0; i !== tags.length; ++i) {
         var text = tags[i], twiddle = text.indexOf("~"), hash = text.indexOf("#");
-        if (text !== "" && (twiddle <= 0 || text.substr(0, twiddle) == hotcrp_user.cid)) {
+        if (text !== "" && (twiddle <= 0 || text.substr(0, twiddle) == siteinfo.user.cid)) {
             twiddle = Math.max(twiddle, 0);
             var tbase = text.substring(0, hash), tindex = text.substr(hash + 1),
                 tagx = tagmap ? tagmap[tbase.toLowerCase()] || 0 : 0, h, q;
@@ -7017,7 +7449,7 @@ function render_row_tags(div) {
 function make_tag_column_callback(f) {
     var tag = /^(?:#|tag:|tagval:)(\S+)/.exec(f.name)[1];
     if (/^~[^~]/.test(tag))
-        tag = hotcrp_user.cid + tag;
+        tag = siteinfo.user.cid + tag;
     return function (evt, rv) {
         var e = pidfield(rv.pid, f), tags = rv.tags, tagval = null;
         if (!e.length || f.missing)
@@ -7090,7 +7522,7 @@ function add_row(f) {
 
 function ensure_field(f) {
     if (f.missing)
-        f.column ? add_column(f) : add_row(f);
+        f.as_row ? add_row(f) : add_column(f);
 }
 
 function make_callback(dofold, type) {
@@ -7137,7 +7569,7 @@ function make_callback(dofold, type) {
         if (values.stat && f.name in values.stat) {
             render_statistics(values.stat[f.name]);
         }
-        if (type !== "aufull") {
+        if (dofold !== null) {
             fold(self, dofold, f.foldnum);
         }
         check_statistics();
@@ -7152,8 +7584,8 @@ function make_callback(dofold, type) {
         if (f) {
             f.loadable = false;
         }
-        if (type === "aufull") {
-            aufull[!!dofold] = rv;
+        if (type === "authors") {
+            aufull[rv.fields[type].aufull] = rv;
         }
         if (rv.ok) {
             values = rv;
@@ -7188,52 +7620,53 @@ function check_statistics() {
 
 function plinfo(type, dofold) {
     self || initialize();
-    var elt, f = fields[type];
+    var xtype;
+    if (type === "au")
+        type = xtype = "authors"; // special case
+    else if (type === "aufull" || type === "anonau")
+        xtype = "authors";
+    else
+        xtype = type;
+    var f = fields[xtype];
 
-    if ((type === "aufull" || type === "anonau")
-        && !dofold
-        && (elt = document.getElementById("showau"))
-        && !elt.checked) {
-        elt.click();
-    }
-    if ((type === "au" || type === "anonau")
-        && (elt = document.getElementById("showau_hidden"))
-        && elt.checked != document.getElementById("showau").checked) {
-        elt.click();
+    var ses = self.getAttribute("data-fold-session-prefix"), sesv;
+    if (ses) {
+        if (type === "anonau" && !dofold)
+            sesv = ses + "authors=0 " + ses + "anonau=0";
+        else
+            sesv = ses + type + (dofold ? "=1" : "=0");
     }
 
-    var ses = self.getAttribute("data-fold-session-prefix");
-    if ((type === "aufull" && !aufull[!!dofold])
-        || !f
-        || (!dofold && f.loadable && type !== "anonau")) {
+    if (!f || f.loadable || (type === "aufull" && !aufull[!dofold])) {
         // initiate load
-        var loadargs = $.extend({fn: "fieldhtml", f: type}, hotlist_search_params(self, true));
+        var loadargs = {fn: "fieldhtml", f: xtype};
+        if (type === "aufull")
+            loadargs.aufull = dofold ? 0 : 1;
+        else if (xtype === "authors")
+            loadargs.aufull = hasClass(self, "fold" + foldmap("aufull") + "o") ? 1 : 0;
         if (ses) {
-            loadargs.session = ses + type + (dofold ? "=1" : "=0");
+            loadargs.session = sesv;
+            ses = null;
         }
-        if (type === "au" || type === "aufull") {
-            loadargs.f = "authors";
-            if (type === "aufull")
-                loadargs.aufull = dofold ? 0 : 1;
-            else if ((elt = $$("showaufull")))
-                loadargs.aufull = elt.checked ? 1 : 0;
-        }
-        $.get(hoturl_post("api", loadargs), make_callback(dofold, type));
+        $.get(hoturl_post("api", $.extend(loadargs, hotlist_search_params(self, true))),
+              make_callback(type === "aufull" ? null : dofold, xtype));
+        if (type === "anonau" || type === "aufull")
+            fold(self, dofold, foldmap(type));
     } else {
         // display
-        if (type === "aufull") {
-            make_callback(dofold, type)(aufull[!!dofold]);
-        } else {
+        if (type === "aufull")
+            make_callback(null, xtype)(aufull[!dofold]);
+        else {
+            if (type === "anonau" && !dofold)
+                fold(self, dofold, foldmap(xtype));
             fold(self, dofold, foldmap(type));
-        }
-        // update session
-        if (ses) {
-            $.post(hoturl_post("api/session", {v: ses + type + (dofold ? "=1" : "=0")}));
         }
         // update statistics
         check_statistics();
     }
-
+    // update session
+    if (ses)
+        $.post(hoturl_post("api/session", {v: sesv}));
     return false;
 }
 
@@ -7298,15 +7731,8 @@ $(window).on("hotcrptags", function (evt, rv) {
 
     // set tag decoration
     $ptr.find(".tagdecoration").remove();
-    if (rv.tag_decoration_html) {
-        var decor = rv.tag_decoration_html;
-        if ("tag_decoration_html_conflicted" in rv) {
-            decor = '<span class="fx5">' + decor + '</span>';
-            if (rv.tag_decoration_html_conflicted)
-                decor = '<span class="fn5">' + rv.tag_decoration_html_conflicted + '</span>' + decor;
-        }
-        $ptr.find(".pl_title").append(decor);
-    }
+    if (rv.tag_decoration_html)
+        $ptr.find(".pl_title").append(rv.tag_decoration_html);
 
     // set actual tags
     if (fields.tags && !fields.tags.missing)
@@ -7343,26 +7769,26 @@ handle_ui.on("js-override-conflict", function () {
 });
 
 handle_ui.on("js-plinfo", function (event) {
-    var type = this.getAttribute("data-plinfo-field"), dofold = null;
-    if (!type
-        && this.type === "checkbox"
-        && this.name.substring(0, 4) === "show") {
-        type = this.name.substring(4);
-        dofold = !this.checked;
+    if (this.type !== "checkbox" || this.name.substring(0, 4) !== "show")
+        throw new Exception("bad plinfo");
+    var types = [this.name.substring(4)], dofold = !this.checked;
+    if (types[0] === "anonau") {
+        var form = this.closest("form"), showau = form && form.elements.showau;
+        if (!dofold && showau)
+            showau.checked = true;
+        else if (!showau && dofold)
+            types.push("authors");
     }
-    if (type) {
-        self || initialize();
-        type = type.split(/\s+/);
-        for (var i = 0; i != type.length; ++i) {
-            if (type[i] === "force")
-                fold_override(dofold);
-            else if (type[i] === "rownum")
-                fold(self, dofold, 6);
-            else
-                plinfo(type[i], dofold);
-        }
-        event.preventDefault();
+    self || initialize();
+    for (var i = 0; i != types.length; ++i) {
+        if (types[i] === "force")
+            fold_override(dofold);
+        else if (types[i] === "rownum")
+            fold(self, dofold, 6);
+        else
+            plinfo(types[i], dofold);
     }
+    event.preventDefault();
 });
 
 return plinfo;
@@ -7463,14 +7889,9 @@ function transfer_form_values($dst, $src, names) {
 
 // login UI
 handle_ui.on("js-signin", function (event) {
-    var form = this;
-    $.get(hoturl("api/session"), function (data) {
-        if (data && data.postvalue) {
-            siteurl_postvalue = data.postvalue;
-            form.post && (form.post.value = siteurl_postvalue);
-        }
-        form.submit();
-    });
+    var form = this, signin = document.getElementById("signin_signin");
+    signin && (signin.disabled = true);
+    $.get(hoturl("api/session"), function () { form.submit() });
 });
 
 handle_ui.on("js-no-signin", function (event) {
@@ -7493,16 +7914,14 @@ handle_ui.on("js-check-format", function () {
     if (this && "tagName" in this && this.tagName === "A")
         $self.addClass("hidden");
     var running = setTimeout(function () {
-        $cf.html(render_xmsg(0, "Checking format (this can take a while)..."));
+        $cf.html(render_xmsg("Checking format (this can take a while)...", 0));
     }, 1000);
-    $.ajax(hoturl_post("api/formatcheck", {p: hotcrp_paperid}), {
+    $.ajax(hoturl_post("api/formatcheck", {p: siteinfo.paperid}), {
         timeout: 20000, data: {
             dt: $d[0].getAttribute("data-dtype"), docid: $d[0].getAttribute("data-docid")
         },
         success: function (data) {
             clearTimeout(running);
-            if (data.response && !data.result)
-                data.result = data.response; // XXX backward compat
             if (data.ok || data.result)
                 $cf.html(data.result);
         }
@@ -7512,11 +7931,18 @@ handle_ui.on("js-check-format", function () {
 $(function () {
 var failures = 0;
 function background_format_check() {
-    var needed = $(".need-format-check"), m;
+    var needed = $(".need-format-check"), pid, m, tstart;
     if (!needed.length)
         return;
     needed = needed[Math.floor(Math.random() * needed.length)];
     removeClass(needed, "need-format-check");
+    tstart = now_msec();
+    function next(ok) {
+        if (ok || ++failures <= 2) {
+            var tdelta = now_msec() - tstart;
+            setTimeout(background_format_check, tdelta <= 200 ? 100 : (Math.min(4000, tdelta * 2) + Math.random() * 2000) / 2);
+        }
+    }
     if (needed.tagName === "A"
         && (m = needed.href.match(/\/doc(?:\.php)?\/([^?#]*)/))) {
         $.ajax(hoturl("api/formatcheck", {doc: m[1], soft: 1}), {
@@ -7528,12 +7954,20 @@ function background_format_check() {
                     && img.tagName === "IMG"
                     && (m = img.src.match(/^(.*\/pdff?)x?((?:24)?\.png(?:\?.*)?)$/)))
                     img.src = m[1] + (data.has_error ? "x" : "") + m[2];
-                if ((data && data.ok) || ++failures <= 2)
-                    setTimeout(background_format_check, 2000 + Math.random() * 1000);
+                next(data && data.ok);
+            }
+        });
+    } else if (hasClass(needed, "is-npages")
+               && (pid = needed.closest("[data-pid]"))) {
+        $.ajax(hoturl("api/formatcheck", {p: pid.getAttribute("data-pid"), dtype: needed.getAttribute("data-dtype") || "0", soft: 1}), {
+            success: function (data) {
+                if (data && data.ok)
+                    needed.parentNode.replaceChild(document.createTextNode(data.npages), needed);
+                next(data && data.ok);
             }
         });
     } else {
-        setTimeout(background_format_check, 100);
+        next(true);
     }
 }
 $(background_format_check);
@@ -7541,12 +7975,17 @@ $(background_format_check);
 
 handle_ui.on("js-check-submittable", function (event) {
     var f = this.closest("form"),
-        readye = f.submitpaper,
-        was = f.getAttribute("data-submitted"), is = true;
-    if (this && this.tagName === "INPUT" && this.type === "file" && this.value)
+        readye = f.elements.submitpaper,
+        was = f.getAttribute("data-submitted"),
+        unfold = this && this.tagName === "INPUT" && this.type === "file" && this.value,
+        is = true;
+    if (unfold)
         fold($(f).find(".ready-container"), false);
-    if (readye && readye.type === "checkbox")
+    if (readye && readye.type === "checkbox") {
         is = readye.checked && $(readye).is(":visible");
+        if (readye.disabled && unfold)
+            readye.disabled = false;
+    }
     var t;
     if (f.hasAttribute("data-contacts-only")) {
         t = "Save contacts";
@@ -7561,91 +8000,115 @@ handle_ui.on("js-check-submittable", function (event) {
 });
 
 handle_ui.on("js-add-attachment", function () {
-    var $ea = $($$(this.getAttribute("data-editable-attachments"))),
-        $ei = $ea,
-        $f = $ea.closest("form"),
-        name, n = 0;
-    if ($ea.hasClass("entryi")) {
-        if (!$ea.find(".entry").length)
-            $ea.append('<div class="entry"></div>');
-        $ei = $ea.find(".entry");
+    var attache = $$(this.getAttribute("data-editable-attachments")),
+        f = attache.closest("form"),
+        $ei = $(attache), name, n = 0;
+    if (hasClass(attache, "entryi")) {
+        if (!$ei.find(".entry").length)
+            $ei.append('<div class="entry"></div>');
+        $ei = $ei.find(".entry");
     }
     do {
         ++n;
-        name = $ea[0].getAttribute("data-document-prefix") + "_new_" + n;
-    } while ($f[0]["has_" + name]);
-    var $na = $('<div class="has-document document-new-instance hidden" data-document-name="' + name + '">'
-        + '<div class="document-upload"><input type="file" name="' + name + '" size="15" class="uich document-uploader"></div>'
-        + '<div class="document-actions"><a href="" class="ui js-remove-document document-action">Delete</a></div>'
-        + '</div>');
+        name = attache.getAttribute("data-document-prefix") + "_new_" + n;
+    } while (f.elements["has_" + name]);
+    var max_size = attache.getAttribute("data-document-max-size"),
+        $na = $('<div class="has-document document-new-instance hidden'
+            + '" data-dtype="' + attache.getAttribute("data-dtype")
+            + '" data-document-name="' + name
+            + (max_size == null ? "" : '" data-document-max-size="' + max_size)
+            + '"><div class="document-upload"><input type="file" name="' + name + '" size="15" class="uich document-uploader"></div>'
+            + '<div class="document-actions"><a href="" class="ui js-cancel-document document-action">Cancel</a></div>'
+            + '</div>');
     if (this.id === name)
-        this.id = "";
+        this.removeAttribute("id");
+    $(f).append(hidden_input("has_" + name, "1", {"class": "ignore-diff"}));
     $na.appendTo($ei).find(".document-uploader")[0].click();
 });
 
 handle_ui.on("js-replace-document", function (event) {
-    var $ei = $(this).closest(".has-document"),
-        $u = $ei.find(".document-uploader");
-    $ei.find(".document-remover").val("");
-    if (!$u.length) {
-        var docid = +$ei.attr("data-dtype"),
-            name = docid > 0 ? "opt" + docid : "paperUpload",
+    var doce = this.closest(".has-document"), $doc = $(doce),
+        $actions = $doc.find(".document-actions"),
+        $u = $doc.find(".document-uploader");
+    if (!$actions.length) {
+        $actions = $('<div class="document-actions hidden"></div>').insertBefore($doc.find(".document-replacer"));
+    }
+    if ($u.length) {
+        $u.trigger("hotcrp-change-document");
+    } else {
+        var docid = +doce.getAttribute("data-dtype"),
+            name = doce.getAttribute("data-document-name") || "opt" + docid,
             t = '<div class="document-upload hidden"><input id="' + name + '" type="file" name="' + name + '"';
-        if ($ei[0].hasAttribute("data-document-accept"))
-            t += ' accept="' + $ei[0].getAttribute("data-document-accept") + '"';
+        if (doce.hasAttribute("data-document-accept"))
+            t += ' accept="' + doce.getAttribute("data-document-accept") + '"';
         t += ' class="uich document-uploader' + (docid > 0 ? "" : " js-check-submittable") + '"></div>';
         if (this.id === name)
-            this.id = "";
-        $u = $(t).appendTo($ei).find(".document-uploader");
+            this.removeAttribute("id");
+        $u = $(t).insertBefore($actions).find(".document-uploader");
+        $actions.append('<a href="" class="ui js-cancel-document document-action hidden">Cancel</a>');
     }
     $u[0].click();
 });
 
 handle_ui.on("document-uploader", function (event) {
-    var doce = this.closest(".has-document");
-    if (hasClass(doce, "document-new-instance")) {
+    var doce = this.closest(".has-document"), $doc = $(doce);
+    if (hasClass(doce, "document-new-instance") && hasClass(doce, "hidden")) {
         removeClass(doce, "hidden");
-        removeClass(doce.parentElement, "hidden");
-        var f = doce.closest("form"), n = "has_" + doce.getAttribute("data-document-name");
-        if (!f[n])
-            $(f).append('<input type="hidden" name="' + n + '" value="1">');
+        var hea = doce.closest(".has-editable-attachments");
+        hea && removeClass(hea, "hidden");
     } else {
-        $(doce).find(".document-file, .document-stamps, .document-actions, .document-format, .js-replace-document").addClass("hidden");
-        $(doce).find(".document-upload").removeClass("hidden");
-        $(doce).find(".js-remove-document").removeClass("undelete").html("Delete");
+        $doc.find(".document-file, .document-stamps, .js-check-format, .document-format, .js-remove-document").addClass("hidden");
+        $doc.find(".document-upload, .document-actions, .js-cancel-document").removeClass("hidden");
+        $doc.find(".document-remover").remove();
+        $doc.find(".js-replace-document").html("Replace");
+        $doc.find(".js-remove-document").removeClass("undelete").html("Delete");
     }
 });
 
-handle_ui.on("js-remove-document", function (event) {
-    var $ei = $(this).closest(".has-document"),
-        $r = $ei.find(".document-remover"),
-        $en = $ei.find(".document-file"),
-        f = this.closest("form") /* set before $ei is removed */;
-    if (hasClass(this, "undelete")) {
-        $r.val("");
-        $en.find("del > *").unwrap();
-        $ei.find(".document-stamps, .document-shortformat").removeClass("hidden");
-        $(this).removeClass("undelete").html("Delete");
-    } else if ($ei.hasClass("document-new-instance")) {
-        var holder = $ei[0].parentElement;
-        $ei.remove();
+handle_ui.on("js-cancel-document", function (event) {
+    var doce = this.closest(".has-document"), $doc = $(doce),
+        f = doce.closest("form");
+    $doc.find(".document-uploader").trigger("hotcrp-change-document");
+    if (hasClass(doce, "document-new-instance")) {
+        var holder = doce.parentElement;
+        $doc.remove();
         if (!holder.firstChild && hasClass(holder.parentElement, "has-editable-attachments"))
             addClass(holder.parentElement, "hidden");
     } else {
-        if (!$r.length)
-            $r = $('<input type="hidden" class="document-remover" name="remove_' + $ei.data("documentName") + '" data-default-value="" value="1">').appendTo($ei.find(".document-actions"));
-        $r.val(1);
-        if (!$en.find("del").length)
-            $en.wrapInner("<del></del>");
-        $ei.find(".document-stamps, .document-shortformat").addClass("hidden");
-        $(this).addClass("undelete").html("Undelete");
+        $doc.find(".document-upload").remove();
+        $doc.find(".document-file, .document-stamps, .js-check-format, .document-format, .js-remove-document").removeClass("hidden");
+        $doc.find(".document-file > del > *").unwrap();
+        $doc.find(".js-replace-document").html("Upload");
+        $doc.find(".js-cancel-document").remove();
+        var $actions = $doc.find(".document-actions");
+        if (!$actions[0].firstChild)
+            $actions.addClass("hidden");
     }
     form_highlight(f);
 });
 
+handle_ui.on("js-remove-document", function (event) {
+    var doce = this.closest(".has-document"), $doc = $(doce),
+        $en = $doc.find(".document-file"),
+        f = this.closest("form") /* set before $doc is removed */;
+    if (hasClass(this, "undelete")) {
+        $doc.find(".document-remover").val("").trigger("change").remove();
+        $en.find("del > *").unwrap();
+        $doc.find(".document-stamps, .document-shortformat").removeClass("hidden");
+        $(this).removeClass("undelete").html("Delete");
+    } else {
+        $(hidden_input($doc.data("documentName") + ":remove", "1", {"class": "document-remover", "data-default-value": ""})).appendTo($doc.find(".document-actions")).trigger("change");
+        if (!$en.find("del").length)
+            $en.wrapInner("<del></del>");
+        $doc.find(".document-uploader").trigger("hotcrp-change-document");
+        $doc.find(".document-stamps, .document-shortformat").addClass("hidden");
+        $(this).addClass("undelete").html("Restore");
+    }
+});
+
 handle_ui.on("js-withdraw", function (event) {
     var f = this.closest("form"),
-        hc = popup_skeleton({anchor: this, action: f});
+        hc = popup_skeleton({near: this, action: f});
     hc.push('<p>Are you sure you want to withdraw this submission from consideration and/or publication?');
     if (!this.hasAttribute("data-revivable"))
         hc.push(' Only administrators can undo this step.');
@@ -7664,7 +8127,7 @@ handle_ui.on("js-withdraw", function (event) {
 
 handle_ui.on("js-delete-paper", function (event) {
     var f = this.closest("form"),
-        hc = popup_skeleton({anchor: this, action: f});
+        hc = popup_skeleton({near: this, action: f});
     hc.push('<p>Be careful: This will permanently delete all information about this submission from the database and <strong>cannot be undone</strong>.</p>');
     hc.push_actions(['<button type="submit" name="delete" value="1" class="btn-danger">Delete</button>',
         '<button type="button" name="cancel">Cancel</button>']);
@@ -7678,7 +8141,7 @@ handle_ui.on("js-clickthrough", function (event) {
         $container = $(this).closest(".js-clickthrough-container");
     if (!$container.length)
         $container = $(this).closest(".pcontainer");
-    $.post(hoturl_post("api/clickthrough", {accept: 1, p: hotcrp_paperid}),
+    $.post(hoturl_post("api/clickthrough", {accept: 1, p: siteinfo.paperid}),
         $(this).closest("form").serialize(),
         function (data) {
             if (data && data.ok) {
@@ -7687,7 +8150,7 @@ handle_ui.on("js-clickthrough", function (event) {
                 $container.find(".js-clickthrough-terms").slideUp();
             } else {
                 make_bubble((data && data.error) || "You can’t continue to review until you accept these terms.", "errorbubble")
-                    .dir("l").near(self);
+                    .anchor("w").near(self);
             }
         });
 });
@@ -7695,8 +8158,8 @@ handle_ui.on("js-clickthrough", function (event) {
 handle_ui.on("js-follow-change", function (event) {
     var self = this;
     $.post(hoturl_post("api/follow",
-        {p: $(self).attr("data-pid") || hotcrp_paperid}),
-        {following: this.checked, reviewer: $(self).data("reviewer") || hotcrp_user.email},
+        {p: $(self).attr("data-pid") || siteinfo.paperid}),
+        {following: this.checked, reviewer: $(self).data("reviewer") || siteinfo.user.email},
         function (rv) {
             setajaxcheck(self, rv);
             rv.ok && (self.checked = rv.following);
@@ -7728,7 +8191,7 @@ function prepare_paper_select() {
         if (ok)
             $s.delay(1000).fadeOut();
         if (message)
-            make_bubble(message, "errorbubble").dir("l").near($s[0]);
+            make_bubble(message, "errorbubble").anchor("w").near($s[0]);
     }
     function make_callback(close) {
         return function (data) {
@@ -7753,7 +8216,7 @@ function prepare_paper_select() {
         if ((keyed && evt.type !== "blur" && now_msec() <= keyed + 1)
             || ctl.disabled) {
         } else if (saveval !== oldval) {
-            $.post(hoturl_post("api/" + ctl.name, {p: hotcrp_paperid}),
+            $.post(hoturl_post("api/" + ctl.name, {p: siteinfo.paperid}),
                    $(self).find("form").serialize(),
                    make_callback(evt.type !== "blur"));
             ctl.disabled = true;
@@ -7778,30 +8241,20 @@ function prepare_paper_select() {
     $(ctl).on("change blur", change).on("keyup", keyup).on("keypress", keypress);
 }
 
-function reduce_tag_report(tagreport, min_status, tags) {
-    var status = 0, t = [];
-    function in_tags(tag) {
-        tag = tag.toLowerCase();
-        for (var i = 0; i !== tags.length; ++i) {
-            var x = tags[i].toLowerCase();
-            if (x === tag
-                || (x.length > tag.length
-                    && x.charAt(tag.length) === "#"
-                    && x.substring(0, tag.length) === tag)) {
-                return true;
-            }
+function render_tag_messages(message_list) {
+    var $me = $(this), t0 = '', t1 = '', i, m, t;
+    for (i = 0; i !== message_list.length; ++i) {
+        var tr = message_list[i];
+        if ((m = tr.message.match(/^(#[-+a-zA-Z0-9!@*_:.\/]*?)(: .*)$/))) {
+            t = render_feedback('<a href="' + hoturl_html("search", {q: m[1]}) + '" class="q">' + m[1] + '</a>' + m[2], tr.status);
+        } else {
+            t = render_feedback(tr.message, tr.status);
         }
-        return false;
+        t0 += t;
+        tr.status > 0 && (t1 += t);
     }
-    for (var i = 0; i != tagreport.length; ++i) {
-        var tr = tagreport[i];
-        if (tr.status < min_status || (tags && !in_tags(tr.tag)))
-            continue;
-        status = Math.max(status, tr.status);
-        var search = tr.search || "#" + tr.tag;
-        t.push('<a href="' + hoturl_html("search", {q: search}) + '" class="q">#' + tr.tag + '</a>: ' + tr.message);
-    }
-    return [status, t];
+    $me.find(".want-tag-report").html(t0);
+    $me.find(".want-tag-report-warnings").html(t1);
 }
 
 function prepare_pstags() {
@@ -7810,24 +8263,24 @@ function prepare_pstags() {
         $ta = $f.find("textarea");
     removeClass(this, "need-tag-form");
     function handle_tag_report(data) {
-        if (data.ok && data.tagreport) {
-            var tx = reduce_tag_report(data.tagreport, 0);
-            $f.find(".want-tag-report").html(render_xmsg(tx[0], tx[1]));
-            tx = reduce_tag_report(data.tagreport, 1);
-            $f.find(".want-tag-report-warnings").html(render_xmsg(tx[0], tx[1]));
-        }
+        data.message_list && render_tag_messages.call(self, data.message_list);
     }
     $f.on("keydown", "textarea", function (event) {
         var key = event_key(event);
-        if ((key === "Enter" || key === "Escape") && !event_modkey(event)) {
-            $f[0][key === "Enter" ? "save" : "cancel"].click();
-            event.preventDefault();
-            event.stopImmediatePropagation();
+        if (key === "Enter" || key === "Escape") {
+            var mod = event_modkey(event);
+            if (mod === 0 || (key === "Enter" && mod === event_modkey.META)) {
+                $f[0][key === "Enter" ? "save" : "cancel"].click();
+                event.preventDefault();
+                event.stopImmediatePropagation();
+            }
         }
     });
     $f.find("button[name=cancel]").on("click", function (evt) {
         $ta.val($ta.prop("defaultValue"));
-        $f.find(".msg-error").remove();
+        $ta.removeClass("has-error");
+        $f.find(".is-error").remove();
+        $f.find(".btn-highlight").removeClass("btn-highlight");
         foldup.call($ta[0], evt, {f: true});
     });
     $f.on("submit", save_pstags);
@@ -7835,7 +8288,7 @@ function prepare_pstags() {
         $f.data("everOpened", true);
         $f.find("input").prop("disabled", false);
         if (!$f.data("noTagReport")) {
-            $.get(hoturl("api/tagreport", {p: $f.attr("data-pid")}), handle_tag_report);
+            $.get(hoturl("api/tagmessages", {p: $f.attr("data-pid")}), handle_tag_report);
         }
         $f.removeData("noTagReport");
         $ta.autogrow();
@@ -7861,26 +8314,35 @@ function prepare_pstags() {
 }
 
 function save_pstags(evt) {
-    var $f = $(this);
+    var f = this, $f = $(f);
     evt.preventDefault();
     $f.find("input").prop("disabled", true);
     $.ajax(hoturl_post("api/settags", {p: $f.attr("data-pid")}), {
         method: "POST", data: $f.serialize(), timeout: 4000,
         success: function (data) {
             $f.find("input").prop("disabled", false);
-            $f.find(".msg-error").remove();
             if (data.ok) {
-                foldup.call($f[0], null, {f: true});
+                if (!data.message_list || !data.message_list.length) {
+                    foldup.call($f[0], null, {f: true});
+                }
                 $(window).trigger("hotcrptags", [data]);
-            } else if (data.error) {
-                $f.find(".js-tag-editor").prepend(render_xmsg(2, data.error));
+                removeClass(f.elements.tags, "has-error");
+                removeClass(f.elements.save, "btn-highlight");
+            } else {
+                addClass(f.elements.tags, "has-error");
+                addClass(f.elements.save, "btn-highlight");
+                data.message_list = data.message_list || [];
+                data.message_list.push({message: "Your changes were not saved. Please correct these errors and try again.", status: 2});
             }
+            if (data.message_list)
+                render_tag_messages.call($f[0], data.message_list);
         }
     });
 }
 
 function save_pstagindex(event) {
-    var self = this, $f = $(self).closest("form"), tags = [], inputs = [];
+    var self = this, $f = $(self).closest("form"),
+        assignments = [], inputs = [];
     if (event.type === "submit")
         event.preventDefault();
     if (hasClass($f[0], "submitting"))
@@ -7894,35 +8356,55 @@ function save_pstagindex(event) {
                 v = this.checked ? this.value : "";
             else
                 v = $.trim(this.value);
-            tags.push(t + "#" + (v === "" ? "clear" : v));
+            assignments.push(t + "#" + (v === "" ? "clear" : v));
         }
     });
+    function interesting(m) {
+        for (var i = 0; i !== assignments.length; ++i) {
+            var pound = assignments[i].indexOf("#"),
+                start = "#" + assignments[i].substring(0, pound) + ": ";
+            if (start.length > 3 && m.startsWith(start))
+                return true;
+        }
+        return false;
+    }
     function done(data) {
-        var message = [];
+        var messages = "", i, status = 0;
         $f.removeClass("submitting");
-        if (data.ok) {
+        if (!data.ok) {
+            messages += render_feedback("Your changes were not saved.", 2);
+            status = 2;
+        }
+        if (data.message_list) {
+            for (i = 0; i !== data.message_list.length; ++i) {
+                var mx = data.message_list[i];
+                if (mx.status > 1 || interesting(mx.message)) {
+                    messages += render_feedback(mx.message, mx.status);
+                    status = Math.max(status, mx.status);
+                }
+            }
+        }
+        if (data.ok && messages === "") {
             foldup.call($f[0], null, {f: true});
-            $(window).trigger("hotcrptags", [data]);
-            message = reduce_tag_report(data.tagreport, 1, tags)[1];
         } else {
             focus_within($f);
-            message = [data.error];
         }
+        data.ok && $(window).trigger("hotcrptags", [data]);
 
         $f.find(".psfn .savesuccess, .psfn .savefailure").remove();
         var $s = $("<span class=\"save" + (data.ok ? "success" : "failure") + "\"></span>");
         $s.appendTo($f.find(".psfn").first());
         if (data.ok)
             $s.delay(1000).fadeOut();
-        if (message.length) {
-            make_bubble(message.join("<br>"), "errorbubble").dir("l")
+        if (messages !== "") {
+            make_bubble(messages, status > 1 ? "errorbubble" : "warningbubble").anchor("w")
                 .near($(inputs[0]).is(":visible") ? inputs[0] : $f.find(".psfn")[0])
                 .removeOn($f.find("input"), "input")
                 .removeOn(document.body, "fold");
         }
     }
     $.post(hoturl_post("api/settags", {p: $f.attr("data-pid")}),
-            {"addtags": tags.join(" ")}, done);
+            {"addtags": assignments.join(" ")}, done);
 }
 
 function evaluate_compar(x, compar, y) {
@@ -7944,7 +8426,7 @@ function evaluate_compar(x, compar, y) {
 }
 
 function evaluate_edit_condition(ec, form) {
-    if (ec === false || ec === true) {
+    if (ec === true || ec === false || typeof ec === "number") {
         return ec;
     } else if (edit_conditions[ec.type]) {
         return edit_conditions[ec.type](ec, form);
@@ -7968,45 +8450,75 @@ edit_conditions.or = function (ec, form) {
 edit_conditions.not = function (ec, form) {
     return !evaluate_edit_condition(ec.child[0], form);
 };
-edit_conditions.option = function (ec, form) {
-    var fs = form["opt" + ec.id], v;
-    if (fs instanceof HTMLInputElement) {
-        if (fs.type === "radio" || fs.type === "checkbox")
-            v = fs.checked ? fs.value : 0;
-        else
-            v = fs.value;
-    } else if ("value" in fs)
-        v = fs.value;
-    if (v != null && v !== "")
-        v = +v;
-    else
-        v = null;
-    return evaluate_compar(v, ec.compar, ec.value);
+edit_conditions.checkbox = function (ec, form) {
+    var e = form.elements["opt" + ec.id];
+    return e && e.checked;
 };
+edit_conditions.selector = function (ec, form) {
+    var e = form.elements["opt" + ec.id];
+    return e && e.value ? +e.value : false;
+};
+edit_conditions.text_present = function (ec, form) {
+    var e = form.elements["opt" + ec.id],
+        v = $.trim(e ? e.value : "");
+    return v !== "";
+};
+edit_conditions.numeric = function (ec, form) {
+    var e = form.elements["opt" + ec.id],
+        v = $.trim(e ? e.value : ""), n;
+    return v !== "" && !isNaN((n = parseFloat(v))) ? n : null;
+};
+edit_conditions.document_count = function (ec, form) {
+    var n = 0;
+    $(form).find(".has-document").each(function () {
+        if (this.getAttribute("data-dtype") == ec.id) {
+            var name = this.getAttribute("data-document-name"), e;
+            if ((e = form.elements[name])) {
+                n += e.value ? 1 : 0;
+            } else if ($(this).find(".document-file").length
+                       && !form.elements[name + ":remove"]) {
+                n += 1;
+            }
+        }
+    });
+    return n;
+};
+edit_conditions.compar = function (ec, form) {
+    return evaluate_compar(evaluate_edit_condition(ec.child[0], form),
+                           ec.compar,
+                           evaluate_edit_condition(ec.child[1], form));
+};
+edit_conditions["in"] = function (ec, form) {
+    var v = evaluate_edit_condition(ec.child[0], form);
+    return ec.values.indexOf(v) >= 0;
+}
 edit_conditions.topic = function (ec, form) {
     if (ec.topics === false || ec.topics === true) {
         var has_topics = $(form).find(".topic-entry").filter(":checked").length > 0;
         return has_topics === ec.topics;
     }
     for (var i = 0; i !== ec.topics.length; ++i)
-        if (form["top" + ec.topics[i]].checked)
+        if (form.elements["top" + ec.topics[i]].checked)
             return true;
     return false;
 };
 edit_conditions.title = function (ec, form) {
-    return ec.match === ($.trim(form.title && form.title.value) !== "");
+    var e = form.elements.title;
+    return ec.match === ($.trim(e && e.value) !== "");
 };
 edit_conditions.abstract = function (ec, form) {
-    return ec.match === ($.trim(form.abstract && form.abstract.value) !== "");
+    var e = form.elements.abstract;
+    return ec.match === ($.trim(e && e.value) !== "");
 };
 edit_conditions.collaborators = function (ec, form) {
-    return ec.match === ($.trim(form.collaborators && form.collaborators.value) !== "");
+    var e = form.elements.collaborators;
+    return ec.match === ($.trim(e && e.value) !== "");
 };
 edit_conditions.pc_conflict = function (ec, form) {
     var n = 0, elt;
     for (var i = 0; i !== ec.cids.length; ++i)
-        if ((elt = form["pcc" + ec.cids[i]])
-            && (elt.type === "checkbox" ? elt.checked : +elt.value > 0)) {
+        if ((elt = form.elements["pcc" + ec.cids[i]])
+            && (elt.type === "checkbox" ? elt.checked : +elt.value > 1)) {
             ++n;
             if (ec.compar === "!=" && ec.value === 0)
                 return true;
@@ -8015,22 +8527,20 @@ edit_conditions.pc_conflict = function (ec, form) {
 };
 
 function run_edit_conditions() {
-    $(".has-edit-condition").each(function () {
-        var f = this.closest("form"),
-            ec = JSON.parse(this.getAttribute("data-edit-condition")),
-            off = !evaluate_edit_condition(ec, f),
-            link = add_pslitem(this);
-        toggleClass(this, "hidden", off);
-        link && toggleClass(link, "hidden", off);
-    });
+    var f = this.closest("form"),
+        ec = JSON.parse(this.getAttribute("data-edit-condition")),
+        off = !evaluate_edit_condition(ec, f),
+        link = add_pslitem(this);
+    toggleClass(this, "hidden", off);
+    link && toggleClass(link, "hidden", off);
 }
 
-function check_still_ready(event) {
-    var sub = this.submitpaper;
-    if (sub && sub.type === "checkbox" && !sub.checked) {
-        if (!window.confirm("Are you sure the paper is no longer ready for review?\n\nOnly papers that are ready for review will be considered."))
-            event.preventDefault();
+function header_text(hdr) {
+    var x = hdr.firstChild;
+    while (x && x.nodeType !== 3) {
+        x = x.nextSibling;
     }
+    return x ? x.data.trim() : null;
 }
 
 function add_pslitem_header() {
@@ -8039,11 +8549,8 @@ function add_pslitem_header() {
         id = this.id || l.getAttribute("for") || $(l).find("input").attr("id");
     }
     if (id) {
-        var x = l.firstChild;
-        while (x && x.nodeType !== 3) {
-            x = x.nextSibling;
-        }
-        var e = x ? add_pslitem(id, escape_entities(x.data.trim()), this.parentElement) : null;
+        var xt = header_text(l),
+            e = xt ? add_pslitem(id, escape_entities(xt), this.parentElement) : null;
         if (e) {
             hasClass(this, "has-error") && addClass(e.firstChild, "is-error");
             hasClass(this, "has-warning") && addClass(e.firstChild, "is-warning");
@@ -8052,61 +8559,96 @@ function add_pslitem_header() {
     }
 }
 
-
-function edit_paper_ui(event) {
-    if (event.type === "submit")
-        check_still_ready.call(this, event);
-};
-edit_paper_ui.edit_condition = function () {
-    run_edit_conditions();
-    $("#form-paper").on("change click", "input, select, textarea", run_edit_conditions);
-};
-edit_paper_ui.load = function () {
-    hiliter_children("#form-paper");
-    $("#form-paper input[name=paperUpload]").trigger("change");
-    $(".papet").each(add_pslitem_header);
-    var h = $(".btn-savepaper").first(),
-        k = $("#form-paper").hasClass("alert") ? "" : " hidden";
-    $(".pslcard-nav").append('<div class="paper-alert mt-5' + k + '">'
-        + '<button class="ui btn btn-highlight btn-savepaper">'
-        + h.html() + '</button></div>')
-        .find(".btn-savepaper").click(function () {
-            $("#form-paper .btn-savepaper").first().click();
-        });
-};
-edit_paper_ui.prepare = function () {
-    $(".need-tag-index-form").each(function () {
-        $(this).removeClass("need-tag-index-form").on("submit", save_pstagindex)
-            .find("input").on("change", save_pstagindex);
-    });
-    $(".need-tag-form").each(prepare_pstags);
-    $(".need-paper-select-api").each(function () {
-        removeClass(this, "need-paper-select-api");
-        prepare_paper_select.call(this);
-    });
-};
-edit_paper_ui.load_review = function () {
-    hiliter_children("#form-review");
-    $(".revet").each(add_pslitem_header);
-    if ($(".revet").length) {
-        $(".pslcard > .pslitem:last-child").addClass("mb-3");
+function add_pslitem_papeg() {
+    if (hasClass(this, "papeg-separator")) {
+        var $j = $('<li class="pslitem pslitem-separator"></li>');
+        add_pslitem($j[0], true);
+    } else if (hasClass(this.firstChild, "papet")) {
+        add_pslitem_header.call(this.firstChild);
     }
-    var h = $(".btn-savereview").first(),
-        k = $("#form-review").hasClass("alert") ? "" : " hidden";
-    $(".pslcard-nav").append('<div class="review-alert mt-5' + k + '">'
-        + '<button class="ui btn btn-highlight btn-savereview">'
-        + h.html() + '</button></div>')
-        .find(".btn-savereview").click(function () {
-            $("#form-review .btn-savereview").first().click();
+}
+
+handle_ui.on("js-submit-paper", function (event) {
+    if (event.type === "submit") {
+        var sub = this.elements.submitpaper,
+            is_submit = (form_submitter(this, event) || "update") === "update";
+        if (is_submit
+            && sub && sub.type === "checkbox" && !sub.checked
+            && this.hasAttribute("data-submitted")) {
+            if (!window.confirm("Are you sure the paper is no longer ready for review?\n\nOnly papers that are ready for review will be considered.")) {
+                event.preventDefault();
+                return;
+            }
+        }
+        if (is_submit
+            && $(this).find(".prevent-submit").length) {
+            window.alert("Waiting for uploads to complete");
+            event.preventDefault();
+        }
+    }
+});
+
+function fieldchange(event) {
+    $(event.delegateTarget).find(".want-fieldchange")
+        .trigger({type: "fieldchange", changeTarget: event.target});
+}
+
+return {
+    edit_condition: function () {
+        $("#form-paper").on("fieldchange", ".has-edit-condition", run_edit_conditions)
+            .find(".has-edit-condition").each(run_edit_conditions);
+    },
+    evaluate_edit_condition: function (ec) {
+        return evaluate_edit_condition(typeof ec === "string" ? JSON.parse(ec) : ec, $("#form-paper")[0]);
+    },
+    load: function () {
+        hiliter_children("#form-paper");
+        $("#form-paper input.primary-document").trigger("change");
+        $(".papeg").each(add_pslitem_papeg);
+        var h = $(".btn-savepaper").first(),
+            k = $("#form-paper").hasClass("alert") ? "" : " hidden";
+        $(".pslcard-nav").append('<div class="paper-alert mt-5' + k + '">'
+            + '<button class="ui btn btn-highlight btn-savepaper">'
+            + h.html() + '</button></div>')
+            .find(".btn-savepaper").click(function () {
+                $("#form-paper .btn-savepaper").first().trigger({type: "click", sidebarTarget: this});
+            });
+        $("#form-paper").on("change", "input, select, textarea", fieldchange)
+            .on("click", "input[type=checkbox], input[type=radio]", fieldchange);
+    },
+    prepare: function () {
+        $(".need-tag-index-form").each(function () {
+            $(this).removeClass("need-tag-index-form").on("submit", save_pstagindex)
+                .find("input").on("change", save_pstagindex);
         });
+        $(".need-tag-form").each(prepare_pstags);
+        $(".need-paper-select-api").each(function () {
+            removeClass(this, "need-paper-select-api");
+            prepare_paper_select.call(this);
+        });
+    },
+    load_review: function () {
+        hiliter_children("#form-review");
+        $(".revet").each(add_pslitem_header);
+        if ($(".revet").length) {
+            $(".pslcard > .pslitem:last-child").addClass("mb-3");
+        }
+        var h = $(".btn-savereview").first(),
+            k = $("#form-review").hasClass("alert") ? "" : " hidden";
+        $(".pslcard-nav").append('<div class="review-alert mt-5' + k + '">'
+            + '<button class="ui btn btn-highlight btn-savereview">'
+            + h.html() + '</button></div>')
+            .find(".btn-savereview").click(function () {
+                $("#form-review .btn-savereview").first().trigger({type: "click", sidebarTarget: this});
+            });
+    }
 };
-return edit_paper_ui;
 })($);
 
 
-if (hotcrp_paperid) {
+if (siteinfo.paperid) {
     $(window).on("hotcrptags", function (event, data) {
-        if (data.pid != hotcrp_paperid)
+        if (data.pid != siteinfo.paperid)
             return;
         data.color_classes && make_pattern_fill(data.color_classes, "", true);
         $(".has-tag-classes").each(function () {
@@ -8119,7 +8661,7 @@ if (hotcrp_paperid) {
             var $j = $(this), res = "",
                 t = $j.data("tagBase") + "#", i;
             if (t.charAt(0) == "~" && t.charAt(1) != "~")
-                t = hotcrp_user.cid + t;
+                t = siteinfo.user.cid + t;
             for (i = 0; i != data.tags.length; ++i)
                 if (data.tags[i].substr(0, t.length) == t)
                     res = data.tags[i].substr(t.length);
@@ -8140,15 +8682,15 @@ if (hotcrp_paperid) {
 
 // profile UI
 handle_ui.on("js-cannot-delete-user", function (event) {
-    var hc = popup_skeleton({anchor: this});
-    hc.push('<p><strong>This user cannot be deleted</strong> because they are the sole contact for ' + $(this).data("soleAuthor") + '. To delete the user, first remove these papers from the database or give the papers more contacts.</p>');
+    var hc = popup_skeleton({near: this});
+    hc.push('<p><strong>This user cannot be deleted</strong> because they are the sole contact for ' + $(this).data("soleAuthor") + '. To delete the user, first remove those submissions from the database or give them more contacts.</p>');
     hc.push_actions(['<button type="button" name="cancel">Cancel</button>']);
     hc.show();
 });
 
 handle_ui.on("js-delete-user", function (event) {
     var f = this.closest("form"),
-        hc = popup_skeleton({anchor: this, action: f}), x;
+        hc = popup_skeleton({near: this, action: f}), x;
     hc.push('<p>Be careful: This will permanently delete all information about this user from the database and <strong>cannot be undone</strong>.</p>');
     if ((x = this.getAttribute("data-delete-info")))
         hc.push(x);
@@ -8158,14 +8700,47 @@ handle_ui.on("js-delete-user", function (event) {
     $d.on("submit", "form", function () { addClass(f, "submitting"); });
 });
 
+handle_ui.on("js-disable-user", function (event) {
+    var disabled = hasClass(this, "btn-success"), self = this;
+    self.disabled = true;
+    $.post(hoturl_post("api/account", {u: this.getAttribute("data-user") || this.closest("form").getAttribute("data-user")}),
+        disabled ? {enable: 1} : {disable: 1},
+        function (data) {
+            setajaxcheck(self, data);
+            self.disabled = false;
+            if (data.ok) {
+                if (data.disabled) {
+                    self.textContent = "Enable account";
+                    removeClass(self, "btn-danger");
+                    addClass(self, "btn-success");
+                } else {
+                    self.textContent = "Disable account";
+                    removeClass(self, "btn-success");
+                    addClass(self, "btn-danger");
+                }
+                $(self.closest("form")).find(".js-send-user-accountinfo").prop("disabled", data.disabled);
+            }
+        });
+});
+
+handle_ui.on("js-send-user-accountinfo", function (event) {
+    var self = this;
+    self.disabled = true;
+    $.post(hoturl_post("api/account", {u: this.getAttribute("data-user") || this.closest("form").getAttribute("data-user")}),
+        {sendinfo: 1},
+        function (data) {
+            setajaxcheck(self, data);
+        });
+});
+
 var profile_ui = (function ($) {
 return function (event) {
     if (hasClass(this, "js-role")) {
         var $f = $(this).closest("form"),
             pctype = $f.find("input[name=pctype]:checked").val(),
             ass = $f.find("input[name=ass]:checked").length;
-        foldup.call(this, null, {n: 1, f: !pctype || pctype === "no"});
-        foldup.call(this, null, {n: 2, f: (!pctype || pctype === "no") && ass === 0});
+        foldup.call(this, null, {n: 1, f: !pctype || pctype === "none"});
+        foldup.call(this, null, {n: 2, f: (!pctype || pctype === "none") && ass === 0});
     }
 };
 })($);
@@ -8174,17 +8749,17 @@ return function (event) {
 // review UI
 handle_ui.on("js-decline-review", function () {
     var f = this.closest("form"),
-        hc = popup_skeleton({anchor: this, action: f});
+        hc = popup_skeleton({near: this, action: f});
     hc.push('<p>Select “Decline review” to decline this review. Thank you for your consideration.</p>');
     hc.push('<textarea name="reason" rows="3" cols="60" class="w-99 need-autogrow" placeholder="Optional explanation" spellcheck="true"></textarea>');
-    hc.push_actions(['<button type="submit" name="refuse" value="yes" class="btn-danger">Decline review</button>',
+    hc.push_actions(['<button type="submit" name="decline" value="1" class="btn-danger">Decline review</button>',
         '<button type="button" name="cancel">Cancel</button>']);
     hc.show();
 });
 
 handle_ui.on("js-deny-review-request", function () {
     var f = this.closest("form"),
-        hc = popup_skeleton({anchor: this, action: f});
+        hc = popup_skeleton({near: this, action: f});
     hc.push('<p>Select “Deny request” to deny this review request.</p>');
     hc.push('<textarea name="reason" rows="3" cols="60" class="w-99 need-autogrow" placeholder="Optional explanation" spellcheck="true"></textarea>');
     hc.push_actions(['<button type="submit" name="denyreview" value="1" class="btn-danger">Deny request</button>',
@@ -8195,28 +8770,39 @@ handle_ui.on("js-deny-review-request", function () {
 
 handle_ui.on("js-delete-review", function () {
     var f = this.closest("form"),
-        hc = popup_skeleton({anchor: this, action: f});
+        hc = popup_skeleton({near: this, action: f});
     hc.push('<p>Be careful: This will permanently delete all information about this review assignment from the database and <strong>cannot be undone</strong>.</p>');
     hc.push_actions(['<button type="submit" name="deletereview" value="1" class="btn-danger">Delete review</button>',
         '<button type="button" name="cancel">Cancel</button>']);
     hc.show();
 });
 
-handle_ui.on("js-adopt-review", function (event) {
-    var self = this, hc = popup_skeleton({anchor: this});
-    hc.push('<p>Replace your review with the contents of this review?</p>');
-    hc.push_actions([
-        '<button type="button" name="bsubmit" class="btn-primary">Adopt and submit</button>',
-        '<button type="button" name="bdraft">Adopt as draft</button>',
-        '<button type="button" name="cancel">Cancel</button>'
-    ]);
+handle_ui.on("js-approve-review", function (event) {
+    var self = this, hc = popup_skeleton({near: event.sidebarTarget || self});
+    hc.push('<div class="btngrid">', '</div>');
+    var subreviewClass = "";
+    if (hasClass(self, "can-adopt")) {
+        hc.push('<button type="button" name="adoptsubmit" class="btn btn-primary big">Adopt and submit</button><p>Submit a copy of this review under your name. You can make changes afterwards.</p>');
+        hc.push('<button type="button" name="adoptdraft" class="btn big">Adopt as draft</button><p>Save a copy of this review as a draft review under your name.</p>');
+    } else if (hasClass(self, "can-adopt-replace")) {
+        hc.push('<button type="button" name="adoptsubmit" class="btn btn-primary big">Adopt and submit</button><p>Replace your draft review with a copy of this review and submit it. You can make changes afterwards.</p>');
+        hc.push('<button type="button" name="adoptdraft" class="btn big">Adopt as draft</button><p>Replace your draft review with a copy of this review.</p>');
+    } else {
+        subreviewClass = " btn-primary";
+    }
+    hc.push('<button type="button" name="approvesubreview" class="btn big' + subreviewClass + '">Approve subreview</button><p>Approve this review as a subreview. It will not be shown to authors and its scores will not be counted in statistics.</p>');
+    if (hasClass(self, "can-approve-submit")) {
+        hc.push('<button type="button" name="submitreview" class="btn big">Submit as full review</button><p>Submit this review as an independent review. It will be shown to authors and its scores will be counted in statistics.</p>');
+    }
+    hc.pop();
+    hc.push_actions(['<button type="button" name="cancel">Cancel</button>']);
     var $d = hc.show();
     $d.on("click", "button", function (event) {
-        if (event.target.name !== "cancel") {
+        var b = event.target.name;
+        if (b !== "cancel") {
             var form = self.closest("form");
-            $(form).append('<input type="hidden" name="adoptreview" value="1">');
-            if (event.target.name === "bsubmit")
-                $(form).append('<input type="hidden" name="adoptsubmit" value="1">');
+            $(form).append(hidden_input(b, "1"))
+                .append(hidden_input(b.startsWith("adopt") ? "adoptreview" : "update", "1"));
             addClass(form, "submitting");
             form.submit();
             $d.close();
@@ -8227,21 +8813,21 @@ handle_ui.on("js-adopt-review", function (event) {
 
 // search/paperlist UI
 handle_ui.on("js-edit-formulas", function () {
-    var self = this, $d, nformulas = 0;
-    function push_formula(hc, f) {
-        ++nformulas;
-        hc.push('<div class="editformulas-formula" data-formula-number="' + nformulas + '">', '</div>');
-        hc.push('<div class="entryi"><label for="htctl_formulaname_' + nformulas + '">Name</label><div class="entry">', '</div></div>');
+    var self = this, $d, count = 0;
+    function push1(hc, f) {
+        ++count;
+        hc.push('<div class="editformulas-formula" data-formula-number="' + count + '">', '</div>');
+        hc.push('<div class="entryi"><label for="htctl_formulaname_' + count + '">Name</label><div class="entry nw">', '</div></div>');
         if (f.editable) {
-            hc.push('<input type="text" id="htctl_formulaname_' + nformulas + '" class="editformulas-name need-autogrow" name="formulaname_' + nformulas + '" size="30" value="' + escape_entities(f.name) + '">');
+            hc.push('<input type="text" id="htctl_formulaname_' + count + '" class="editformulas-name need-autogrow" name="formulaname_' + count + '" size="30" value="' + escape_entities(f.name) + '" placeholder="Formula name">');
             hc.push('<a class="ui closebtn delete-link need-tooltip" href="" aria-label="Delete formula">x</a>');
         } else
             hc.push(escape_entities(f.name));
         hc.pop();
-        hc.push('<div class="entryi"><label for="htctl_formulaexpression_' + nformulas + '">Expression</label><div class="entry">', '</div></div>');
+        hc.push('<div class="entryi"><label for="htctl_formulaexpression_' + count + '">Expression</label><div class="entry">', '</div></div>');
         if (f.editable)
-            hc.push('<textarea class="editformulas-expression need-autogrow" id="htctl_formulaexpression_' + nformulas + '" name="formulaexpression_' + nformulas + '" rows="1" cols="60" style="width:99%">' + escape_entities(f.expression) + '</textarea>')
-                .push('<input type="hidden" name="formulaid_' + nformulas + '" value="' + f.id + '">');
+            hc.push('<textarea class="editformulas-expression need-autogrow w-99" id="htctl_formulaexpression_' + count + '" name="formulaexpression_' + count + '" rows="1" cols="64" placeholder="Formula definition">' + escape_entities(f.expression) + '</textarea>')
+                .push('<input type="hidden" name="formulaid_' + count + '" value="' + f.id + '">');
         else
             hc.push(escape_entities(f.expression));
         hc.pop();
@@ -8253,7 +8839,7 @@ handle_ui.on("js-edit-formulas", function () {
     function click(event) {
         if (this.name === "add") {
             var hc = new HtmlCollector;
-            push_formula(hc, {name: "", expression: "", editable: true, id: "new"});
+            push1(hc, {name: "", expression: "", editable: true, id: "new"});
             var $f = $(hc.render()).appendTo($d.find(".editformulas"));
             $f[0].setAttribute("data-formula-new", "");
             $f.find("textarea").autogrow();
@@ -8264,12 +8850,13 @@ handle_ui.on("js-edit-formulas", function () {
     function ondelete() {
         var $x = $(this).closest(".editformulas-formula");
         if ($x[0].hasAttribute("data-formula-new"))
-            $x.remove();
+            $x.addClass("hidden");
         else {
-            $x.find(".editformulas-expression").closest(".f-i").addClass("hidden");
+            $x.find(".editformulas-expression").closest(".entryi").addClass("hidden");
             $x.find(".editformulas-name").prop("disabled", true).css("text-decoration", "line-through");
-            $x.append('<em>(Formula deleted)</em><input type="hidden" name="formuladeleted_' + $x.data("formulaNumber") + '" value="1">');
+            $x.append('<em>(Formula deleted)</em>');
         }
+        $x.append('<input type="hidden" name="formuladeleted_' + $x.data("formulaNumber") + '" value="1">');
     }
     function submit(event) {
         event.preventDefault();
@@ -8289,7 +8876,7 @@ handle_ui.on("js-edit-formulas", function () {
         hc.push('<p><a href="' + hoturl("help", "t=formulas") + '" target="_blank">Formulas</a>, such as “sum(OveMer)”, are calculated from review statistics and paper information. Named formulas are shared with the PC and can be used in other formulas. To view an unnamed formula, use a search term like “show:(sum(OveMer))”.</p>');
         hc.push('<div class="editformulas">', '</div>');
         for (i in formulas || [])
-            push_formula(hc, formulas[i]);
+            push1(hc, formulas[i]);
         hc.pop_push('<button type="button" name="add">Add named formula</button>');
         hc.push_actions(['<button type="submit" name="saveformulas" value="1" class="btn-primary">Save</button>', '<button type="button" name="cancel">Cancel</button>']);
         $d = hc.show();
@@ -8309,8 +8896,22 @@ handle_ui.on("js-edit-view-options", function () {
         $.ajax(hoturl_post("api/viewoptions"), {
             method: "POST", data: $(this).serialize(),
             success: function (data) {
-                if (data.ok)
+                if (data.ok) {
                     $d.close();
+                    location.reload();
+                } else {
+                    var ta = $d.find("[name=display]")[0];
+                    while (ta.previousSibling
+                           && hasClass(ta.previousSibling, "feedback")) {
+                        ta.parentElement.removeChild(ta.previousSibling);
+                    }
+                    data.errors = data.errors || ["Error saving view options."];
+                    for (var i in data.errors) {
+                        $('<p class="feedback is-error">' + data.errors[i] + '</p>').insertBefore(ta);
+                    }
+                    addClass(ta, "has-error");
+                    ta.focus();
+                }
             }
         });
         event.preventDefault();
@@ -8320,10 +8921,10 @@ handle_ui.on("js-edit-view-options", function () {
         hc.push('<div style="max-width:480px;max-width:40rem;position:relative">', '</div>');
         hc.push('<h2>View options</h2>');
         hc.push('<div class="f-i"><div class="f-c">Default view options</div>', '</div>');
-        hc.push('<div class="reportdisplay-default">' + escape_entities(display_default || "") + '</div>');
+        hc.push('<div class="reportdisplay-default">' + escape_entities(display_default || "(none)") + '</div>');
         hc.pop();
         hc.push('<div class="f-i"><div class="f-c">Current view options</div>', '</div>');
-        hc.push('<textarea class="reportdisplay-current w-99 need-autogrow" name="display" rows="1" cols="60">' + escape_entities(display_current || "") + '</textarea>');
+        hc.push('<textarea class="reportdisplay-current w-99 need-autogrow uikd js-keydown-enter-submit" name="display" rows="1" cols="60">' + escape_entities(display_current || "") + '</textarea>');
         hc.pop();
         hc.push_actions(['<button type="submit" name="save" class="btn-primary">Save options as default</button>', '<button type="button" name="cancel">Cancel</button>']);
         $d = hc.show();
@@ -8337,8 +8938,88 @@ handle_ui.on("js-edit-view-options", function () {
     });
 });
 
+handle_ui.on("js-edit-namedsearches", function () {
+    var self = this, $d, count = 0;
+    function push1(hc, f) {
+        ++count;
+        hc.push('<div class="editsearches-search" data-search-number="' + count + '">', '</div>');
+        hc.push('<div class="entryi"><label for="htctl_searchname_' + count + '">Name</label><div class="entry nw">', '</div></div>');
+        if (f.editable) {
+            hc.push('<input type="text" id="htctl_searchname_' + count + '" class="editsearches-name need-autogrow" name="searchname_' + count + '" size="30" value="' + escape_entities(f.name) + '" placeholder="Search name">');
+            hc.push('<a class="ui closebtn delete-link need-tooltip" href="" aria-label="Delete search">x</a>');
+        } else
+            hc.push(escape_entities(f.name));
+        hc.pop();
+        hc.push('<div class="entryi"><label for="htctl_searchquery_' + count + '">Search</label><div class="entry">', '</div></div>');
+        if (f.editable)
+            hc.push('<textarea class="editsearches-query need-autogrow w-99" id="htctl_searchquery_' + count + '" name="searchq_' + count + '" rows="1" cols="64" placeholder="(All)">' + escape_entities(f.q) + '</textarea>');
+        else
+            hc.push(escape_entities(f.q));
+        hc.push('<input type="hidden" name="searchid_' + count + '" value="' + (f.id || f.name) + '">');
+        hc.pop();
+        if (f.error_html) {
+            hc.push('<div class="entryi"><label class="is-error">Error</label><div class="entry">' + f.error_html + '</div></div>');
+        }
+        hc.pop();
+    }
+    function click(event) {
+        if (this.name === "add") {
+            var hc = new HtmlCollector,
+                q = document.getElementById("searchform");
+            push1(hc, {name: "", q: q ? q.getAttribute("data-lquery") : "", editable: true, id: "new"});
+            var $f = $(hc.render()).appendTo($d.find(".editsearches"));
+            $f[0].setAttribute("data-search-new", "");
+            $f.find("textarea").autogrow();
+            focus_at($f.find(".editsearches-name"));
+            $d.find(".modal-dialog").scrollIntoView({atBottom: true, marginBottom: "auto"});
+        }
+    }
+    function ondelete() {
+        var $x = $(this).closest(".editsearches-search");
+        if ($x[0].hasAttribute("data-search-new"))
+            $x.addClass("hidden");
+        else {
+            $x.find(".editsearches-query").closest(".entryi").addClass("hidden");
+            $x.find(".editsearches-name").prop("disabled", true).css("text-decoration", "line-through");
+            $x.append('<em>(Search deleted)</em>');
+        }
+        $x.append('<input type="hidden" name="searchdeleted_' + $x.data("searchNumber") + '" value="1">');
+    }
+    function submit(event) {
+        event.preventDefault();
+        $.post(hoturl_post("api/namedsearch"),
+            $d.find("form").serialize(),
+            function (data) {
+                if (data.ok)
+                    location.reload(true);
+                else
+                    $d.show_errors(data);
+            });
+    }
+    function create(searches) {
+        var hc = popup_skeleton(), i;
+        hc.push('<div style="max-width:480px;max-width:40rem;position:relative">', '</div>');
+        hc.push('<h2>Saved searches</h2>');
+        hc.push('<p>Invoke a saved search with “ss:NAME”. Saved searches are shared with the PC.</p>');
+        hc.push('<div class="editsearches">', '</div>');
+        for (i in searches || []) {
+            push1(hc, searches[i]);
+        }
+        hc.pop_push('<button type="button" name="add">Add named search</button>');
+        hc.push_actions(['<button type="submit" name="savesearches" value="1" class="btn-primary">Save</button>', '<button type="button" name="cancel">Cancel</button>']);
+        $d = hc.show();
+        $d.on("click", "button", click);
+        $d.on("click", "a.delete-link", ondelete);
+        $d.on("submit", "form", submit);
+    }
+    $.get(hoturl_post("api/namedsearch"), function (data) {
+        if (data.ok)
+            create(data.searches);
+    });
+});
+
 handle_ui.on("js-select-all", function () {
-    $(this).closest("table.pltable").find("input[name='pap[]']").prop("checked", true);
+    $(this).closest("table.pltable").find("input.js-selector").prop("checked", true);
 });
 
 
@@ -8377,46 +9058,86 @@ handle_ui.on("js-assign-list-action", function () {
     });
 });
 
-handle_ui.on("js-paperlist-submit", function (event) {
+handle_ui.on("js-submit-paperlist", function (event) {
     // analyze why this is being submitted
     var $self = $(this), fn = $self.data("submitMark");
     $self.removeData("submitMark");
-    if (!fn && this.defaultact)
-        fn = $(this.defaultact).val();
+    if (!fn && this.elements.defaultact)
+        fn = this.elements.defaultact.value;
     if (!fn && document.activeElement) {
-        var $td = $(document.activeElement).closest("td");
-        if ($td.hasClass("lld")) {
-            var $sub = $td.closest(".linelink.active").find("input[type=submit], button[type=submit]");
+        var td = document.activeElement.closest("td");
+        if (td && hasClass(td, "lld")) {
+            var $sub = $(td.closest(".linelink.active")).find("input[type=submit], button[type=submit]");
             if ($sub.length == 1)
-                fn = this.defaultact.value = $sub[0].value;
+                fn = this.elements.defaultact.value = $sub[0].value;
         }
     }
 
+    // find what is selected
+    var paps = this.elements["pap[]"];
+    if (paps && paps.length) {
+        paps = Array.prototype.slice.call(paps);
+        for (var i = 0; i !== paps.length; ++i) {
+            paps[i].setAttribute("data-range-type", "pap[]");
+            paps[i].removeAttribute("name");
+        }
+    }
+    var allval = [], chkval = [];
+    $self.find("input.js-selector").each(function () {
+        allval.push(this.value);
+        if (this.checked)
+            chkval.push(this.value);
+    });
+
     // if nothing selected, either select all or error out
-    $self.find(".js-default-submit-values").remove();
-    if (!$self.find("input[name='pap[]']:checked").length) {
+    if (!chkval.length) {
         var subbtn = fn && $self.find("input[type=submit], button[type=submit]").filter("[value=" + fn + "]");
         if (subbtn && subbtn.length == 1 && subbtn.data("defaultSubmitAll")) {
-            var values = $self.find("input[name='pap[]']").map(function () { return this.value; }).get();
-            $self.append('<div class="js-default-submit-values"><input type="hidden" name="pap" value="' + values.join(" ") + '"></div>');
+            chkval = allval;
         } else {
             alert("Select one or more papers first.");
             event.preventDefault();
             return;
         }
     }
+    if (!this.elements.p) {
+        $self.append(hidden_input("p", "", {"class": "is-selector-submit"}));
+    }
+    this.elements.p.value = chkval.join(" ");
 
     // encode the expected download in the form action, to ease debugging
     var action = $self.data("originalAction");
     if (!action)
         $self.data("originalAction", (action = this.action));
-    if (fn && /^[-_\w]+$/.test(fn)) {
-        $self.find(".js-submit-action-info-" + fn).each(function () {
-            fn += "-" + ($(this).val() || "");
-        });
-        action = hoturl_add(action, "action=" + encodeURIComponent(fn));
+    if (fn === "get") {
+        var getform = $$("searchgetform"), input;
+        if (!getform) {
+            getform = hoturl_get_form(action);
+            getform.appendChild(hidden_input("forceShow", ""));
+            getform.appendChild(hidden_input("fn", ""));
+            getform.appendChild(hidden_input("p", ""));
+            getform.setAttribute("id", "searchgetform");
+            document.body.appendChild(getform);
+        }
+        if (this.elements.forceShow && this.elements.forceShow.value !== "") {
+            getform.elements.forceShow.value = this.elements.forceShow.value;
+            getform.elements.forceShow.disabled = false;
+        } else {
+            getform.elements.forceShow.disabled = true;
+        }
+        getform.elements.fn.value = fn + "/" + this.elements.getfn.value;
+        getform.elements.p.value = this.elements.p.value;
+        getform.submit();
+        event.preventDefault();
+    } else {
+        if (fn && /^[-_\w]+$/.test(fn)) {
+            $self.find(".js-submit-action-info-" + fn).each(function () {
+                fn += "-" + ($(this).val() || "");
+            });
+            action = hoturl_add(action, "action=" + encodeURIComponent(fn));
+        }
+        this.action = action;
     }
-    this.action = action;
 });
 
 
@@ -8496,12 +9217,6 @@ function decode_session_list_ids(str) {
             continue;
         }
 
-        while (ch === 122) {
-            sign = -sign;
-            ++i;
-            ch = i < l ? str.charCodeAt(i) : 0;
-        }
-
         var include = true, n = 0, skip = 0;
         if (ch >= 97 && ch <= 104)
             n = ch - 96;
@@ -8519,6 +9234,11 @@ function decode_session_list_ids(str) {
             skip = 1;
         } else if (ch >= 73 && ch <= 80) {
             n = ch - 72;
+            skip = 2;
+        } else if (ch === 122) {
+            sign = -sign;
+        } else if (ch === 90) {
+            sign = -sign;
             skip = 2;
         }
 
@@ -8561,83 +9281,107 @@ function update_digest(info) {
     else
         return false;
 }
-function make_digest(info, pid) {
-    var m = /^(.*)"ids":"([-0-9'a-zA-Z]+)"(.*)/.exec(info), digest;
-    if (m && wstorage() && (digest = update_digest(m[2]))) {
-        info = m[1] + '"digest":"listdigest' + digest + '"';
-        if (pid) {
-            var ids = decode_session_list_ids(m[2]), pos;
-            if (ids && (pos = $.inArray(pid, ids)) >= 0) {
-                info += ',"curid":' + pid
-                    + ',"previd":' + (pos > 0 ? ids[pos - 1] : 'false')
-                    + ',"nextid":' + (pos < ids.length - 1 ? ids[pos + 1] : 'false');
-            }
-        }
-        info += m[3];
+window.Hotlist = function (s) {
+    this.str = s || "";
+    this.obj = null;
+    if (this.str && this.str.charAt(0) === "{") {
+        try {
+            this.obj = JSON.parse(this.str);
+        } catch (e) {}
     }
-    return info;
-}
-function resolve_digest(info) {
+};
+Hotlist.at = function (elt) {
+    return new Hotlist(elt ? elt.getAttribute("data-hotlist") : "");
+};
+Hotlist.prototype.ids = function () {
+    return this.obj && this.obj.ids ? decode_session_list_ids(this.obj.ids) : null;
+};
+Hotlist.prototype.resolve = function () {
     var m, ids;
-    if (info.indexOf('"ids":') < 0
-        && (m = /^(.*)"digest":"listdigest([0-9]+)(".*)$/.exec(info))
-        && (ids = update_digest(+m[2])) !== false)
-        return m[1] + '"ids":"' + ids + m[3];
-    else
-        return info;
-}
-function set_cookie(info, pid) {
-    if (info) {
-        if (/"digest":/.test(info))
-            info = resolve_digest(info);
-        if (info.length > 1500)
-            info = make_digest(info, pid);
-        cookie_set_at = now_msec();
-        var p = "; max-age=20", m;
-        if (siteurl && (m = /^[a-z]+:\/\/[^\/]*(\/.*)/.exec(hoturl_absolute_base())))
-            p += "; path=" + m[1];
-        document.cookie = "hotlist-info-" + now_msec() + "=" + encodeURIComponent(info) + siteurl_cookie_params + p;
+    if (this.obj
+        && !this.obj.ids
+        && this.obj.digest
+        && /^listdigest[0-9]+$/.test(this.obj.digest)
+        && (ids = update_digest(+this.obj.digest.substring(10)))) {
+        delete this.obj.digest;
+        this.obj.ids = ids;
+        this.str = JSON.stringify(this.obj);
     }
+    return this;
+};
+Hotlist.prototype.cookie_at = function (pid) {
+    this.resolve();
+    var m, digest, ids, pos;
+    if (this.str.length > 1500
+        && this.obj
+        && this.obj.ids
+        && wstorage()
+        && (digest = update_digest(this.obj.ids))) {
+        var x = Object.assign({digest: "listdigest" + digest}, this.obj);
+        delete x.ids;
+        if (pid
+            && (ids = this.ids())
+            && (pos = $.inArray(pid, ids)) >= 0) {
+            x.curid = pid;
+            x.previd = pos > 0 ? ids[pos - 1] : false;
+            x.nextid = pos < ids.length - 1 ? ids[pos + 1] : false;
+        }
+        return JSON.stringify(x);
+    } else {
+        return this.str;
+    }
+};
+Hotlist.prototype.reorder = function (tbody) {
+    if (this.obj) {
+        this.resolve();
+        var p0 = -100, p1 = -100, pid, l = [];
+        for (var cur = tbody.firstChild; cur; cur = cur.nextSibling)
+            if (cur.nodeName === "TR" && /^pl(?:\s|\z)/.test(cur.className)
+                && (pid = +cur.getAttribute("data-pid"))) {
+                if (pid != p1 + 1) {
+                    if (p0 > 0)
+                        l.push(p0 == p1 ? p0 : p0 + "-" + p1);
+                    p0 = pid;
+                }
+                p1 = pid;
+            }
+        if (p0 > 0)
+            l.push(p0 == p1 ? p0 : p0 + "-" + p1);
+        this.obj.ids = l.join("'");
+        this.str = JSON.stringify(this.obj);
+    }
+};
+function set_cookie(info, pid) {
+    var cstr = info.cookie_at(pid);
+    cookie_set_at = now_msec();
+    var p = "; Max-Age=20", m;
+    if (siteinfo.site_relative && (m = /^[a-z]+:\/\/[^\/]*(\/.*)/.exec(hoturl_absolute_base())))
+        p += "; Path=" + m[1];
+    document.cookie = "hotlist-info-".concat(cookie_set_at, "=", encodeURIComponent(cstr), siteinfo.cookie_params, p);
 }
 function is_listable(sitehref) {
     return /^(?:paper|review|assign|profile)(?:|\.php)\//.test(sitehref);
 }
-function set_list_order(info, tbody) {
-    var p0 = -100, p1 = -100, pid, l = [];
-    for (var cur = tbody.firstChild; cur; cur = cur.nextSibling)
-        if (cur.nodeName === "TR" && /^pl(?:\s|\z)/.test(cur.className)
-            && (pid = +cur.getAttribute("data-pid"))) {
-            if (pid != p1 + 1) {
-                if (p0 > 0)
-                    l.push(p0 == p1 ? p0 : p0 + "-" + p1);
-                p0 = pid;
-            }
-            p1 = pid;
-        }
-    if (p0 > 0)
-        l.push(p0 == p1 ? p0 : p0 + "-" + p1);
-    return info.replace(/"ids":"[-0-9'a-zA-Z]+"/, '"ids":"' + l.join("'") + '"');
-}
 function handle_list(e, href) {
-    var hl, sitehref, m;
+    var hl, sitehref, info;
     if (href
-        && href.substring(0, siteurl.length) === siteurl
-        && is_listable((sitehref = href.substring(siteurl.length)))
-        && (hl = e.closest(".has-hotlist"))) {
-        var info = hl.getAttribute("data-hotlist");
+        && href.substring(0, siteinfo.site_relative.length) === siteinfo.site_relative
+        && is_listable((sitehref = href.substring(siteinfo.site_relative.length)))
+        && (hl = e.closest(".has-hotlist"))
+        && (info = Hotlist.at(hl)).str) {
         if (hl.tagName === "TABLE"
             && hasClass(hl, "pltable")
             && hl.hasAttribute("data-reordered")
             && document.getElementById("footer"))
             // Existence of `#footer` checks that the table is fully loaded
-            info = set_list_order(info, hl.tBodies[0]);
-        m = /^[^\/]*\/(\d+)(?:$|[a-zA-Z]*\/)/.exec(sitehref);
+            info.reorder(hl.tBodies[0]);
+        var m = /^[^\/]*\/(\d+)(?:$|[a-zA-Z]*\/)/.exec(sitehref);
         set_cookie(info, m ? +m[1] : null);
     }
 }
 function unload_list() {
-    var hl = document.body.getAttribute("data-hotlist");
-    if (hl && (!cookie_set_at || cookie_set_at + 3 < now_msec()))
+    var hl = Hotlist.at(document.body);
+    if (hl.str && (!cookie_set_at || cookie_set_at + 3 < now_msec()))
         set_cookie(hl);
 }
 function row_click(evt) {
@@ -8669,7 +9413,10 @@ function row_click(evt) {
     evt.preventDefault();
 }
 handle_ui.on("js-edit-comment", function (event) {
-    return papercomment.edit_id(this.hash.substring(1));
+    if (this.tagName !== "A" || event_key.is_default_a(event)) {
+        event.preventDefault();
+        papercomment.edit_id(this.hash.substring(1));
+    }
 });
 
 function default_click(evt) {
@@ -8713,28 +9460,18 @@ $(document).on("click", "tr.pl", row_click);
 $(window).on("beforeunload", unload_list);
 
 $(function () {
-    var had_digests = false;
     // resolve list digests
-    $(".has-hotlist").each(function () {
-        var info = this.getAttribute("data-hotlist");
-        if (info && (info = resolve_digest(info))) {
-            this.setAttribute("data-hotlist", info);
-            had_digests = true;
-        }
-    });
+    if (document.body.hasAttribute("data-hotlist")) {
+        document.body.setAttribute("data-hotlist", Hotlist.at(document.body).resolve().str);
+    }
     // having resolved digests, insert quicklinks
-    if (had_digests
-        && hotcrp_paperid
+    if (siteinfo.paperid
         && !$$("quicklink-prev")
         && !$$("quicklink-next")) {
         $(".quicklinks").each(function () {
-            var $l = $(this).closest(".has-hotlist"),
-                info = JSON.parse($l.attr("data-hotlist") || "null"),
-                ids, pos;
-            if (info
-                && info.ids
-                && (ids = decode_session_list_ids(info.ids))
-                && (pos = $.inArray(hotcrp_paperid, ids)) >= 0) {
+            var info = Hotlist.at(this.closest(".has-hotlist")), ids, pos;
+            if ((ids = info.ids())
+                && (pos = $.inArray(siteinfo.paperid, ids)) >= 0) {
                 if (pos > 0)
                     $(this).prepend('<a id="quicklink-prev" class="x" href="' + hoturl_html("paper", {p: ids[pos - 1]}) + '">&lt; #' + ids[pos - 1] + '</a> ');
                 if (pos < ids.length - 1)
@@ -8747,14 +9484,22 @@ $(function () {
 
 
 function hotlist_search_params(x, ids) {
-    if (x instanceof HTMLElement)
-        x = x.getAttribute("data-hotlist");
-    if (x && typeof x === "string")
-        x = JSON.parse(x);
+    x = x instanceof HTMLElement ? Hotlist.at(x) : new Hotlist(x);
     var m;
-    if (!x || !x.ids || !(m = x.listid.match(/^p\/(.*?)\/(.*?)(?:$|\/)(.*)/)))
+    if (!x || !x.obj || !x.obj.ids || !(m = x.obj.listid.match(/^p\/(.*?)\/(.*?)(?:$|\/)(.*)/)))
         return false;
-    var q = {q: ids ? decode_session_list_ids(x.ids).join(" ") : urldecode(m[2]), t: m[1] || "s"};
+    var idv;
+    if (ids) {
+        if (x.obj.sorted_ids)
+            idv = "pidcode:" + x.obj.sorted_ids;
+        else if ($.isArray(x.obj.ids))
+            idv = x.obj.ids.join(" ");
+        else
+            idv = "pidcode:" + x.obj.ids;
+    } else {
+        idv = urldecode(m[2]);
+    }
+    var q = {q: idv, t: m[1] || "s"};
     if (m[3]) {
         var args = m[3].split(/[&;]/);
         for (var i = 0; i < args.length; ++i) {
@@ -8792,12 +9537,12 @@ function populate_pcselector(pcs) {
         if (cid === "" || cid === "*") {
             optids.splice.apply(optids, [i + 1, 0].concat(pcs.__order__));
         } else if (cid === "assignable") {
-            optids.splice.apply(optids, [i + 1, 0].concat(pcs.__assignable__[hotcrp_paperid] || []));
+            optids.splice.apply(optids, [i + 1, 0].concat(pcs.__assignable__[siteinfo.paperid] || []));
         } else if (cid === "selected") {
             if (selected != null)
                 optids.splice.apply(optids, [i + 1, 0, selected]);
         } else if (cid === "extrev") {
-            var extrevs = pcs.__extrev__ ? pcs.__extrev__[hotcrp_paperid] : null;
+            var extrevs = pcs.__extrev__ ? pcs.__extrev__[siteinfo.paperid] : null;
             if (extrevs && extrevs.length) {
                 optids.splice.apply(optids, [i + 1, 0].concat(extrevs));
                 optids.splice(i + 1 + extrevs.length, 0, "endgroup");
@@ -9317,3 +10062,35 @@ $.fn.unautogrow = function () {
 })(jQuery);
 
 $(function () { $(".need-autogrow").autogrow(); });
+
+
+window.hotcrp = {
+    add_comment: papercomment.add,
+    add_review: review_form.add_review,
+    add_preference_ajax: add_revpref_ajax,
+    check_version: check_version,
+    demand_load: demand_load,
+    edit_comment: papercomment.edit,
+    focus_within: focus_within,
+    fold: fold,
+    fold_storage: fold_storage,
+    foldup: foldup,
+    handle_ui: handle_ui,
+    highlight_form_children: hiliter_children,
+    hoturl: hoturl,
+    init_deadlines: hotcrp_deadlines.init,
+    load_editable_paper: edit_paper_ui.load,
+    load_editable_review: edit_paper_ui.load_review,
+    make_pattern_fill: make_pattern_fill,
+    onload: hotcrp_load,
+    paper_edit_conditions: edit_paper_ui.edit_condition,
+    prepare_editable_paper: edit_paper_ui.prepare,
+    profile_ui: profile_ui,
+    render_list: plinfo.render_needed,
+    render_text_page: render_text.on_page,
+    scorechart: scorechart,
+    set_default_format: render_text.set_default_format,
+    set_response_round: papercomment.set_resp_round,
+    set_review_form: review_form.set_form,
+    shortcut: shortcut
+};

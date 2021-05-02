@@ -1,6 +1,6 @@
 <?php
 // src/settings/s_decisionvisibility.php -- HotCRP settings > decisions page
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class DecisionVisibility_SettingParser extends SettingParser {
     static function render(SettingValues $sv) {
@@ -12,16 +12,14 @@ class DecisionVisibility_SettingParser extends SettingParser {
         $sv->echo_radio_table("seedec", [Conf::SEEDEC_ADMIN => "Only administrators",
                 Conf::SEEDEC_NCREV => "$Rtext and non-conflicted PC members",
                 Conf::SEEDEC_REV => "$Rtext and <em>all</em> PC members",
-                Conf::SEEDEC_ALL => "<b>Authors</b>, $rtext, and all PC members<span class=\"fx fn2\"> (and reviewers can see accepted submissions’ author lists)</span>"],
-            'Who can see <strong>decisions</strong> (accept/reject)?',
+                Conf::SEEDEC_ALL => "<b>Authors</b>, $rtext, and all PC members<span class=\"fx fn2\"> (and reviewers can see accepted submissions’ author lists)</span>"
+            ], 'Who can see <strong>decisions</strong> (accept/reject)?',
             ["group_class" => $accept_auview ? "fold2c" : "fold2o",
-             "fold" => Conf::SEEDEC_ALL,
+             "fold_values" => [Conf::SEEDEC_ALL],
              "item_class" => "uich js-foldup js-settings-seedec"]);
     }
 
     static function crosscheck(SettingValues $sv) {
-        global $Now;
-
         if ($sv->has_interest("seedec")
             && $sv->newv("seedec") == Conf::SEEDEC_ALL
             && $sv->newv("au_seerev") == Conf::AUSEEREV_NO) {
@@ -30,13 +28,14 @@ class DecisionVisibility_SettingParser extends SettingParser {
 
         if (($sv->has_interest("seedec") || $sv->has_interest("sub_sub"))
             && $sv->newv("sub_open")
-            && $sv->newv("sub_sub") > $Now
+            && $sv->newv("sub_sub") > Conf::$now
             && $sv->newv("seedec") != Conf::SEEDEC_ALL
             && $sv->conf->fetch_value("select paperId from Paper where outcome<0 limit 1") > 0) {
-            $sv->warning_at(null, "Updates will not be allowed for rejected submissions. This exposes decision information that would otherwise be hidden from authors.");
+            $sv->warning_at(null, "Updates will not be allowed for rejected submissions. As a result, authors can discover information about decisions that would otherwise be hidden.");
         }
 
         if ($sv->has_interest("au_seerev")
+            && $sv->newv("au_seerev") != Conf::AUSEEREV_NO
             && !array_filter($sv->conf->review_form()->all_fields(), function ($f) {
                 return $f->view_score >= VIEWSCORE_AUTHORDEC;
             })) {
@@ -45,8 +44,8 @@ class DecisionVisibility_SettingParser extends SettingParser {
                 . $sv->setting_link("the review form", "review_form") . ".");
             $sv->warning_at("au_seerev", false);
         } else if ($sv->has_interest("au_seerev")
-                   && $sv->newv("seedec") != Conf::SEEDEC_ALL
                    && $sv->newv("au_seerev") != Conf::AUSEEREV_NO
+                   && $sv->newv("seedec") != Conf::SEEDEC_ALL
                    && !array_filter($sv->conf->review_form()->all_fields(), function ($f) {
                        return $f->view_score >= VIEWSCORE_AUTHOR;
                    })

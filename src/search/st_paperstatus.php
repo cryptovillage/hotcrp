@@ -1,6 +1,6 @@
 <?php
 // search/st_paperstatus.php -- HotCRP helper class for searching for papers
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class PaperStatus_SearchTerm extends SearchTerm {
     private $match;
@@ -12,20 +12,20 @@ class PaperStatus_SearchTerm extends SearchTerm {
     static function parse($word, SearchWord $sword, PaperSearch $srch) {
         $fval = PaperSearch::status_field_matcher($srch->conf, $word, $sword->quoted);
         if (is_array($fval[1]) && empty($fval[1])) {
-            $srch->warn("“" . htmlspecialchars($word) . "” doesn’t match a decision or status.");
+            $srch->warning("“" . htmlspecialchars($word) . "” doesn’t match a decision or status.");
             $fval[1][] = -10000000;
         }
         if ($fval[0] === "outcome") {
-            return new Decision_SearchTerm($fval[1]);
+            return new Decision_SearchTerm($srch->user, $fval[1]);
         } else {
             if ($srch->limit_submitted()
                 && ($fval[0] !== "timeSubmitted" || $fval[1] !== ">0")) {
-                $srch->warn("“" . htmlspecialchars("{$sword->keyword}:{$sword->qword}") . "” won’t match because this collection that only contains submitted papers.");
+                $srch->warning($sword->source_html() . ": Matches nothing because this search is limited to submitted papers.");
             }
             return new PaperStatus_SearchTerm($fval);
         }
     }
-    function trivial_rights(Contact $user, PaperSearch $srch) {
+    function is_sqlexpr_precise() {
         return true;
     }
     function sqlexpr(SearchQueryInfo $sqi) {
@@ -36,11 +36,14 @@ class PaperStatus_SearchTerm extends SearchTerm {
         }
         return self::andjoin_sqlexpr($q);
     }
-    function exec(PaperInfo $row, PaperSearch $srch) {
+    function test(PaperInfo $row, $rrow) {
         for ($i = 0; $i < count($this->match); $i += 2) {
             if (!CountMatcher::compare_using($row->{$this->match[$i]}, $this->match[$i+1]))
                 return false;
         }
         return true;
+    }
+    function about_reviews() {
+        return self::ABOUT_NO;
     }
 }

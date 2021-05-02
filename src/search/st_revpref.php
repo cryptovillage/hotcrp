@@ -1,13 +1,16 @@
 <?php
 // search/st_revpref.php -- HotCRP helper class for searching for papers
-// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class RevprefSearchMatcher extends ContactCountMatcher {
-    public $preference_match = null;
-    public $expertise_match = null;
+    /** @var ?CountMatcher */
+    public $preference_match;
+    /** @var ?CountMatcher */
+    public $expertise_match;
     public $safe_contacts;
     public $is_any = false;
 
+    /** @param string $countexpr */
     function __construct($countexpr, $contacts, $safe_contacts) {
         parent::__construct($countexpr, $contacts);
         $this->safe_contacts = $safe_contacts;
@@ -18,10 +21,10 @@ class RevprefSearchMatcher extends ContactCountMatcher {
         } else {
             $where = [];
             if ($this->preference_match) {
-                $where[] = "preference" . $this->preference_match->countexpr();
+                $where[] = "preference" . $this->preference_match->comparison();
             }
             if ($this->expertise_match) {
-                $where[] = "expertise" . $this->expertise_match->countexpr();
+                $where[] = "expertise" . $this->expertise_match->comparison();
             }
             return join(" and ", $where);
         }
@@ -40,10 +43,14 @@ class RevprefSearchMatcher extends ContactCountMatcher {
 }
 
 class Revpref_SearchTerm extends SearchTerm {
+    /** @var Contact */
+    private $user;
+    /** @var RevprefSearchMatcher */
     private $rpsm;
 
-    function __construct(RevprefSearchMatcher $rpsm) {
+    function __construct(Contact $user, RevprefSearchMatcher $rpsm) {
         parent::__construct("revpref");
+        $this->user = $user;
         $this->rpsm = $rpsm;
     }
     static function parse($word, SearchWord $sword, PaperSearch $srch) {
@@ -68,7 +75,7 @@ class Revpref_SearchTerm extends SearchTerm {
             $contacts = array_keys($srch->conf->pc_members());
         } else {
             $safe_contacts = 1;
-            $contacts = [$srch->cid];
+            $contacts = [$srch->user->contactXid];
         }
 
         $count = "";
@@ -87,7 +94,7 @@ class Revpref_SearchTerm extends SearchTerm {
 
         if ($count === "") {
             if ($safe_contacts === 0) {
-                $contacts = [$srch->cid];
+                $contacts = [$srch->user->contactXid];
                 $safe_contacts = 1;
             }
             $count = ">0";
@@ -98,15 +105,17 @@ class Revpref_SearchTerm extends SearchTerm {
             $value->is_any = true;
         } else if (preg_match(',\A\s*([=!<>]=?|≠|≤|≥|)\s*(-?\d*)\s*([xyz]?)\z,i', $word, $m)
                    && ($m[2] !== "" || $m[3] !== "")) {
-            if ($m[2] !== "")
+            if ($m[2] !== "") {
                 $value->preference_match = new CountMatcher($m[1] . $m[2]);
-            if ($m[3] !== "")
+            }
+            if ($m[3] !== "") {
                 $value->expertise_match = new CountMatcher(($m[2] === "" ? $m[1] : "") . (121 - ord(strtolower($m[3]))));
+            }
         } else {
             return new False_SearchTerm;
         }
 
-        return (new Revpref_SearchTerm($value))->negate_if(strcasecmp($word, "none") === 0);
+        return (new Revpref_SearchTerm($srch->user, $value))->negate_if(strcasecmp($word, "none") === 0);
     }
 
     function sqlexpr(SearchQueryInfo $sqi) {
@@ -126,17 +135,20 @@ class Revpref_SearchTerm extends SearchTerm {
         }
         $q .= " group by paperId";
         $thistab = "Revpref_" . count($sqi->tables);
-        $sqi->add_table($thistab, array("left join", "($q)"));
-        return "coalesce($thistab.count,0)" . $this->rpsm->countexpr();
+        $sqi->add_table($thistab, ["left join", "($q)"]);
+        return "coalesce($thistab.count,0)" . $this->rpsm->comparison();
     }
-    function exec(PaperInfo $row, PaperSearch $srch) {
-        $can_view = $srch->user->can_view_preference($row, $this->rpsm->safe_contacts);
+    function test(PaperInfo $row, $rrow) {
+        $can_view = $this->user->can_view_preference($row, $this->rpsm->safe_contacts);
         $n = 0;
         foreach ($this->rpsm->contact_set() as $cid) {
-            if (($cid == $srch->cid || $can_view)
+            if (($cid == $this->user->contactXid || $can_view)
                 && $this->rpsm->test_preference($row->preference($cid)))
                 ++$n;
         }
         return $this->rpsm->test($n);
+    }
+    function about_reviews() {
+        return self::ABOUT_NO;
     }
 }

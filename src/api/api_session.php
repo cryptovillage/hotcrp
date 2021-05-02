@@ -3,11 +3,21 @@
 // Copyright (c) 2008-2020 Eddie Kohler; see LICENSE.
 
 class Session_API {
-    static function getsession(Contact $user) {
-        ensure_session();
-        return ["ok" => true, "postvalue" => post_value()];
+    static private function session_result(Contact $user, $ok) {
+        $si = ["postvalue" => post_value()];
+        if ($user->contactId) {
+            $si["cid"] = $user->contactId;
+        }
+        return ["ok" => $ok, "postvalue" => post_value(), "sessioninfo" => $si];
     }
 
+    static function getsession(Contact $user) {
+        ensure_session();
+        return self::session_result($user, true);
+    }
+
+    /** @param string|Qrequest $qreq
+     * @return array{ok:bool,postvalue:string} */
     static function setsession(Contact $user, $qreq) {
         ensure_session();
         if (is_string($qreq)) {
@@ -72,22 +82,18 @@ class Session_API {
                 $error = true;
             }
         }
-
-        return ["ok" => !$error, "postvalue" => post_value()];
+        return self::session_result($user, !$error);
     }
 
     static function change_display(Contact $user, $report, $settings) {
         $search = new PaperSearch($user, "NONE");
-        $pl = new PaperList($report, $search, ["sort" => true, "no_session_display" => true]);
-        $vd = $pl->viewer_list();
-
         $pl = new PaperList($report, $search, ["sort" => true]);
+        $pl->apply_view_report_default();
+        $pl->apply_view_session();
         foreach ($settings as $k => $v) {
             $pl->set_view($k, $v);
         }
-        $vd = PaperList::viewer_diff($pl->viewer_list(), $vd);
-        $vd = array_filter($vd, function ($x) { return !str_starts_with($x, "sort:"); });
-
+        $vd = array_filter($pl->unparse_view(true), function ($x) { return !str_starts_with($x, "sort:"); });
         $user->save_session("{$report}display", join(" ", $vd));
     }
 }

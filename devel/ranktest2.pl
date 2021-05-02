@@ -30,7 +30,7 @@ print "delete from PaperReview;\n";
 print "delete from PaperConflict;\n";
 print "delete from PaperTag;\n";
 
-print "insert into ContactInfo (contactId, firstName, lastName, email, password, collaborators, creationTime, roles) values (1, 'Janette', 'Chair', 'chair\@_.com', 'chair', 'None', $now, 7);\n";
+print "insert into ContactInfo (contactId, firstName, lastName, email, password, collaborators, roles) values (1, 'Janette', 'Chair', 'chair\@_.com', 'chair', 'None', 7);\n";
 
 print "insert into Settings (name, value, data) values ('rev_open', $now, null), ('tag_rank', 1, 'r') on duplicate key update value=values(value), data=values(data);\n";
 
@@ -43,7 +43,7 @@ while (<DATA>) {
     $papers[$p] = 1;
     print "insert into Paper (paperId, title, authorInformation, abstract, timeSubmitted) values ($p, '$n', 'Jane\\tAuthor$p\\tauthor$p\@_.com\\t\\n', 'This is Paper $p', $now) on duplicate key update abstract=abstract;\n";
     print "insert into ContactInfo (firstName, lastName, email, password) values ('Jane', 'Author$p', 'author$p\@_.com', 'x') on duplicate key update password=password;\n";
-    print "insert into PaperConflict (paperId, contactId, conflictType) values ($p, (select contactId from ContactInfo where email='author$p\@_.com'), 10) on duplicate key update conflictType=conflictType;\n";
+    print "insert into PaperConflict (paperId, contactId, conflictType) values ($p, (select contactId from ContactInfo where email='author$p\@_.com'), 65) on duplicate key update conflictType=conflictType;\n";
 }
 
 my($voternum) = @papers + 1;
@@ -52,7 +52,7 @@ while (<DATA>) {
     chomp $_;
     my(@x) = split(//);
     last if /^RATINGS/;
-    print "insert into ContactInfo (contactId, firstName, lastName, email, password, collaborators, creationTime, roles) values ($voternum, 'Jane', 'Voter" . ($voternum - $voterdelta) . "', 'comm" . ($voternum - $voterdelta) . "\@_.com', 'x', 'None', $now, 1) on duplicate key update firstName=firstName;\n";
+    print "insert into ContactInfo (contactId, firstName, lastName, email, password, collaborators, roles) values ($voternum, 'Jane', 'Voter" . ($voternum - $voterdelta) . "', 'comm" . ($voternum - $voterdelta) . "\@_.com', 'x', 'None', 1) on duplicate key update firstName=firstName;\n";
     for ($i = 0; $i < @x; ++$i) {
 	if ($x[$i] ne 'x') {
 	    die "VOTE FOR BAD PAPER " . ($i+1) if !$papers[$i+1];

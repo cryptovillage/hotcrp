@@ -48,22 +48,21 @@ CREATE TABLE `ContactInfo` (
   `email` varchar(120) NOT NULL,
   `preferredEmail` varchar(120) DEFAULT NULL,
   `affiliation` varbinary(2048) NOT NULL DEFAULT '',
+  `orcid` varbinary(64) DEFAULT NULL,
   `phone` varbinary(64) DEFAULT NULL,
   `country` varbinary(256) DEFAULT NULL,
   `password` varbinary(2048) NOT NULL,
   `passwordTime` bigint(11) NOT NULL DEFAULT '0',
   `passwordUseTime` bigint(11) NOT NULL DEFAULT '0',
   `collaborators` varbinary(8192) DEFAULT NULL,
-  `creationTime` bigint(11) NOT NULL DEFAULT '0',
   `updateTime` bigint(11) NOT NULL DEFAULT '0',
   `lastLogin` bigint(11) NOT NULL DEFAULT '0',
   `defaultWatch` int(11) NOT NULL DEFAULT '2',
   `roles` tinyint(1) NOT NULL DEFAULT '0',
   `disabled` tinyint(1) NOT NULL DEFAULT '0',
   `contactTags` varbinary(4096) DEFAULT NULL,
-  `birthday` int(11) DEFAULT NULL,
-  `gender` varbinary(24) DEFAULT NULL,
   `data` varbinary(32767) DEFAULT NULL,
+  `primaryContactId` int(11) NOT NULL DEFAULT '0',
   PRIMARY KEY (`contactId`),
   UNIQUE KEY `email` (`email`),
   KEY `roles` (`roles`)
@@ -81,7 +80,8 @@ CREATE TABLE `DeletedContactInfo` (
   `firstName` varbinary(120) NOT NULL,
   `lastName` varbinary(120) NOT NULL,
   `unaccentedName` varbinary(240) NOT NULL,
-  `email` varchar(120) NOT NULL
+  `email` varchar(120) NOT NULL,
+  `affiliation` varbinary(2048) NOT NULL DEFAULT ''
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 
@@ -124,8 +124,6 @@ DROP TABLE IF EXISTS `Formula`;
 CREATE TABLE `Formula` (
   `formulaId` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(200) NOT NULL,
-  `heading` varchar(200) NOT NULL DEFAULT '',
-  `headingTitle` varbinary(4096) NOT NULL,
   `expression` varbinary(4096) NOT NULL,
   `createdBy` int(11) NOT NULL DEFAULT '0',
   `timeModified` bigint(11) NOT NULL DEFAULT '0',
@@ -150,6 +148,7 @@ CREATE TABLE `MailLog` (
   `subject` blob,
   `emailBody` blob,
   `fromNonChair` tinyint(1) NOT NULL DEFAULT '0',
+  `status` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`mailId`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
@@ -187,6 +186,7 @@ CREATE TABLE `Paper` (
   `pdfFormatStatus` bigint(11) NOT NULL DEFAULT '0',
   `withdrawReason` varbinary(1024) DEFAULT NULL,
   `paperFormat` tinyint(1) DEFAULT NULL,
+  `dataOverflow` longblob,
   PRIMARY KEY (`paperId`),
   KEY `timeSubmitted` (`timeSubmitted`),
   KEY `leadContactId` (`leadContactId`),
@@ -210,7 +210,6 @@ CREATE TABLE `PaperComment` (
   `comment` varbinary(32767) DEFAULT NULL,
   `commentType` int(11) NOT NULL DEFAULT '0',
   `replyTo` int(11) NOT NULL,
-  `paperStorageId` int(11) NOT NULL DEFAULT '0',
   `ordinal` int(11) NOT NULL DEFAULT '0',
   `authorOrdinal` int(11) NOT NULL DEFAULT '0',
   `commentTags` varbinary(1024) DEFAULT NULL,
@@ -269,20 +268,22 @@ CREATE TABLE `PaperReview` (
   `reviewType` tinyint(1) NOT NULL DEFAULT '0',
   `reviewRound` int(1) NOT NULL DEFAULT '0',
   `requestedBy` int(11) NOT NULL DEFAULT '0',
-  `timeRequested` bigint(11) NOT NULL DEFAULT '0',
-  `timeRequestNotified` bigint(11) NOT NULL DEFAULT '0',
   `reviewBlind` tinyint(1) NOT NULL DEFAULT '1',
   `reviewModified` bigint(1) NOT NULL DEFAULT '0',
-  `reviewAuthorModified` bigint(1) DEFAULT NULL,
   `reviewSubmitted` bigint(1) DEFAULT NULL,
-  `reviewNotified` bigint(1) DEFAULT NULL,
-  `reviewAuthorNotified` bigint(11) NOT NULL DEFAULT '0',
   `reviewAuthorSeen` bigint(1) DEFAULT NULL,
   `reviewOrdinal` int(1) NOT NULL DEFAULT '0',
   `timeDisplayed` bigint(11) NOT NULL DEFAULT '0',
   `timeApprovalRequested` bigint(11) NOT NULL DEFAULT '0',
-  `reviewEditVersion` int(1) NOT NULL DEFAULT '0',
   `reviewNeedsSubmit` tinyint(1) NOT NULL DEFAULT '1',
+  `reviewViewScore` tinyint(2) NOT NULL DEFAULT '-3',
+
+  `timeRequested` bigint(11) NOT NULL DEFAULT '0',
+  `timeRequestNotified` bigint(11) NOT NULL DEFAULT '0',
+  `reviewAuthorModified` bigint(1) DEFAULT NULL,
+  `reviewNotified` bigint(1) DEFAULT NULL,
+  `reviewAuthorNotified` bigint(11) NOT NULL DEFAULT '0',
+  `reviewEditVersion` int(1) NOT NULL DEFAULT '0',
   `reviewWordCount` int(11) DEFAULT NULL,
   `reviewFormat` tinyint(1) DEFAULT NULL,
 
@@ -300,6 +301,7 @@ CREATE TABLE `PaperReview` (
 
   `tfields` longblob,
   `sfields` varbinary(2048) DEFAULT NULL,
+  `data` varbinary(8192) DEFAULT NULL,
 
   PRIMARY KEY (`paperId`,`reviewId`),
   UNIQUE KEY `reviewId` (`reviewId`),
@@ -338,11 +340,14 @@ CREATE TABLE `PaperReviewRefused` (
   `lastName` varbinary(120) DEFAULT NULL,
   `affiliation` varbinary(2048) DEFAULT NULL,
   `contactId` int(11) NOT NULL,
+  `refusedReviewId` int(11) DEFAULT NULL,
+  `refusedReviewType` tinyint(1) NOT NULL DEFAULT '0',
+  `reviewRound` int(1) DEFAULT NULL,
   `requestedBy` int(11) NOT NULL,
   `timeRequested` bigint(11) DEFAULT NULL,
   `refusedBy` int(11) DEFAULT NULL,
   `timeRefused` bigint(11) DEFAULT NULL,
-  `reviewRound` int(1) DEFAULT NULL,
+  `data` varbinary(8192) DEFAULT NULL,
   `reason` varbinary(32767) DEFAULT NULL,
   PRIMARY KEY (`paperId`,`email`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
@@ -362,6 +367,7 @@ CREATE TABLE `PaperStorage` (
   `paper` longblob,
   `compression` tinyint(1) NOT NULL DEFAULT '0',
   `sha1` varbinary(64) NOT NULL DEFAULT '',
+  `crc32` binary(4) DEFAULT NULL,
   `documentType` int(3) NOT NULL DEFAULT '0',
   `filename` varbinary(255) DEFAULT NULL,
   `infoJson` varbinary(32768) DEFAULT NULL,
@@ -510,7 +516,7 @@ CREATE TABLE `TopicInterest` (
 
 
 
-insert into Settings (name, value) values ('allowPaperOption', 209);
+insert into Settings (name, value) values ('allowPaperOption', 246);
 insert into Settings (name, value) values ('setupPhase', 1);
 -- there are no submissions yet
 insert into Settings (name, value) values ('no_papersub', 1);

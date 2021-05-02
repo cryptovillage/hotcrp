@@ -1,12 +1,12 @@
 <?php
 // listactions/la_assign.php -- HotCRP helper classes for list actions
-// Copyright (c) 2006-2019 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class Assign_ListAction extends ListAction {
-    function allow(Contact $user) {
-        return $user->privChair && Navigation::page() !== "reviewprefs";
+    function allow(Contact $user, Qrequest $qreq) {
+        return $user->privChair && $qreq->page() !== "reviewprefs";
     }
-    static function render(PaperList $pl) {
+    static function render(PaperList $pl, Qrequest $qreq) {
         return [Ht::select("assignfn",
                           array("auto" => "Automatic assignments",
                                 "zzz1" => null,
@@ -20,40 +20,44 @@ class Assign_ListAction extends ListAction {
                                 "zzz3" => null,
                                 "lead" => "Discussion lead",
                                 "shepherd" => "Shepherd"),
-                          $pl->qreq->assignfn,
+                          $qreq->assignfn,
                           ["class" => "want-focus js-submit-action-info-assign"])
             . '<span class="fx"> &nbsp;<span class="js-assign-for">for</span> &nbsp;'
-            . Ht::select("markpc", [], 0, ["data-pcselector-selected" => $pl->qreq->markpc])
-            . "</span> &nbsp;" . Ht::submit("fn", "Go", ["value" => "assign", "class" => "uix js-submit-mark"]),
+            . Ht::select("markpc", [], 0, ["data-pcselector-selected" => $qreq->markpc])
+            . "</span> &nbsp;" . Ht::submit("fn", "Go", ["value" => "assign", "class" => "uic js-submit-mark"]),
             ["linelink-class" => "has-fold foldc ui-unfold js-assign-list-action"]];
     }
-    function run(Contact $user, $qreq, $ssel) {
+    function run(Contact $user, Qrequest $qreq, SearchSelection $ssel) {
         $mt = $qreq->assignfn;
         if ($mt === "auto") {
             $t = in_array($qreq->t, ["acc", "s"]) ? $qreq->t : "all";
             $q = join("+", $ssel->selection());
-            go(hoturl("autoassign", "q=$q&amp;t=$t&amp;pap=$q"));
+            $user->conf->redirect_hoturl("autoassign", "q=$q&amp;t=$t&amp;pap=$q");
         }
 
         $mpc = (string) $qreq->markpc;
-        if ($mpc === "" || $mpc === "0" || strcasecmp($mpc, "none") == 0)
+        if ($mpc === "" || $mpc === "0" || strcasecmp($mpc, "none") == 0) {
             $mpc = "none";
-        else if (($pc = $user->conf->user_by_email($mpc)))
+        } else if (($pc = $user->conf->cached_user_by_email($mpc))) {
             $mpc = $pc->email;
-        else
+        } else {
             return "“" . htmlspecialchars($mpc) . "” is not a PC member.";
-        if ($mpc === "none" && $mt !== "lead" && $mt !== "shepherd")
+        }
+        if ($mpc === "none" && $mt !== "lead" && $mt !== "shepherd") {
             return "A PC member is required.";
+        }
         $mpc = CsvGenerator::quote($mpc);
 
         if (!in_array($mt, ["lead", "shepherd", "conflict", "clearconflict",
                             "pcreview", "secondaryreview", "primaryreview",
-                            "clearreview"]))
+                            "clearreview"])) {
             return "Unknown assignment type.";
+        }
 
         $text = "paper,action,user\n";
-        foreach ($ssel->selection() as $pid)
+        foreach ($ssel->selection() as $pid) {
             $text .= "$pid,$mt,$mpc\n";
+        }
         $assignset = new AssignmentSet($user, true);
         $assignset->enable_papers($ssel->selection());
         $assignset->parse($text);

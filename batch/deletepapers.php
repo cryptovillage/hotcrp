@@ -1,9 +1,7 @@
 <?php
-$ConfSitePATH = preg_replace(',/batch/[^/]+,', '', __FILE__);
+require_once(preg_replace('/\/batch\/[^\/]+/', '/src/siteloader.php', __FILE__));
 
-require_once("$ConfSitePATH/lib/getopt.php");
-$arg = getopt_rest($argv, "hn:yq",
-    ["help", "name:", "yes", "quiet"]);
+$arg = Getopt::rest($argv, "hn:yq", ["help", "name:", "yes", "quiet"]);
 if (isset($arg["h"]) || isset($arg["help"])
     || count($arg["_"]) == 0) {
     fwrite(STDOUT, "Usage: php batch/deletepapers.php [-n CONFID] [OPTIONS] PAPER...
@@ -14,19 +12,20 @@ Options include:
     exit(0);
 }
 
-require_once("$ConfSitePATH/src/init.php");
+require_once(SiteLoader::find("src/init.php"));
 
 $yes = isset($arg["y"]) || isset($arg["yes"]);
 $quiet = isset($arg["q"]) || isset($arg["quiet"]);
-$user = $Conf->site_contact();
+$user = $Conf->root_user();
 $search = new PaperSearch($user, ["t" => "all", "q" => join(" ", $arg["_"])]);
 $pids = $search->paper_ids();
 if (($pids = $search->paper_ids())) {
     $ndeleted = false;
-    foreach ($user->paper_set($pids) as $prow) {
+    foreach ($user->paper_set(["paperId" => $pids]) as $prow) {
         $pid = "#{$prow->paperId}";
-        if ($prow->title !== "")
+        if ($prow->title !== "") {
             $pid .= " (" . UnicodeHelper::utf8_abbreviate($prow->title, 40) . ")";
+        }
         if (!$yes) {
             $str = "";
             while (!preg_match('/\A[ynq]/i', $str)) {
@@ -34,22 +33,25 @@ if (($pids = $search->paper_ids())) {
                 $str = fgets(STDIN);
             }
             $str = strtolower($str);
-            if (str_starts_with($str, "q"))
+            if (str_starts_with($str, "q")) {
                 exit(1);
-            else if (str_starts_with($str, "n"))
+            } else if (str_starts_with($str, "n")) {
                 continue;
+            }
         }
         if (!$quiet) {
             fwrite(STDERR, "Deleting $pid\n");
         }
-        if (!$prow->delete_from_database($user))
+        if (!$prow->delete_from_database($user)) {
             exit(2);
+        }
         $ndeleted = true;
     }
     exit($ndeleted ? 0 : 1);
-} else if ($search->warnings) {
-    foreach ($search->warnings as $text)
+} else if ($search->has_problem()) {
+    foreach ($search->problem_texts() as $text) {
         fwrite(STDERR, htmlspecialchars_decode($text) . "\n");
+    }
     exit(1);
 } else {
     fwrite(STDERR, "No matching papers.\n");

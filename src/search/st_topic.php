@@ -1,11 +1,13 @@
 <?php
 // search/st_topic.php -- HotCRP helper class for searching for papers
-// Copyright (c) 2006-2019 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class Topic_SearchTerm extends SearchTerm {
+    /** @var true|list<int> */
     private $topics;
     private $negated;
 
+    /** @param true|list<int> $topics */
     function __construct($topics, $negated) {
         parent::__construct("topic");
         $this->topics = $topics;
@@ -21,7 +23,7 @@ class Topic_SearchTerm extends SearchTerm {
             $value = true;
             $negated = true;
         } else if ($word === "") {
-            $srch->warn("Topic missing.");
+            $srch->warning("Topic missing.");
             return new False_SearchTerm;
         } else {
             $tam = $srch->conf->topic_abbrev_matcher();
@@ -39,26 +41,28 @@ class Topic_SearchTerm extends SearchTerm {
                 $value = $tam->find_all($word);
             }
             if (empty($value)) {
-                $srch->warn("“" . htmlspecialchars($word) . "” does not match any defined paper topic.");
+                $srch->warning("“" . htmlspecialchars($word) . "” does not match any defined paper topic.");
             }
         }
         return new Topic_SearchTerm($value, $negated);
     }
-    function trivial_rights(Contact $user, PaperSearch $srch) {
+    function is_sqlexpr_precise() {
         return true;
     }
     function sqlexpr(SearchQueryInfo $sqi) {
         $tm = "";
-        if ($this->topics === [])
+        if ($this->topics === []) {
             return "false";
-        else if (is_array($this->topics))
+        } else if (is_array($this->topics)) {
             $tm = " and topicId in (" . join(",", $this->topics) . ")";
+        }
         $t = "exists (select * from PaperTopic where paperId=Paper.paperId$tm)";
-        if ($this->negated)
+        if ($this->negated) {
             $t = "not $t";
+        }
         return $t;
     }
-    function exec(PaperInfo $row, PaperSearch $srch) {
+    function test(PaperInfo $row, $rrow) {
         if ($this->topics === []) {
             return false;
         } else if ($this->topics === true) {
@@ -68,10 +72,14 @@ class Topic_SearchTerm extends SearchTerm {
         }
         return $this->negated ? !$v : $v;
     }
-    function compile_edit_condition(PaperInfo $row, PaperSearch $srch) {
-        $o = (object) ["type" => "topic", "topics" => $this->topics];
-        if ($this->negated)
-            $o = (object) ["type" => "not", "child" => [$o]];
+    function script_expression(PaperInfo $row) {
+        $o = ["type" => "topic", "topics" => $this->topics];
+        if ($this->negated) {
+            $o = ["type" => "not", "child" => [$o]];
+        }
         return $o;
+    }
+    function about_reviews() {
+        return self::ABOUT_NO;
     }
 }

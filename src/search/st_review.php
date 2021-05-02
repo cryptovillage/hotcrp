@@ -1,6 +1,6 @@
 <?php
 // search/st_review.php -- HotCRP helper class for searching for papers
-// Copyright (c) 2006-2019 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class ReviewSearchMatcher extends ContactCountMatcher {
     const COMPLETE = 1;
@@ -8,28 +8,51 @@ class ReviewSearchMatcher extends ContactCountMatcher {
     const INPROGRESS = 4;
     const NOTSTARTED = 8;
     const PENDINGAPPROVAL = 16;
-    const PROPOSED = 32;
     const MYREQUEST = 64;
+    const APPROVED = 128;
+    const SUBMITTED = 256;
 
+    const HAS_COUNT = 1;
+    const HAS_USERS = 2;
+    const HAS_RTYPE = 4;
+    const HAS_REQUEST = 8;
+    const HAS_ROUND = 16;
+    const HAS_STATUS = 32;
+    const HAS_TOKENS = 64;
+    const HAS_REQUESTER = 128;
+    const HAS_RATINGS = 256;
+    const HAS_WORDCOUNT = 512;
+    const HAS_FIELD = 1024;
+
+    /** @var int */
+    private $sensitivity = 0;
+    /** @var int */
     private $review_type = 0;
+    /** @var int */
     private $completeness = 0;
-    public $view_score;
-    public $round;
-    public $review_testable = true;
+    /** @var ?list<int> */
+    public $round_list;
+    /** @var ?list<int> */
     private $tokens;
+    /** @var ?CountMatcher */
     private $wordcountexpr;
+    /** @var ?int */
+    private $requester;
+    /** @var ?int */
+    private $rate_bits;
+    /** @var bool */
+    private $rate_fail;
+    /** @var ?ReviewField */
     private $rfield;
     private $rfield_score1;
     private $rfield_score2;
     private $rfield_scoret;
     private $rfield_scorex;
     private $rfield_text;
-    private $requester;
-    private $ratings;
-    private $frozen = false;
 
     static private $completeness_map = [
         "approvable" => self::PENDINGAPPROVAL,
+        "approved" => self::APPROVED,
         "complete" => self::COMPLETE,
         "completed" => self::COMPLETE,
         "done" => self::COMPLETE,
@@ -49,93 +72,163 @@ class ReviewSearchMatcher extends ContactCountMatcher {
         "pending" => self::PENDINGAPPROVAL,
         "pending-approval" => self::PENDINGAPPROVAL,
         "pendingapproval" => self::PENDINGAPPROVAL,
-        "proposal" => self::PROPOSED,
-        "proposed" => self::PROPOSED,
+        "pending-my-approval" => self::PENDINGAPPROVAL | self::MYREQUEST,
+        "pendingmy-approval" => self::PENDINGAPPROVAL | self::MYREQUEST,
+        "pending-myapproval" => self::PENDINGAPPROVAL | self::MYREQUEST,
+        "pendingmyapproval" => self::PENDINGAPPROVAL | self::MYREQUEST,
+        "submitted" => self::SUBMITTED
     ];
 
-    function __construct($countexpr = null, $contacts = null) {
-        parent::__construct($countexpr, $contacts);
+    function __construct() {
+        parent::__construct(">0", null);
     }
+    /** @return int */
+    function sensitivity() {
+        return $this->sensitivity;
+    }
+    /** @return bool */
+    function can_test_review() {
+        return ($this->sensitivity & self::HAS_COUNT) === 0;
+    }
+    /** @return bool */
+    function has_wordcount() {
+        return ($this->sensitivity & self::HAS_WORDCOUNT) !== 0;
+    }
+    /** @return bool */
     function only_pc() {
         return $this->review_type >= REVIEW_PC;
     }
+    /** @return int */
     function review_type() {
         return $this->review_type;
     }
-    function has_wordcount() {
-        return !!$this->wordcountexpr;
-    }
 
+    /** @param string $word
+     * @return bool */
     function apply_review_type($word) {
-        if (str_ends_with($word, "review")) {
-            $word = substr($word, 0, strlen($word) - 6);
-            if (str_ends_with($word, "-"))
-                $word = substr($word, 0, strlen($word) - 1);
-        }
-        if ($word === "meta")
-            $rt = REVIEW_META;
-        else if ($word === "pri" || $word === "primary")
-            $rt = REVIEW_PRIMARY;
-        else if ($word === "sec" || $word === "secondary")
-            $rt = REVIEW_SECONDARY;
-        else if ($word === "optional")
-            $rt = REVIEW_PC;
-        else if ($word === "ext" || $word === "external")
-            $rt = REVIEW_EXTERNAL;
-        else
-            return false;
-        if ($this->review_type === 0 || $this->review_type === $rt)
+        if ($this->review_type === 0
+            && ($rt = ReviewInfo::parse_type($word))) {
             $this->review_type = $rt;
-        else
-            $this->review_type = -100;
-        return true;
+            $this->sensitivity |= self::HAS_RTYPE;
+            return true;
+        } else {
+            return false;
+        }
     }
+    /** @param string $word
+     * @return bool */
     function apply_completeness($word) {
-        if (!isset(self::$completeness_map[$word]))
+        if (($c = self::$completeness_map[$word] ?? null) !== null) {
+            $this->completeness |= $c;
+            $this->sensitivity |= self::HAS_STATUS;
+            return true;
+        } else {
             return false;
-        $this->completeness |= self::$completeness_map[$word];
-        return true;
+        }
     }
+    /** @return ?list<int> */
+    static function parse_round($word, Conf $conf, $allow_generic = false) {
+        if (($neg = str_starts_with($word, "-"))) {
+            $word = substr($word, 1);
+        }
+        if (strcasecmp($word, "unnamed") === 0
+            || ($allow_generic && strcasecmp($word, "none") === 0)) {
+            $r = [0];
+        } else if ($allow_generic && strcasecmp($word, "any") === 0) {
+            $r = array_keys($conf->defined_round_list());
+        } else if (strpos($word, "*") === false) {
+            if (($round = $conf->round_number($word, false)) !== false) {
+                $r = [$round];
+            } else {
+                return null;
+            }
+        } else {
+            $re = '/\A' . str_replace('\*', '.*', preg_quote($word)) . '\z/i';
+            $r = array_keys(preg_grep($re, $conf->defined_round_list()));
+        }
+        if ($neg) {
+            $r = array_values(array_diff(array_keys($conf->defined_round_list()), $r));
+        }
+        return $r;
+    }
+    /** @param string $word
+     * @return bool */
     function apply_round($word, Conf $conf) {
-        if (($round = $conf->round_number($word, false)) === false)
+        if ($this->round_list === null
+            && ($round = $conf->round_number($word, false)) !== false) {
+            $this->round_list = [$round];
+            $this->sensitivity |= self::HAS_ROUND;
+            return true;
+        } else {
             return false;
-        $this->round[] = $round;
-        return true;
+        }
     }
+    /** @param list<int> $rounds
+     * @return bool */
+    function apply_round_list($rounds) {
+        if ($this->round_list === null) {
+            $this->round_list = $rounds;
+            $this->sensitivity |= self::HAS_ROUND;
+            return true;
+        } else {
+            return false;
+        }
+    }
+    /** @param int $relation
+     * @param int $value
+     * @return bool */
+    function apply_relation_value($relation, $value) {
+        if (($this->sensitivity & self::HAS_COUNT) === 0) {
+            $this->set_relation_value($relation, $value);
+            $this->sensitivity |= self::HAS_COUNT;
+            return true;
+        } else {
+            return false;
+        }
+    }
+    /** @param string $word
+     * @return bool */
     function apply_countexpr($word, $default_op = "=") {
-        if (!preg_match('/\A(?:(?:[=!<>]=?|≠|≤|≥|)\d+|any|none|yes|no)\z/', $word))
-            return false;
-        if (ctype_digit($word))
+        if (ctype_digit($word)) {
             $word = $default_op . $word;
-        $count = PaperSearch::unpack_comparison($word, false);
-        $this->set_countexpr($count[1]);
-        $this->review_testable = false;
-        return true;
+        }
+        $a = CountMatcher::unpack_search_comparison($word);
+        return $a[0] === "" && $this->apply_relation_value($a[1], $a[2]);
     }
-    function adjust_round_list($rounds) {
-        if ($this->round === null)
-            $this->round = $rounds;
-    }
+    /** @param int $cid */
     function apply_requester($cid) {
         $this->requester = $cid;
+        $this->sensitivity |= $cid !== null ? self::HAS_REQUESTER : 0;
     }
-    function apply_wordcount($wordcount) {
-        assert($this->wordcountexpr === null);
-        if ($wordcount)
-            $this->wordcountexpr = $wordcount;
+    /** @param int $relation
+     * @param int|float $value
+     * @return bool */
+    function apply_wordcount($relation, $value) {
+        if ($this->wordcountexpr === null) {
+            $this->wordcountexpr = CountMatcher::make($relation, $value);
+            $this->sensitivity |= self::HAS_WORDCOUNT;
+            return true;
+        } else {
+            return false;
+        }
     }
+    /** @param ?list<int> $tokens */
     function apply_tokens($tokens) {
         assert($this->tokens === null);
         $this->tokens = $tokens;
+        $this->sensitivity |= $this->tokens !== null ? self::HAS_TOKENS : 0;
     }
-    function adjust_ratings(ReviewRating_SearchAdjustment $rrsa) {
-        if ($this->ratings === null)
-            $this->ratings = $rrsa;
+    /** @param int $rate_bits */
+    function apply_rate_bits($rate_bits) {
+        assert($this->rate_bits === null);
+        $this->rate_bits = $rate_bits;
+        $this->sensitivity |= self::HAS_RATINGS;
     }
     function apply_text_field(ReviewField $field, $value) {
         assert(!$this->rfield && !$field->has_options);
         $this->rfield = $field;
         $this->rfield_text = $value;
+        $this->sensitivity |= self::HAS_FIELD;
     }
     function apply_score_field(ReviewField $field, $value1, $value2, $valuet) {
         assert(!$this->rfield && $field->has_options);
@@ -143,57 +236,68 @@ class ReviewSearchMatcher extends ContactCountMatcher {
         $this->rfield_score1 = $value1;
         $this->rfield_score2 = $value2;
         $this->rfield_scoret = $valuet;
+        $this->sensitivity |= self::HAS_FIELD;
     }
     function finish() {
-        if (!$this->completeness && ($this->rfield || $this->wordcountexpr))
+        if (!$this->completeness
+            && ($this->rfield || $this->wordcountexpr)) {
             $this->completeness = self::COMPLETE;
-        if ($this->completeness & self::PENDINGAPPROVAL)
+            $this->sensitivity |= self::HAS_STATUS;
+        }
+        if ($this->completeness & self::PENDINGAPPROVAL) {
             $this->apply_review_type("ext");
-        if ($this->completeness & self::PROPOSED) {
-            if (($this->completeness & ~(self::PROPOSED | self::MYREQUEST))
-                || ($this->review_type !== 0 && $this->review_type !== REVIEW_EXTERNAL)
-                || $this->rfield
-                || $this->wordcountexpr
-                || $this->ratings
-                || $this->view_score !== null) {
-                $this->review_type = -100;
-            } else {
-                $this->review_type = REVIEW_REQUEST;
-                $this->completeness &= self::MYREQUEST;
-            }
+        }
+        if ($this->has_contacts()) {
+            $this->sensitivity |= self::HAS_USERS;
         }
     }
 
+    /** @return ?string */
     function useful_sqlexpr(Contact $user, $table_name) {
-        if ($this->test(0))
-            return false;
+        if ($this->test(0)) {
+            return null;
+        }
         $where = [];
-        if ($this->completeness & self::COMPLETE)
+        if ($this->completeness & self::SUBMITTED) {
             $where[] = "reviewSubmitted is not null";
-        if ($this->completeness & self::PENDINGAPPROVAL)
+        } else if ($this->completeness & self::COMPLETE) {
+            $where[] = "reviewSubmitted is not null or timeApprovalRequested<0";
+        }
+        if ($this->completeness & self::PENDINGAPPROVAL) {
             $where[] = "(reviewSubmitted is null and timeApprovalRequested>0)";
-        if ($this->completeness & self::NOTSTARTED)
-            $where[] = "reviewModified=0";
-        if (!empty($where))
+        }
+        if ($this->completeness & self::NOTSTARTED) {
+            $where[] = "reviewModified<2";
+        }
+        if (!empty($where)) {
             $where = ["(" . join(" or ", $where) . ")"];
+        }
+        if ($this->review_type === 0) {
+            $where[] = "reviewType>0";
+        } else {
+            $where[] = "reviewType={$this->review_type}";
+        }
         if ($this->has_contacts()) {
             $cm = $this->contact_match_sql("contactId");
-            if ($this->tokens)
+            if ($this->tokens) {
                 $cm = "($cm or reviewToken in (" . join(",", $this->tokens) . "))";
+            }
             $where[] = $cm;
         }
         if ($this->rfield) {
             if ($this->rfield->has_options) {
                 if ($this->rfield->main_storage) {
-                    if ($this->rfield_scoret >= 8)
+                    if ($this->rfield_scoret >= 8) {
                         $ce = ">=";
-                    else
+                    } else {
                         $ce = CountMatcher::$oparray[$this->rfield_scoret];
+                    }
                     $where[] = $this->rfield->main_storage . $ce . $this->rfield_score1;
                 } else {
                     if ($this->rfield_score1 != 0
-                        || !($this->rfield_scoret & 2))
+                        || !($this->rfield_scoret & 2)) {
                         $where[] = "sfields is not null";
+                    }
                 }
             } else {
                 if ($this->rfield->main_storage) {
@@ -204,84 +308,116 @@ class ReviewSearchMatcher extends ContactCountMatcher {
                 }
             }
         }
-        if ($this->ratings && $this->ratings->must_exist())
+        if ($this->rate_bits > 0) {
             $where[] = "exists (select * from ReviewRating where paperId={$table_name}.paperId and reviewId={$table_name}.reviewId)";
-        if ($this->requester)
+        }
+        if ($this->requester !== null) {
             $where[] = "requestedBy=" . $this->requester;
-        if ($this->completeness & self::MYREQUEST)
+        }
+        if ($this->completeness & self::MYREQUEST) {
             $where[] = "requestedBy=" . $user->contactId;
-        if (empty($where))
-            return false;
-        else
+        }
+        if (empty($where)) {
+            return null;
+        } else {
             return join(" and ", $where);
+        }
     }
     function prepare_reviews(PaperInfo $prow) {
-        if ($this->wordcountexpr)
+        if ($this->wordcountexpr) {
             $prow->ensure_review_word_counts();
+        }
         if (($this->rfield && !$this->rfield->has_options)
-            || $this->ratings)
+            || $this->rate_bits !== null) {
             $prow->ensure_full_reviews();
-        else if ($this->rfield)
+        } else if ($this->rfield) {
             $prow->ensure_review_score($this->rfield);
+        }
         $this->rfield_scorex = $this->rfield_scoret === 16 ? 0 : 3;
+        $this->rate_fail = false;
     }
-    function test_review(Contact $user, PaperInfo $prow, $rrow, PaperSearch $srch) {
+    function test_review(Contact $user, PaperInfo $prow, ReviewInfo $rrow) {
         if ($this->review_type
-            && $this->review_type !== $rrow->reviewType)
+            && $this->review_type !== $rrow->reviewType) {
             return false;
+        }
         if ($this->completeness) {
             if ((($this->completeness & self::COMPLETE)
-                 && !$rrow->reviewSubmitted)
+                 && $rrow->reviewStatus < ReviewInfo::RS_ADOPTED)
+                || (($this->completeness & self::SUBMITTED)
+                    && $rrow->reviewStatus < ReviewInfo::RS_COMPLETED)
                 || (($this->completeness & self::INCOMPLETE)
                     && !$rrow->reviewNeedsSubmit)
                 || (($this->completeness & self::INPROGRESS)
-                    && ($rrow->reviewSubmitted || !$rrow->reviewModified))
+                    && $rrow->reviewStatus !== ReviewInfo::RS_DRAFTED
+                    && $rrow->reviewStatus !== ReviewInfo::RS_DELIVERED)
                 || (($this->completeness & self::NOTSTARTED)
-                    && $rrow->reviewModified !== 0)
+                    && $rrow->reviewStatus >= ReviewInfo::RS_DRAFTED)
                 || (($this->completeness & self::PENDINGAPPROVAL)
-                    && ($rrow->reviewSubmitted
-                        || $rrow->timeApprovalRequested <= 0
-                        || ($rrow->requestedBy != $user->contactId
-                            && !$user->allow_administer($prow))))
+                    && $rrow->reviewStatus !== ReviewInfo::RS_DELIVERED)
+                || (($this->completeness & self::APPROVED)
+                    && $rrow->reviewStatus !== ReviewInfo::RS_ADOPTED)
                 || (($this->completeness & self::MYREQUEST)
-                    && $rrow->requestedBy != $user->contactId))
+                    && $rrow->requestedBy != $user->contactId)) {
                 return false;
+            }
         }
-        if ($this->round !== null
-            && !in_array($rrow->reviewRound, $this->round))
+        if ($this->round_list !== null
+            && !in_array($rrow->reviewRound, $this->round_list)) {
             // XXX can_view_review_round?
             return false;
-        if ($this->rfield || $this->wordcountexpr || $this->ratings
+        }
+        if ($this->rfield || $this->wordcountexpr || $this->rate_bits !== null
             ? !$user->can_view_review($prow, $rrow)
-            : !$user->can_view_review_assignment($prow, $rrow))
+            : !$user->can_view_review_assignment($prow, $rrow)) {
             return false;
+        }
         if ($this->has_contacts()) {
-            if (!$this->test_contact($rrow->contactId)
-                && (!$this->tokens || !in_array($rrow->reviewToken, $this->tokens)))
+            if ((!$this->test_contact($rrow->contactId)
+                 && (!$this->tokens || !in_array($rrow->reviewToken, $this->tokens)))
+                || !$user->can_view_review_identity($prow, $rrow)) {
                 return false;
-            if (!$user->can_view_review_identity($prow, $rrow))
-                return false;
+            }
         } else if ($rrow->reviewType > 0
-                   && $rrow->reviewSubmitted <= 0
-                   && $rrow->reviewNeedsSubmit <= 0)
-            // don't count delegated reviews unless contacts given
+                   && $rrow->reviewStatus < ReviewInfo::RS_ADOPTED
+                   && $rrow->reviewNeedsSubmit <= 0
+                   && !$this->completeness) {
+            // don't count delegated reviews unless contacts or completeness given
             return false;
+        }
         if ($this->wordcountexpr
-            && !$this->wordcountexpr->test($rrow->reviewWordCount))
+            && !$this->wordcountexpr->test($rrow->reviewWordCount)) {
             return false;
+        }
         if ($this->requester !== null
-            && ($rrow->requestedBy != $this->requester
-                || !$user->can_view_review_requester($prow, $rrow)))
+            && ($rrow->requestedBy !== $this->requester
+                || !$user->can_view_review_requester($prow, $rrow))) {
             return false;
-        if ($this->ratings !== null
-            && !$this->ratings->test($user, $prow, $rrow))
-            return false;
-        if ($this->view_score !== null
-            && $this->view_score <= $user->view_score_bound($prow, $rrow))
-            return false;
+        }
+        if ($this->rate_bits !== null) {
+            if ($user->can_view_review_ratings($prow, $rrow, $user->privChair)) {
+                $ratings = $rrow->ratings();
+            } else {
+                $ratings = [];
+            }
+            $ok = $this->rate_bits === 0;
+            foreach ($ratings as $r) {
+                if ($ok ? $r !== 0 : ($r & $this->rate_bits) !== 0) {
+                    $ok = !$ok;
+                    break;
+                }
+            }
+            if (!$ok) {
+                $this->rate_fail = true;
+                return false;
+            }
+        }
         if ($this->rfield) {
+            if ($this->rfield->view_score <= $user->view_score_bound($prow, $rrow)) {
+                return false;
+            }
             $fid = $this->rfield->id;
-            $val = isset($rrow->$fid) ? $rrow->$fid : null;
+            $val = $rrow->$fid ?? null;
             if ($this->rfield->has_options) {
                 if ($this->rfield_scoret >= 8) {
                     if (!$val || $this->rfield_scorex < 0) {
@@ -290,10 +426,12 @@ class ReviewSearchMatcher extends ContactCountMatcher {
                         $this->rfield_scorex = -1;
                         return false;
                     } else {
-                        if ($val == $this->rfield_score1)
+                        if ($val == $this->rfield_score1) {
                             $this->rfield_scorex |= 1;
-                        if ($val == $this->rfield_score2)
+                        }
+                        if ($val == $this->rfield_score2) {
                             $this->rfield_scorex |= 2;
+                        }
                         return true;
                     }
                 } else if ($val) {
@@ -312,141 +450,247 @@ class ReviewSearchMatcher extends ContactCountMatcher {
         }
         return true;
     }
+    /** @param int $n
+     * @return bool */
     function test_finish($n) {
-        return $this->test($n) && $this->rfield_scorex === 3;
+        return $this->test($n)
+            && $this->rfield_scorex === 3
+            && ($this->rate_bits !== 0
+                || !$this->rate_fail
+                || ($this->sensitivity & self::HAS_COUNT) !== 0);
     }
 }
 
 class Review_SearchTerm extends SearchTerm {
+    /** @var Contact */
+    private $user;
+    /** @var ReviewSearchMatcher */
     private $rsm;
     private static $recompleteness_map = [
         "c" => "complete", "i" => "incomplete", "p" => "partial"
     ];
 
-    function __construct(ReviewSearchMatcher $rsm) {
+    function __construct(Contact $user, ReviewSearchMatcher $rsm) {
         parent::__construct("re");
+        $this->user = $user;
         $this->rsm = $rsm;
         $this->rsm->finish();
     }
-    static function keyword_factory($keyword, Conf $conf, $kwfj, $m) {
+
+    /** @return ReviewSearchMatcher */
+    function review_matcher() {
+        return $this->rsm;
+    }
+
+    static function keyword_factory($keyword, Contact $user, $kwfj, $m) {
         $c = str_replace("-", "", $m[1]);
         $t = str_replace("-", "", $m[2]);
         return (object) [
             "name" => $keyword,
-            "parse_callback" => "Review_SearchTerm::parse",
+            "parse_function" => "Review_SearchTerm::parse",
             "retype" => $t,
-            "recompleteness" => get(self::$recompleteness_map, $c, $c),
+            "recompleteness" => self::$recompleteness_map[$c] ?? $c,
+            "reblank" => $c === "" && $t === "",
             "has" => ">0"
         ];
     }
-    static function parse($word, SearchWord $sword, PaperSearch $srch) {
-        $rsm = new ReviewSearchMatcher(">0");
-        if ($sword->kwdef->retype)
-            $rsm->apply_review_type($sword->kwdef->retype);
-        if ($sword->kwdef->recompleteness)
-            $rsm->apply_completeness($sword->kwdef->recompleteness);
 
-        $qword = $sword->qword;
-        $quoted = false;
-        $contacts = null;
-        $wordcount = null;
-        $tailre = '(?:\z|:|(?=[=!<>]=?|≠|≤|≥))(.*)\z/s';
-        while ($qword !== "") {
-            if (preg_match('/\A:?((?:[=!<>]=?|≠|≤|≥|)\d+)' . $tailre, $qword, $m)
-                && $rsm->apply_countexpr($m[1])) {
-                $qword = $m[2];
-            } else if (preg_match('/\A(.+?)' . $tailre, $qword, $m)
-                       && ($rsm->apply_review_type($m[1])
-                           || $rsm->apply_completeness($m[1])
-                           || $rsm->apply_round($m[1], $srch->conf)
-                           || $rsm->apply_countexpr($m[1]))) {
-                $qword = $m[2];
-            } else if (preg_match('/\A(?:au)?words((?:[=!<>]=?|≠|≤|≥)\d+)(?:\z|:)(.*)\z/', $qword, $m)) {
-                $wordcount = new CountMatcher($m[1]);
-                $qword = $m[2];
-            } else if (preg_match('/\A(..*?|"[^"]+(?:"|\z))' . $tailre, $qword, $m)) {
-                if (($quoted = $m[1][0] === "\""))
-                    $m[1] = str_replace(array('"', '*'), array('', '\*'), $m[1]);
-                $contacts = $m[1];
-                $qword = $m[2];
-            } else {
-                $rsm->set_countexpr("<0");
-                break;
+    /** @param string $s
+     * @return list<string> */
+    static function split($s) {
+        $cs = [];
+        $pos = 0;
+        while ($pos < strlen($s)) {
+            $pos1 = SearchSplitter::span_balanced_parens($s, $pos, function ($ch, $pos) {
+                return $ch === ":";
+            });
+            $x = trim(substr($s, $pos, $pos1 - $pos));
+            if ($x !== ""
+                && ctype_digit($x[strlen($x) - 1])
+                && ($a = CountMatcher::unpack_comparison($x))) {
+                if ($a[0] !== "") {
+                    $cs[] = $a[0];
+                }
+                $x = CountMatcher::unparse_relation($a[1]) . $a[2];
             }
+            $cs[] = $x;
+            $pos = $pos1 + 1;
         }
-
-        if (($qr = PaperSearch::check_tautology($rsm->countexpr()))) {
-            $qr->set_float("used_revadj", true);
-            return $qr;
-        }
-
-        $rsm->apply_wordcount($wordcount);
-        if ($contacts) {
-            $rsm->set_contacts($srch->matching_uids($contacts, $quoted, $rsm->only_pc()));
-            if (strcasecmp($contacts, "me") == 0)
-                $rsm->apply_tokens($srch->user->review_tokens());
-        }
-        return new Review_SearchTerm($rsm);
+        return $cs;
     }
 
-    static function review_field_factory($keyword, Conf $conf, $kwfj, $m) {
-        $f = $conf->find_all_fields($keyword);
-        if (count($f) == 1 && $f[0] instanceof ReviewField)
+    /** @param list<string> &$components
+     * @param int &$pos
+     * @return ?array{int,float} */
+    static function comparator_after(&$components, &$pos) {
+        if ($pos + 1 < count($components)
+            && ($a = CountMatcher::parse_comparison($components[$pos + 1]))) {
+            ++$pos;
+            return $a;
+        } else if ($pos + 1 < count($components) - 1
+                   && ($a = CountMatcher::parse_comparison($components[count($components) - 1]))) {
+            array_pop($components);
+            return $a;
+        } else {
+            return null;
+        }
+    }
+
+    /** @param list<string> $components
+     * @param int $i
+     * @return ?Review_SearchTerm */
+    static private function parse_components(ReviewSearchMatcher $rsm, $components, $i, PaperSearch $srch) {
+        $contacts = null;
+        for (; $i < count($components); ++$i) {
+            $c = $components[$i];
+            if ($rsm->apply_review_type($c)
+                || $rsm->apply_completeness($c)
+                || $rsm->apply_round($c, $srch->conf)) {
+                // ok
+            } else if (($c === "auwords" || $c === "words")
+                       && ($a = self::comparator_after($components, $i))) {
+                if (!$rsm->apply_wordcount($a[0], $a[1])) {
+                    return null;
+                }
+            } else if ($i === count($components) - 1
+                       && ($a = CountMatcher::parse_comparison($c))) {
+                $rsm->apply_relation_value($a[0], (int) $a[1]);
+            } else if ($i === count($components) - 1
+                       && ($c === "any" || $c === "none")) {
+                $rsm->apply_relation_value($c === "any" ? 4 : 2, 0);
+            } else if ($contacts === null) {
+                $contacts = $c;
+            } else {
+                return null;
+            }
+        }
+        if (($qr = PaperSearch::check_tautology($rsm->comparison()))) {
+            return $qr;
+        }
+        if ($contacts !== null && $contacts !== "") {
+            $rsm->set_contacts($srch->matching_uids($contacts, null, $rsm->only_pc()));
+            if (strcasecmp($contacts, "me") == 0) {
+                $rsm->apply_tokens($srch->user->review_tokens());
+            }
+        }
+        return new Review_SearchTerm($srch->user, $rsm);
+    }
+
+    /** @return SearchTerm */
+    static function parse($word, SearchWord $sword, PaperSearch $srch) {
+        if ($sword->kwdef->reblank
+            && str_starts_with($sword->qword, "proposal")
+            && (strlen($sword->qword) === 8 || $sword->qword[8] === ":")) {
+            $sword->qword = strlen($sword->qword) === 8 ? "any" : ltrim(substr($sword->qword, 9));
+            return Proposal_SearchTerm::parse(SearchWord::unquote($sword->qword), $sword, $srch);
+        }
+        $rsm = new ReviewSearchMatcher;
+        if ($sword->kwdef->retype) {
+            $rsm->apply_review_type($sword->kwdef->retype);
+        }
+        if ($sword->kwdef->recompleteness) {
+            $rsm->apply_completeness($sword->kwdef->recompleteness);
+        }
+        if (($qr = self::parse_components($rsm, self::split($sword->qword), 0, $srch))) {
+            return $qr;
+        } else {
+            $srch->warning($sword->source_html() . ": Invalid reviewer search.");
+            return new False_SearchTerm;
+        }
+    }
+
+    /** @return SearchTerm */
+    static function parse_round($word, SearchWord $sword, PaperSearch $srch) {
+        $rsm = new ReviewSearchMatcher;
+        $components = self::split($sword->qword);
+        if (empty($components)
+            || ($round_list = ReviewSearchMatcher::parse_round($components[0], $srch->conf)) === null) {
+            $srch->warning($sword->source_html() . ": No such round.");
+            return new False_SearchTerm;
+        }
+        $rsm->apply_round_list($round_list);
+        if (($qr = self::parse_components($rsm, $components, 1, $srch))) {
+            return $qr;
+        } else {
+            $srch->warning($sword->source_html() . ": Invalid round search.");
+            return new False_SearchTerm;
+        }
+    }
+
+    /** @return SearchTerm */
+    static function parse_rate($word, SearchWord $sword, PaperSearch $srch) {
+        $rsm = new ReviewSearchMatcher;
+        $components = self::split($sword->qword);
+        if (!empty($components)) {
+            $rate_bits = ReviewInfo::parse_rating_search($components[0]);
+            $rsm->apply_rate_bits($rate_bits ?? ReviewInfo::RATING_ANYMASK);
+            if (($qr = self::parse_components($rsm, $components, 1, $srch))) {
+                return $qr;
+            }
+        }
+        $srch->warning($sword->source_html() . ": Invalid rating search.");
+        return new False_SearchTerm;
+    }
+
+    static function review_field_factory($keyword, Contact $user, $kwfj, $m) {
+        $f = $user->conf->find_all_fields($keyword);
+        if (count($f) == 1 && $f[0] instanceof ReviewField) {
             return (object) [
                 "name" => $keyword,
-                "parse_callback" => "Review_SearchTerm::parse_review_field",
+                "parse_function" => "Review_SearchTerm::parse_review_field",
                 "review_field" => $f[0],
                 "has" => "any"
             ];
-        else
+        } else {
             return null;
+        }
     }
+    /** @return SearchTerm */
     static function parse_review_field($word, SearchWord $sword, PaperSearch $srch) {
         $f = $sword->kwdef->review_field;
-        $rsm = new ReviewSearchMatcher(">0");
-        $rsm->view_score = $f->view_score;
+        $rsm = new ReviewSearchMatcher;
 
         $contactword = "";
         while (preg_match('/\A([^<>].*?|[<>].+?)(:|[=!<>]=?|≠|≤|≥)(.*)\z/s', $word, $m)) {
             if ($rsm->apply_review_type($m[1])
                 || $rsm->apply_completeness($m[1])
                 || $rsm->apply_round($m[1], $srch->conf)
-                || $rsm->apply_countexpr($m[1], ">="))
-                /* OK */;
-            else
+                || $rsm->apply_countexpr($m[1], ">=")) {
+                // OK
+            } else {
                 $rsm->set_contacts($srch->matching_uids($m[1], $sword->quoted, false));
+            }
             $word = ($m[2] === ":" ? $m[3] : $m[2] . $m[3]);
             $contactword .= $m[1] . ":";
         }
 
         if ($f->has_options) {
-            return self::parse_score_field($rsm, $word, $f, $srch);
+            return self::parse_score_field($rsm, $word, $sword, $f, $srch);
         } else {
             if ($word === "any" && !$sword->quoted) {
                 $val = true;
             } else if ($word === "none" && !$sword->quoted) {
                 $val = true;
-                $rsm->set_countexpr("=0");
+                $rsm->set_comparison("=0");
             } else {
                 $val = Text::star_text_pregexes($word, $sword->quoted);
             }
             $rsm->apply_text_field($f, $val);
-            return new Review_SearchTerm($rsm);
+            return new Review_SearchTerm($srch->user, $rsm);
         }
     }
-    private static function impossible_score_match(ReviewField $f) {
-        $t = new False_SearchTerm;
+    private static function impossible_score_match(ReviewField $f, SearchWord $sword, PaperSearch $srch) {
         $r = $f->full_score_range();
-        $t->set_float("contradiction_warning", "$f->name_html scores range from $r[0] to $r[1].");
-        $t->set_float("used_revadj", true);
-        return $t;
+        $srch->warning($sword->source_html() . ": {$f->name_html} scores range from {$r[0]} to {$r[1]}.");
+        return new False_SearchTerm;
     }
-    private static function parse_score($f, $str) {
-        if (strcasecmp($str, "none") == 0)
+    /** @return int|false */
+    private static function parse_score(ReviewField $f, $str) {
+        if (strcasecmp($str, "none") === 0) {
             return 0;
-        else if ($f->option_letter != (ctype_digit($str) === false)) // `!=` matters
+        } else if ($f->option_letter != (ctype_digit($str) === false)) { // `!=` matters
             return false;
-        else if ($f->option_letter) {
+        } else if ($f->option_letter) {
             $val = $f->option_letter - ord(strtoupper($str));
             return $val > 0 && $val <= count($f->options) ? $val : false;
         } else {
@@ -454,74 +698,78 @@ class Review_SearchTerm extends SearchTerm {
             return $val >= 0 && $val <= count($f->options) ? $val : false;
         }
     }
-    private static function parse_score_field(ReviewSearchMatcher $rsm, $word, ReviewField $f, PaperSearch $srch) {
+    /** @return SearchTerm */
+    private static function parse_score_field(ReviewSearchMatcher $rsm, $word, SearchWord $sword, ReviewField $f, PaperSearch $srch) {
         if ($word === "any") {
             $rsm->apply_score_field($f, 0, 0, 4);
-        } else if ($word === "none" && $rsm->review_testable) {
-            $rsm->apply_countexpr("=0");
+        } else if ($word === "none" && $rsm->can_test_review()) {
+            $rsm->apply_relation_value(2, 0);
             $rsm->apply_score_field($f, 0, 0, 4);
         } else if (preg_match('/\A([=!<>]=?|≠|≤|≥|)\s*([A-Z]|\d+|none)\z/si', $word, $m)) {
-            if ($f->option_letter && !$srch->conf->opt("smartScoreCompare"))
-                $m[1] = CountMatcher::flip_countexpr_string($m[1]);
+            if ($f->option_letter && !$srch->conf->opt("smartScoreCompare")) {
+                $m[1] = CountMatcher::flip_comparator($m[1]);
+            }
             $score = self::parse_score($f, $m[2]);
-            if ($score === false)
-                return self::impossible_score_match($f);
+            if ($score === false) {
+                return self::impossible_score_match($f, $sword, $srch);
+            }
             $rsm->apply_score_field($f, $score, 0, CountMatcher::$opmap[$m[1]]);
-        } else if (preg_match('/\A(\d+|[A-Z]|none)\s*(|-|–|—|\.\.\.?|…)\s*(\d+|[A-Z]|none)\s*\z/si', $word, $m)) {
+        } else if (preg_match('/\A(\d+|[A-Z])\s*(|-|–|—|\.\.\.?|…)\s*(\d+|[A-Z])\s*\z/si', $word, $m)) {
             $score1 = self::parse_score($f, $m[1]);
             $score2 = self::parse_score($f, $m[3]);
-            if ($score1 === false || $score2 === false)
-                return self::impossible_score_match($f);
-            if ($score1 > $score2)
+            if ($score1 === false || $score2 === false) {
+                return self::impossible_score_match($f, $sword, $srch);
+            }
+            if ($score1 > $score2) {
                 list($score1, $score2) = [$score2, $score1];
+            }
             $precise = $m[2] !== ".." && $m[2] !== "..." && $m[2] !== "…";
             $rsm->apply_score_field($f, $score1, $score2, $precise ? 16 : 8);
-        } else              // XXX
+        } else {             // XXX
             return new False_SearchTerm;
-        return new Review_SearchTerm($rsm);
+        }
+        return new Review_SearchTerm($srch->user, $rsm);
     }
 
-
-    function adjust_reviews(ReviewAdjustment_SearchTerm $revadj = null, PaperSearch $srch) {
-        if ($revadj)
-            $revadj->promote_matcher($this->rsm);
-        return $this;
-    }
     function sqlexpr(SearchQueryInfo $sqi) {
         $sqi->add_review_signature_columns();
-        if ($this->rsm->has_wordcount())
+        if ($this->rsm->has_wordcount()) {
             $sqi->add_review_word_count_columns();
+        }
 
         // Make the database query conservative (so change equality
         // constraints to >= constraints, and ignore <=/</!= constraints).
         // We'll do the precise query later.
         // ">=0" is a useless constraint in SQL-land.
-        $cexpr = $this->rsm->conservative_nonnegative_countexpr();
-        if ($cexpr === ">=0" || $sqi->negated)
+        $cexpr = $this->rsm->conservative_nonnegative_comparison();
+        if ($cexpr === ">=0") {
             return "true";
-        else if ($this->rsm->review_type() == REVIEW_REQUEST)
-            return "exists (select * from ReviewRequest where paperId=Paper.paperId)";
-        else {
-            $wheres = $this->rsm->useful_sqlexpr($sqi->user, "r") ? : "true";
-            if ($cexpr === ">0")
+        } else {
+            $wheres = $this->rsm->useful_sqlexpr($this->user, "r") ?? "true";
+            if ($cexpr === ">0") {
                 return "exists (select * from PaperReview r where paperId=Paper.paperId and $wheres)";
-            else
+            } else {
                 return "(select count(*) from PaperReview r where paperId=Paper.paperId and $wheres)" . $cexpr;
+            }
         }
     }
-    function exec(PaperInfo $prow, PaperSearch $srch) {
+    function test(PaperInfo $prow, $rrow) {
         $this->rsm->prepare_reviews($prow);
-        if ($this->rsm->review_testable && $srch->test_review) {
-            return $this->rsm->test_review($srch->user, $prow, $srch->test_review, $srch);
+        $n = 0;
+        if ($this->rsm->can_test_review() && $rrow) {
+            $n += $this->rsm->test_review($this->user, $prow, $rrow);
         } else {
-            if ($this->rsm->review_type() === REVIEW_REQUEST)
-                $rs = $prow->review_requests();
-            else
-                $rs = $prow->reviews_by_id();
             $n = 0;
-            foreach ($rs as $rrow)
-                $n += $this->rsm->test_review($srch->user, $prow, $rrow, $srch);
-            return $this->rsm->test_finish($n);
+            foreach ($prow->all_reviews() as $rrow) {
+                $n += $this->rsm->test_review($this->user, $prow, $rrow);
+            }
         }
+        return $this->rsm->test_finish($n);
+    }
+    function debug_json() {
+        return ["type" => $this->type, "count" => $this->rsm->comparison()];
+    }
+    function about_reviews() {
+        return $this->rsm->can_test_review() ? self::ABOUT_SELF : self::ABOUT_MANY;
     }
 }

@@ -1,6 +1,5 @@
 <?php
-$ConfSitePATH = preg_replace(',/batch/[^/]+,', '', __FILE__);
-require_once("$ConfSitePATH/src/init.php");
+require_once(preg_replace('/\/batch\/[^\/]+/', '/src/init.php', __FILE__));
 
 $optind = null;
 $arg = getopt("acdmn:t", ["absent", "common", "dups", "modifier-bases", "name:", "terminators"], $optind);
@@ -44,8 +43,7 @@ function parse_emoji_data_stdin() {
 }
 
 function list_duplicate_codes() {
-    global $ConfSitePATH;
-    $emoji = json_decode(file_get_contents("$ConfSitePATH/scripts/emojicodes.json"));
+    $emoji = json_decode(file_get_contents(SiteLoader::find("scripts/emojicodes.json")));
     $codes = $dups = [];
     foreach ((array) $emoji->emoji as $code => $text) {
         if (!isset($codes[$text]))
@@ -60,7 +58,7 @@ function list_duplicate_codes() {
 
 function emoji_to_preferred_code($emoji) {
     $codes = [];
-    $pref = get($emoji, "preferred_codes", []);
+    $pref = $emoji->preferred_codes ?? [];
     foreach ((array) $emoji->emoji as $code => $text) {
         if (!isset($codes[$text])
             || (!in_array($codes[$text], $pref)
@@ -70,22 +68,23 @@ function emoji_to_preferred_code($emoji) {
     return $codes;
 }
 
+/** @return array<string,list<string>> */
 function emoji_to_code_set($emoji) {
     $codes = [];
-    $pref = get($emoji, "preferred_codes", []);
+    $pref = $emoji->preferred_codes ?? [];
     foreach ((array) $emoji->emoji as $code => $text) {
         if (!isset($codes[$text])
-            || in_array($code, $pref))
+            || in_array($code, $pref)) {
             $codes[$text] = [$code];
-        else if (!in_array($codes[$text][0], $pref))
+        } else if (!in_array($codes[$text][0], $pref)) {
             $codes[$text][] = $code;
+        }
     }
     return $codes;
 }
 
 function list_common_emoji() {
-    global $ConfSitePATH;
-    $emoji = json_decode(file_get_contents("$ConfSitePATH/scripts/emojicodes.json"));
+    $emoji = json_decode(file_get_contents(SiteLoader::find("scripts/emojicodes.json")));
     $back = emoji_to_code_set($emoji);
 
     $rankings = json_decode(stream_get_contents(STDIN));
@@ -97,11 +96,13 @@ function list_common_emoji() {
     $fcodes = $fscores = [];
     $slice_score = 0;
     foreach ($rankings as $j) {
-        foreach (get($back, $j->char, []) as $code) {
+        foreach ($back[$j->char] ?? [] as $code) {
             $ch = $code[0];
             if (!isset($fcodes[$ch])
+                || !isset($fscores[$ch])
                 || $j->score >= 0.001 * $total_score
-                || ($j->score >= 0.0001 * $total_score && $fscores[$ch] < 0.001 * $total_score)) {
+                || ($j->score >= 0.0001 * $total_score
+                    && $fscores[$ch] < 0.001 * $total_score)) {
                 if (!isset($fcodes[$ch])) {
                     $fcodes[$ch] = [];
                     $fscores[$ch] = 0;
@@ -124,8 +125,7 @@ function list_common_emoji() {
 }
 
 function list_terminators() {
-    global $ConfSitePATH;
-    $emoji = json_decode(file_get_contents("$ConfSitePATH/scripts/emojicodes.json"));
+    $emoji = json_decode(file_get_contents(SiteLoader::find("scripts/emojicodes.json")));
     $x = [];
     foreach ((array) $emoji->emoji as $text) {
         preg_match('/.\z/u', $text, $m);
@@ -185,8 +185,7 @@ function modifier_base_regex() {
 }
 
 function list_absent($args) {
-    global $ConfSitePATH;
-    $emoji = json_decode(file_get_contents("$ConfSitePATH/scripts/emojicodes.json"));
+    $emoji = json_decode(file_get_contents(SiteLoader::find("scripts/emojicodes.json")));
     $codes = [];
     foreach ((array) $emoji->emoji as $text) {
         $codes[$text] = true;
@@ -207,7 +206,7 @@ function list_absent($args) {
             $j = $m[2] === "" ? $i : hexdec(substr($m[2], 2));
             for (; $i <= $j; ++$i) {
                 if ($m[3] === "Emoji") {
-                    $emoji[$i] = get($codes, $i, false);
+                    $emoji[$i] = $codes[$i] ?? false;
                 } else if ($m[3] === "Emoji_Presentation") {
                     $emoji[$i] = true;
                 } else if ($m[3] === "Emoji_Modifier_Base") {

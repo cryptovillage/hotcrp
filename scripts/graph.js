@@ -1,7 +1,9 @@
 // graph.js -- HotCRP JavaScript library for graph drawing
-// Copyright (c) 2006-2019 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
 
-var hotcrp_graph = (function ($, d3) {
+hotcrp.graph = (function ($, d3) {
+var handle_ui = hotcrp.handle_ui;
+var hoturl = hotcrp.hoturl;
 var BOTTOM_MARGIN = 30;
 var PATHSEG_ARGMAP = {
     m: 2, M: 2, z: 0, Z: 0, l: 2, L: 2, h: 1, H: 1, v: 1, V: 1, c: 6, C: 6,
@@ -71,7 +73,7 @@ function normalize_svg_path(s) {
             preva = res.length ? res[res.length - 1] : null;
             if (copen) {
                 if (cx != cx0 || cy != cy0)
-                    res.push(["L", cx0, cy0]);
+                    res.push(["L", cx, cy, cx0, cy0]);
                 res.push(["Z"]);
                 copen = false;
             }
@@ -176,10 +178,10 @@ function pathNodeMayBeNearer(pathNode, point, dist) {
     }
     // check bounding rectangle of path
     if ("clientX" in point) {
-        var bounds = pathNode.getBoundingClientRect();
-        var dx = point[0] - point.clientX, dy = point[1] - point.clientY;
-        if (oob(bounds.left + dx, bounds.top + dy,
-                bounds.right + dx, bounds.bottom + dy))
+        var bounds = pathNode.getBoundingClientRect(),
+            dx = point[0] - point.clientX, dy = point[1] - point.clientY;
+        if (bounds && oob(bounds.left + dx, bounds.top + dy,
+                          bounds.right + dx, bounds.bottom + dy))
             return false;
     }
     // check path
@@ -322,6 +324,7 @@ function make_axes(svg, xAxis, yAxis, args) {
         .attr("class", "x axis")
         .attr("transform", "translate(0," + args.height + ")")
         .call(xAxis)
+        .attr("font-family", null)
         .attr("font-size", null)
         .attr("fill", null)
         .call(make_rotate_ticks(args.x.rotate_ticks))
@@ -333,6 +336,7 @@ function make_axes(svg, xAxis, yAxis, args) {
     svg.append("g")
         .attr("class", "y axis")
         .call(yAxis)
+        .attr("font-family", null)
         .attr("font-size", null)
         .attr("fill", null)
         .call(make_rotate_ticks(args.y.rotate_ticks))
@@ -401,7 +405,7 @@ function pid_renderer(ps, cc) {
     return a.join(" ");
 }
 
-function clicker(pids) {
+function clicker(pids, event) {
     var m, x, i, url, last_review = null;
     if (!pids)
         return;
@@ -418,18 +422,18 @@ function clicker(pids) {
         x.push(p);
     }
     if (x.length === 1 && pids.length === 1 && last_review !== null)
-        clicker_go(hoturl("paper", {p: x[0], anchor: "r" + last_review}));
+        clicker_go(hoturl("paper", {p: x[0], anchor: "r" + last_review}), event);
     else if (x.length === 1)
-        clicker_go(hoturl("paper", {p: x[0]}));
+        clicker_go(hoturl("paper", {p: x[0]}), event);
     else {
-        x = d3.set(x).values();
+        x = Array.from(new Set(x).values());
         x.sort(pid_sorter);
-        clicker_go(hoturl("search", {q: x.join(" ")}));
+        clicker_go(hoturl("search", {q: x.join(" ")}), event);
     }
 }
 
-function clicker_go(url) {
-    if (d3.event && d3.event.metaKey)
+function clicker_go(url, event) {
+    if (event && event.metaKey)
         window.open(url, "_blank");
     else
         window.location = url;
@@ -440,10 +444,12 @@ function make_axis(ticks) {
         ticks = named_integer_ticks(ticks[1]);
     else if (ticks && ticks[0] === "score")
         ticks = score_ticks(ticks[1], ticks[2], ticks[3]);
+    else if (ticks && ticks[0] === "time")
+        ticks = time_ticks();
     else
         ticks = {type: ticks ? ticks[0] : null};
     return $.extend({
-        ticks: function (extent) {},
+        prepare: function (domain, range) {},
         rewrite: function () {},
         unparse_html: function (value, include_numeric) {
             if (value == Math.floor(value))
@@ -468,10 +474,10 @@ function make_args(selector, args) {
     args = $.extend({top: 20, right: 20, bottom: BOTTOM_MARGIN, left: 50}, args);
     args.x = args.x || {};
     args.y = args.y || {};
-    args.x.ticks = make_axis(args.x.ticks);
-    args.y.ticks = make_axis(args.y.ticks);
     args.width = $(selector).width() - args.left - args.right;
     args.height = 520 - args.top - args.bottom;
+    args.x.ticks = make_axis(args.x.ticks);
+    args.y.ticks = make_axis(args.y.ticks);
     return args;
 }
 
@@ -494,7 +500,7 @@ function graph_cdf(selector, args) {
     // massage data
     var series = args.data;
     if (!series.length) {
-        series = d3.values(series);
+        series = Object.values(series);
         series.sort(function (a, b) {
             return d3.ascending(a.priority || 0, b.priority || 0);
         });
@@ -522,7 +528,7 @@ function graph_cdf(selector, args) {
 
     // axes
     var xAxis = d3.axisBottom(x);
-    args.x.ticks.ticks.call(xAxis, x.domain());
+    args.x.ticks.prepare.call(xAxis, x.domain(), x.range());
     args.x.tick_format && xAxis.tickFormat(args.x.tick_format);
     var yAxis = d3.axisLeft(y);
     var line = d3.line().x(function (d) {return x(d[0]);})
@@ -561,10 +567,10 @@ function graph_cdf(selector, args) {
         .on("mouseout", mouseout);
 
     var hovered_path, hubble;
-    function mousemoved() {
-        var m = d3.mouse(this), p = {distance: 16};
-        m.clientX = d3.event.clientX;
-        m.clientY = d3.event.clientY;
+    function mousemoved(event) {
+        var m = d3.pointer(event), p = {distance: 16};
+        m.clientX = event.clientX;
+        m.clientY = event.clientY;
         for (var i in data)
             if (series[i].label || args.cdf_tooltip_position)
                 p = closestPoint(svg.select("[data-index='" + i + "']").node(), m, p);
@@ -589,7 +595,7 @@ function graph_cdf(selector, args) {
                 hubble.html(label);
             } else
                 hubble.text(u.label);
-            hubble.dir(dir >= 0.25*Math.PI && dir <= 0.75*Math.PI ? "r" : "b")
+            hubble.anchor(dir >= 0.25*Math.PI && dir <= 0.75*Math.PI ? "e" : "s")
                 .at(p[0] + args.left, p[1], this);
         } else if (hubble) {
             hubble = hubble.remove() && null;
@@ -613,7 +619,7 @@ function procrastination_filter(revdata) {
         var d = {d: revdata.reviews[cid], className: "gcdf-many"};
         if ((u = revdata.users[cid]) && u.name)
             d.label = u.name;
-        if (cid && cid == hotcrp_user.cid) {
+        if (cid && cid == siteinfo.user.cid) {
             d.className = "gcdf-highlight";
             d.priority = 1;
         } else if (u && u.light)
@@ -765,7 +771,7 @@ function data_to_scatter(data) {
     if (!$.isArray(data)) {
         for (var i in data)
             i && data[i].forEach(function (d) { d.push(i); });
-        data = d3.merge(d3.values(data));
+        data = d3.merge(Object.values(data));
     }
     return data;
 }
@@ -890,9 +896,9 @@ function graph_scatter(selector, args) {
     axis_domain(y, args.y.extent, expand_extent(ye, true));
 
     var xAxis = d3.axisBottom(x);
-    args.x.ticks.ticks.call(xAxis, xe);
+    args.x.ticks.prepare.call(xAxis, xe, x.range());
     var yAxis = d3.axisLeft(y);
-    args.y.ticks.ticks.call(yAxis, ye);
+    args.y.ticks.prepare.call(yAxis, ye, y.range());
 
     $(selector).on("hotgraphhighlight", highlight);
 
@@ -922,8 +928,8 @@ function graph_scatter(selector, args) {
     }
 
     var hovered_data, hubble;
-    function mousemoved() {
-        var m = d3.mouse(this), p = data.quadtree.gfind(m, 4);
+    function mousemoved(event) {
+        var m = d3.pointer(event), p = data.quadtree.gfind(m, 4);
         if (p && (p.head || p.next))
             p = scatter_union(p);
         if (p != hovered_data) {
@@ -940,7 +946,7 @@ function graph_scatter(selector, args) {
         if (p) {
             hubble = hubble || make_bubble("", {color: "graphtip", "pointer-events": "none"});
             hubble.html(make_tooltip(p[2][0], p[2]))
-                .dir("b")
+                .anchor("s")
                 .near(hovers.node());
         } else if (hubble)
             hubble = hubble.remove() && null;
@@ -952,8 +958,8 @@ function graph_scatter(selector, args) {
         hovered_data = hubble = null;
     }
 
-    function mouseclick() {
-        clicker(hovered_data ? hovered_data[2].map(proj2) : null);
+    function mouseclick(event) {
+        clicker(hovered_data ? hovered_data[2].map(proj2) : null, event);
     }
 
     function highlight(event) {
@@ -1052,9 +1058,9 @@ function graph_bars(selector, args) {
     var gdelta = -(ge[1] + 1) * barwidth / 2;
 
     var xAxis = d3.axisBottom(x);
-    args.x.ticks.ticks.call(xAxis, xe);
+    args.x.ticks.prepare.call(xAxis, xe, x.range());
     var yAxis = d3.axisLeft(y);
-    args.y.ticks.ticks.call(yAxis, ye);
+    args.y.ticks.prepare.call(yAxis, ye, y.range());
 
     function place(sel, close) {
         return sel.attr("d", function (d) {
@@ -1117,7 +1123,7 @@ function graph_bars(selector, args) {
         }
         if (p) {
             hubble = hubble || make_bubble("", {color: "graphtip", "pointer-events": "none"});
-            hubble.html(make_tooltip(p)).dir("h").near(hovers.node());
+            hubble.html(make_tooltip(p)).anchor("h").near(hovers.node());
         }
     }
 
@@ -1127,8 +1133,8 @@ function graph_bars(selector, args) {
         hovered_data = hubble = null;
     }
 
-    function mouseclick() {
-        clicker(hovered_data ? hovered_data[2] : null);
+    function mouseclick(event) {
+        clicker(hovered_data ? hovered_data[2] : null, event);
     }
 };
 
@@ -1195,9 +1201,9 @@ function graph_boxplot(selector, args) {
         barwidth = Math.max(Math.min(barwidth, Math.abs(x(xe[0] + deltae[0]) - x(xe[0])) * 0.5), 6);
 
     var xAxis = d3.axisBottom(x);
-    args.x.ticks.ticks.call(xAxis, xe);
+    args.x.ticks.prepare.call(xAxis, xe, x.range());
     var yAxis = d3.axisLeft(y);
-    args.y.ticks.ticks.call(yAxis, ye);
+    args.y.ticks.prepare.call(yAxis, ye, y.range());
 
     function place_whisker(l, sel) {
         sel.attr("x1", function (d) { return x(d[0]); })
@@ -1343,7 +1349,7 @@ function graph_boxplot(selector, args) {
             hubble = hubble || make_bubble("", {color: "graphtip", "pointer-events": "none"});
             if (!p.th)
                 p.th = make_tooltip(p, p.p, p.d, p.c);
-            hubble.html(p.th).dir("h").near(hovers.filter(".box").node());
+            hubble.html(p.th).anchor("h").near(hovers.filter(".box").node());
         }
     }
 
@@ -1360,7 +1366,7 @@ function graph_boxplot(selector, args) {
             hubble = hubble || make_bubble("", {color: "graphtip", "pointer-events": "none"});
             if (!p.th)
                 p.th = make_tooltip(p[2][0], p[2].map(proj2), p[2].map(proj1), p[3]);
-            hubble.html(p.th).dir("h").near(hovers.filter(".outlier").node());
+            hubble.html(p.th).anchor("h").near(hovers.filter(".outlier").node());
         }
     }
 
@@ -1371,17 +1377,15 @@ function graph_boxplot(selector, args) {
     }
 
     function mouseclick(event) {
-        d3.event = event;
         var s;
         if (!hovered_data)
-            clicker(null);
+            clicker(null, event);
         else if (!hovered_data.q)
-            clicker(hovered_data[2].map(proj2));
+            clicker(hovered_data[2].map(proj2), event);
         else if ((s = args.x.ticks.search(hovered_data[0])))
-            clicker_go(hoturl("search", {q: s}));
+            clicker_go(hoturl("search", {q: s}), event);
         else
-            clicker(hovered_data.p);
-        d3.event = null;
+            clicker(hovered_data.p, event);
     }
 
     function highlight(event) {
@@ -1409,31 +1413,72 @@ function graph_boxplot(selector, args) {
 
 function score_ticks(n, c, sv) {
     var info = make_score_info(n, c, sv), split = 2;
-    function format(extent) {
-        var count = Math.floor(extent[1] * 2) - Math.ceil(extent[0] * 2) + 1;
-        if (count > 11)
-            split = 1, count = Math.floor(extent[1]) - Math.ceil(extent[0]) + 1;
-        if (c)
-            this.ticks(count);
+    return {
+        prepare: function (extent) {
+            var count = Math.floor(extent[1] * 2) - Math.ceil(extent[0] * 2) + 1;
+            if (count > 11) {
+                split = 1;
+                count = Math.floor(extent[1]) - Math.ceil(extent[0]) + 1;
+            }
+            if (c)
+                this.ticks(count);
+        },
+        rewrite: function () {
+            this.selectAll("g.tick text").each(function () {
+                var d = d3.select(this), value = +d.text();
+                d.attr("fill", info.rgb(value));
+                if (c && value)
+                    d.text(info.unparse(value, split));
+            });
+        },
+        unparse_html: function (value, include_numeric) {
+            var t = info.unparse_html(value);
+            if (include_numeric
+                && c
+                && t.charAt(0) === "<"
+                && value !== Math.round(value * 2) / 2)
+                t += " (" + value.toFixed(2).replace(/\.00$/, "") + ")";
+            return t;
+        },
+        type: "score"
+    };
+}
+
+function time_ticks() {
+    function format(value) {
+        if (value < 1000000000) {
+            value = Math.round(value / 8640) / 10;
+            return value + "d";
+        } else {
+            var d = new Date(value * 1000);
+            if (d.getHours() || d.getMinutes())
+                return strftime("%Y-%m-%dT%R", d);
+            else
+                return strftime("%Y-%m-%d", d);
+        }
     }
-    function rewrite() {
-        this.selectAll("g.tick text").each(function () {
-            var d = d3.select(this), value = +d.text();
-            d.attr("fill", info.rgb(value));
-            if (c && value)
-                d.text(info.unparse(value, split));
-        });
-    }
-    function unparse_html(value, include_numeric) {
-        var t = info.unparse_html(value);
-        if (include_numeric && c && t.charAt(0) === "<"
-            && value !== Math.round(value * 2) / 2)
-            t += " (" + value.toFixed(2).replace(/\.00$/, "") + ")";
-        return t;
-    }
-    return { ticks: format, rewrite: rewrite, unparse_html: unparse_html,
-             type: "score" };
-};
+    return {
+        prepare: function (domain, range) {
+            var ddomain, scale;
+            if (domain[0] < 1000000000 || domain[1] < 1000000000) {
+                ddomain = [domain[0] / 86400, domain[1] / 86400];
+                scale = d3.scaleLinear().domain(ddomain).range(range);
+                this.tickValues(scale.ticks().map(function (value) {
+                    return value * 86400;
+                }));
+            } else {
+                ddomain = [new Date(domain[0] * 1000), new Date(domain[1] * 1000)];
+                scale = d3.scaleTime().domain(ddomain).range(range);
+                this.tickValues(scale.ticks().map(function (value) {
+                    return value.getTime() / 1000;
+                }));
+            }
+            this.tickFormat(format);
+        },
+        unparse_html: format,
+        type: "time"
+    };
+}
 
 function get_max_tick_width(axis) {
     return d3.max($(axis.selectAll("g.tick text").nodes()).map(function () {
@@ -1456,6 +1501,10 @@ function get_sample_tick_height(axis) {
 }
 
 function named_integer_ticks(map) {
+    var want_tilt = Object.values(map).length > 30
+        || d3.max(Object.keys(map).map(function (k) { return mtext(k).length; })) > 4;
+    var want_mclasses = Object.keys(map).some(function (k) { return mclasses(k); });
+
     function mtext(value) {
         var m = map[value];
         return m && typeof m === "object" ? m.text : m;
@@ -1464,27 +1513,7 @@ function named_integer_ticks(map) {
         var m = map[value];
         return (m && typeof m === "object" && m.color_classes) || "";
     }
-    function format(extent) {
-        var count = Math.floor(extent[1]) - Math.ceil(extent[0]) + 1;
-        this.ticks(count).tickFormat(mtext);
-    }
-    function unparse_html(value, include_numeric) {
-        var fvalue = Math.round(value);
-        if (Math.abs(value - fvalue) <= 0.05 && map[fvalue]) {
-            var t = text_to_html(mtext(fvalue));
-            // NB `value` might be a bool
-            if (value !== fvalue && include_numeric && typeof value === "number")
-                t += " (" + value.toFixed(2) + ")";
-            return t;
-        } else
-            return value.toFixed(2);
-    }
-    function search(value) {
-        var m = map[value];
-        return (m && typeof m === "object" && m.search) || null;
-    }
 
-    var want_tilt, want_mclasses;
     function rewrite() {
         if (!want_tilt && !want_mclasses)
             return;
@@ -1532,7 +1561,7 @@ function named_integer_ticks(map) {
 
         // prevent label overlap
         if (want_tilt) {
-            var total_height = d3.values(map).length * (example_height * Math.cos(1.13446) + 8);
+            var total_height = Object.values(map).length * (example_height * Math.cos(1.13446) + 8);
             var alternation = Math.ceil(total_height / this.node().getBBox().width - 0.1);
             if (alternation > 1)
                 this.selectAll("g.tick").each(function (i) {
@@ -1541,12 +1570,31 @@ function named_integer_ticks(map) {
                 });
         }
     }
-    want_tilt = d3.values(map).length > 30
-        || d3.max(d3.keys(map).map(function (k) { return mtext(k).length; })) > 4;
-    want_mclasses = d3.keys(map).some(function (k) { return mclasses(k); });
 
-    return { ticks: format, rewrite: rewrite, unparse_html: unparse_html,
-             search: search, type: "named_integer", map: map };
+    return {
+        prepare: function (domain) {
+            var count = Math.floor(domain[1]) - Math.ceil(domain[0]) + 1;
+            this.ticks(count).tickFormat(mtext);
+        },
+        rewrite: rewrite,
+        unparse_html: function (value, include_numeric) {
+            var fvalue = Math.round(value);
+            if (Math.abs(value - fvalue) <= 0.05 && map[fvalue]) {
+                var t = text_to_html(mtext(fvalue));
+                // NB `value` might be a bool
+                if (value !== fvalue && include_numeric && typeof value === "number")
+                    t += " (" + value.toFixed(2) + ")";
+                return t;
+            } else
+                return value.toFixed(2);
+        },
+        search: function (value) {
+            var m = map[value];
+            return (m && typeof m === "object" && m.search) || null;
+        },
+        type: "named_integer",
+        map: map
+    };
 };
 
 function make_rotate_ticks(angle) {

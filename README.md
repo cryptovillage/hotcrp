@@ -1,13 +1,13 @@
 HotCRP Conference Review Software [![Build Status](https://travis-ci.org/kohler/hotcrp.svg?branch=master)](https://travis-ci.org/kohler/hotcrp)
 =================================
 
-HotCRP is the best available software for managing the conference
-review process, including paper submission, review and comment
-management, rebuttals, and the PC meeting. Its main strengths are
-flexibility and ease of use in the review process, especially through
-smart paper search and an extensive tagging facility. It is widely
-used in computer science conferences and for internal review processes
-at several large companies.
+HotCRP is awesome software for managing review processes, especially
+for academic conferences. It supports paper submission, review and
+comment management, rebuttals, and the PC meeting. Its main strengths
+are flexibility and ease of use in the review process, especially
+through smart paper search and an extensive tagging facility. It is
+widely used in computer science conferences and for internal review
+processes at several large companies.
 
 Multitrack conferences with per-track deadlines should use other software.
 
@@ -23,15 +23,15 @@ software:
 
 * Nginx, http://nginx.org/ \
   (You may be able to use another web server that works with PHP.)
-* PHP version 5.6 or higher, http://php.net/
-  - Including MySQL support and php-fpm
+* PHP version 7.0 or higher, http://php.net/
+  - Including MySQL support, php-fpm, php-gmp, and php-intl
 * MySQL version 5 or higher, http://mysql.org/
 * The zip compressor, http://www.info-zip.org/
 * Poppler’s version of pdftohtml, http://poppler.freedesktop.org/ (only
   required for format checking)
 
-You may need to install additional packages, such as php71, php71-fpm,
-php71-mysqlnd, zip, poppler-utils, and sendmail or postfix.
+You may need to install additional packages, such as php73, php73-fpm,
+php73-intl, php73-mysqlnd, zip, poppler-utils, and sendmail or postfix.
 
 Installation
 ------------
@@ -55,14 +55,11 @@ as a guide).
 2. Edit `conf/options.php`, which is annotated to guide you.
 (`lib/createdb.sh` creates this file based on `src/distoptions.php`.)
 
-3. Configure your web server to access HotCRP. The right way to do this
-depends on which server you’re running.
-
-    **Nginx**: Configure Nginx to access `php-fpm` for anything under
-the HotCRP URL path. All accesses should be redirected to `index.php`.
-This example, which would go in a `server` block, makes `/testconf`
-point at a HotCRP installation in /home/kohler/hotcrp (assuming
-`php-fpm` is listening on port 9000):
+3. Configure your web server to access HotCRP. For Nginx, configure Nginx to
+access `php-fpm` for anything under the HotCRP URL path. All accesses
+should be redirected to `index.php`. This example, which would go in a
+`server` block, makes `/testconf` point at a HotCRP installation in
+/home/kohler/hotcrp (assuming `php-fpm` is listening on port 9000):
 
         location /testconf/ {
             fastcgi_pass 127.0.0.1:9000;
@@ -128,10 +125,10 @@ You can set up everything else through the web site itself.
 
   - Uploaded papers and reviews are limited in size by several PHP
     configuration variables, set by default to 15 megabytes in the HotCRP
-    directory’s `.htaccess` (or `.user.ini` if you are using php-fpm).
+    directory’s `.user.ini` (or `.htaccess` if using Apache).
 
   - HotCRP PHP scripts can take a lot of memory, particularly if they're
-    doing things like generating MIME-encoded mail messages.  By default
+    doing things like generating MIME-encoded mail messages. By default
     HotCRP sets the PHP memory limit to 128MB.
 
   - Most HotCRP settings are assigned in the conference database’s
@@ -177,4 +174,5 @@ Eddie Kohler, Harvard
 
 * HotCRP is based on CRP, which was written by Dirk Grunwald,
   University of Colorado
-* [banal by Geoff Voelker, UCSD](http://www.sysnet.ucsd.edu/sigops/banal/)
+* HotCRP’s banal is substantially modified from the original
+  [banal by Geoff Voelker, UCSD](http://www.sysnet.ucsd.edu/sigops/banal/)

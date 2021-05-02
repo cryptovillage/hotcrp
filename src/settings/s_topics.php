@@ -1,6 +1,6 @@
 <?php
 // src/settings/s_topics.php -- HotCRP settings > submission form page
-// Copyright (c) 2006-2019 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class Topics_SettingRenderer {
     static function render(SettingValues $sv) {
@@ -8,38 +8,43 @@ class Topics_SettingRenderer {
         // load topic interests
         $result = $sv->conf->q_raw("select topicId, interest from TopicInterest where interest!=0");
         $interests = [];
-        while (($row = edb_row($result))) {
-            if (!isset($interests[$row[0]]))
+        while (($row = $result->fetch_row())) {
+            if (!isset($interests[$row[0]])) {
                 $interests[$row[0]] = [0, 0];
+            }
             $interests[$row[0]][$row[1] > 0] += 1;
         }
         Dbl::free($result);
 
-        echo "<h3 class=\"settings g\">Topics</h3>\n";
-        echo "<p class=\"settingtext\">Authors select the topics that apply to their submissions. PC members can indicate topics they’re interested in or search using the “topic:” keyword. Use a colon to create topic groups, as in “Systems: Correctness” and “Systems: Performance”.";
-        if ($sv->conf->topic_map())
+        $sv->render_section("Topics", "topics");
+        echo "<p>Authors select the topics that apply to their submissions. PC members can indicate topics they’re interested in or search using the “topic:” keyword. Use a colon to create topic groups, as in “Systems: Correctness” and “Systems: Performance”.";
+        if ($sv->conf->has_topics()) {
             echo " To delete an existing topic, remove its name.";
+        }
         echo "</p>\n", Ht::hidden("has_topics", 1);
 
 
-        if ($sv->conf->topic_map()) {
+        if ($sv->conf->has_topics()) {
             echo '<div class="mg has-copy-topics"><table><thead><tr><th style="text-align:left">';
-            if (!empty($interests))
+            if (!empty($interests)) {
                 echo '<span class="float-right n"># PC interests: </span>';
+            }
             echo '<strong>Current topics</strong></th>';
-            if (!empty($interests))
+            if (!empty($interests)) {
                 echo '<th class="padls">Low</th><th class="padls">High</th>';
+            }
             echo '</tr></thead><tbody>';
-            foreach ($sv->conf->topic_map() as $tid => $tname) {
-                if ($sv->use_req() && isset($sv->req["top$tid"]))
-                    $tname = $sv->req["top$tid"];
+            foreach ($sv->conf->topic_set() as $tid => $tname) {
+                if ($sv->use_req() && $sv->has_reqv("top$tid")) {
+                    $tname = $sv->reqv("top$tid");
+                }
                 echo '<tr><td class="lentry">',
                     Ht::entry("top$tid", $tname, ["size" => 80, "class" => "need-autogrow wide" . ($sv->has_problem_at("top$tid") ? " has-error" : ""), "aria-label" => "Topic name"]),
                     '</td>';
                 if (!empty($interests)) {
-                    $tinterests = get($interests, $tid, array());
-                    echo '<td class="fx plr padls">', (get($tinterests, 0) ? '<span class="topic-2">' . $tinterests[0] . "</span>" : ""), "</td>",
-                        '<td class="fx plr padls">', (get($tinterests, 1) ? '<span class="topic2">' . $tinterests[1] . "</span>" : ""), "</td>";
+                    $tinterests = $interests[$tid] ?? [];
+                    echo '<td class="fx plr padls">', ($tinterests[0] ?? null ? '<span class="topic-2">' . $tinterests[0] . "</span>" : ""), "</td>",
+                        '<td class="fx plr padls">', ($tinterests[1] ?? null ? '<span class="topic2">' . $tinterests[1] . "</span>" : ""), "</td>";
                 }
             }
             echo '</tbody></table>',
@@ -48,7 +53,7 @@ class Topics_SettingRenderer {
         }
 
         echo '<div class="mg"><label for="topnew"><strong>New topics</strong></label> (enter one per line)<br>',
-            Ht::textarea("topnew", $sv->use_req() ? get($sv->req, "topnew") : "", array("cols" => 80, "rows" => 2, "class" => ($sv->has_problem_at("topnew") ? "has-error " : "") . "need-autogrow", "id" => "topnew")), "</div>";
+            Ht::textarea("topnew", $sv->use_req() ? $sv->reqv("topnew") : "", array("cols" => 80, "rows" => 2, "class" => ($sv->has_problem_at("topnew") ? "has-error " : "") . "need-autogrow", "id" => "topnew")), "</div>";
     }
 }
 
@@ -59,57 +64,64 @@ class Topics_SettingParser extends SettingParser {
 
     private function check_topic($t) {
         $t = simplify_whitespace($t);
-        if ($t === "" || !ctype_digit($t))
+        if (!preg_match('/\A(?:\d+\z|[-+,;:]|–|—)/', $t)) {
             return $t;
-        else
+        } else {
             return false;
+        }
     }
 
     function parse(SettingValues $sv, Si $si) {
-        if (isset($sv->req["topnew"]))
-            foreach (explode("\n", $sv->req["topnew"]) as $x) {
+        if ($sv->has_reqv("topnew")) {
+            foreach (explode("\n", $sv->reqv("topnew")) as $x) {
                 $t = $this->check_topic($x);
-                if ($t === false)
-                    $sv->error_at("topnew", "Topic name “" . htmlspecialchars($x) . "” is reserved. Please choose another name.");
-                else if ($t !== "")
+                if ($t === false) {
+                    $sv->error_at("topnew", "Topic name “" . htmlspecialchars(trim($x)) . "” is reserved. Please choose another name.");
+                } else if ($t !== "") {
                     $this->new_topics[] = [$t]; // NB array of arrays
+                }
             }
-        $tmap = $sv->conf->topic_map();
-        foreach ($sv->req as $k => $x)
-            if (strlen($k) > 3 && substr($k, 0, 3) === "top"
-                && ctype_digit(substr($k, 3))) {
-                $tid = (int) substr($k, 3);
+        }
+        $tmap = $sv->conf->topic_set();
+        foreach ($tmap as $tid => $tname) {
+            if (($x = $sv->reqv("top$tid")) !== null) {
                 $t = $this->check_topic($x);
-                if ($t === false)
-                    $sv->error_at($k, "Topic name “" . htmlspecialchars($x) . "” is reserved. Please choose another name.");
-                else if ($t === "")
+                if ($t === false) {
+                    if ($this->check_topic($tname)) {
+                        $sv->error_at("top$tid", "Topic name “" . htmlspecialchars($x) . "” is reserved. Please choose another name.");
+                    }
+                } else if ($t === "") {
                     $this->deleted_topics[] = $tid;
-                else if (isset($tmap[$tid]) && $tmap[$tid] !== $t)
+                } else if ($tname !== $t) {
                     $this->changed_topics[$tid] = $t;
+                }
             }
+        }
         if (!$sv->has_error()) {
-            foreach (["TopicArea", "PaperTopic", "TopicInterest"] as $t)
-                $sv->need_lock[$t] = true;
+            $sv->request_write_lock("TopicArea", "PaperTopic", "TopicInterest");
             return true;
         }
     }
 
     function save(SettingValues $sv, Si $si) {
-        if ($this->new_topics)
+        if ($this->new_topics) {
             $sv->conf->qe("insert into TopicArea (topicName) values ?v", $this->new_topics);
+        }
         if ($this->deleted_topics) {
             $sv->conf->qe("delete from TopicArea where topicId?a", $this->deleted_topics);
             $sv->conf->qe("delete from PaperTopic where topicId?a", $this->deleted_topics);
             $sv->conf->qe("delete from TopicInterest where topicId?a", $this->deleted_topics);
         }
         if ($this->changed_topics) {
-            foreach ($this->changed_topics as $tid => $t)
+            foreach ($this->changed_topics as $tid => $t) {
                 $sv->conf->qe("update TopicArea set topicName=? where topicId=?", $t, $tid);
+            }
         }
-        $sv->conf->invalidate_topics();
-        $has_topics = $sv->conf->fetch_ivalue("select exists (select * from TopicArea)");
-        $sv->save("has_topics", $has_topics ? 1 : null);
-        if ($this->new_topics || $this->deleted_topics || $this->changed_topics)
-            $sv->changes[] = "topics";
+        if ($this->new_topics || $this->deleted_topics || $this->changed_topics) {
+            $has_topics = $sv->conf->fetch_ivalue("select exists (select * from TopicArea)");
+            $sv->save("has_topics", $has_topics ? 1 : null);
+            $sv->mark_diff("topics");
+            $sv->mark_invalidate_caches(["autosearch" => true]);
+        }
     }
 }

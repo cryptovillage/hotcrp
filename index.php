@@ -1,6 +1,6 @@
 <?php
 // index.php -- HotCRP home page
-// Copyright (c) 2006-2019 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
 
 require_once("lib/navigation.php");
 $nav = Navigation::get();
@@ -19,38 +19,46 @@ if ($nav->page === "u") {
     }
 }
 
+function gx_call_requests(Conf $conf, Contact $user, Qrequest $qreq, $group, GroupedExtensions $gx) {
+    $gx->add_xt_checker([$qreq, "xt_allow"]);
+    $reqgj = [];
+    $not_allowed = false;
+    foreach ($gx->members($group, "request_function") as $gj) {
+        if ($gx->allowed($gj->allow_request_if ?? null, $gj)) {
+            $reqgj[] = $gj;
+        } else {
+            $not_allowed = true;
+        }
+    }
+    if ($not_allowed && $qreq->is_post() && !$qreq->valid_token()) {
+        $conf->msg($conf->_i("badpost"), 2);
+    }
+    foreach ($reqgj as $gj) {
+        if ($gx->call_function($gj->request_function, $gj) === false) {
+            break;
+        }
+    }
+}
+
 // handle special pages
 if ($nav->page === "images" || $nav->page === "scripts" || $nav->page === "stylesheets") {
     $_GET["file"] = $nav->page . $nav->path;
     include("cacheable.php");
-    exit;
-} else if ($nav->page === "api" || $nav->page === "cacheable") {
+} else if ($nav->page === "api" || $nav->page === "cacheable" || $nav->page === "scorechart") {
     include("{$nav->page}.php");
-    exit;
-}
-
-require_once("src/initweb.php");
-$page_template = $Conf->page_template($nav->page);
-
-if (!$page_template) {
-    header("HTTP/1.0 404 Not Found");
-    exit;
-}
-if ($page_template->name === "index") {
-    // handle signin/signout -- may change $Me
-    $Me = Home_Partial::signin_requests($Me, $Qreq);
-    // That also got rid of all disabled users.
-
-    $gex = new GroupedExtensions($Me, ["etc/homepartials.json"],
-                                 $Conf->opt("pagePartials"));
-    foreach ($gex->members("home") as $gj)
-        $gex->request($gj, $Qreq, [$Me, $Qreq, $gex, $gj]);
-    $gex->start_render();
-    foreach ($gex->members("home") as $gj)
-        $gex->render($gj, [$Me, $Qreq, $gex, $gj]);
-    $gex->end_render();
-
-    $Conf->footer();
 } else {
-    include($page_template->require);
+    require_once("src/initweb.php");
+    $gx = $Conf->page_partials($Me);
+    $pagej = $gx->get($nav->page);
+    if (!$pagej || str_starts_with($pagej->name, "__")) {
+        header("HTTP/1.0 404 Not Found");
+    } else if ($Me->is_disabled() && !($pagej->allow_disabled ?? false)) {
+        header("HTTP/1.0 403 Forbidden");
+    } else if (isset($pagej->render_php)) {
+        include($pagej->render_php);
+    } else {
+        $gx->set_root($pagej->group)->set_context_args([$Me, $Qreq, $gx]);
+        gx_call_requests($Conf, $Me, $Qreq, $pagej->group, $gx);
+        $gx->render_group($pagej->group, true);
+    }
 }

@@ -1,10 +1,10 @@
 <?php
 // src/settings/s_responses.php -- HotCRP settings > decisions page
-// Copyright (c) 2006-2019 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2021 Eddie Kohler; see LICENSE.
 
 class Responses_SettingParser extends SettingParser {
     static function resp_round_names(Conf $conf) {
-        return explode(" ", $conf->setting_data("resp_rounds", "1"));
+        return explode(" ", $conf->setting_data("resp_rounds") ?? "1");
     }
 
     static function render_name_property(SettingValues $sv, $i) {
@@ -15,8 +15,9 @@ class Responses_SettingParser extends SettingParser {
     static function render_deadline_property(SettingValues $sv, $i) {
         $isuf = $i ? "_$i" : "";
         if ($sv->curv("resp_open$isuf") === 1
-            && ($x = $sv->curv("resp_done$isuf")))
+            && ($x = $sv->curv("resp_done$isuf"))) {
             $sv->conf->settings["resp_open$isuf"] = $x - 7 * 86400;
+        }
         $sv->echo_entry_group("resp_open$isuf", "Start time", ["horizontal" => true]);
         $sv->echo_entry_group("resp_done$isuf", "Hard deadline", ["horizontal" => true]);
         $sv->echo_entry_group("resp_grace$isuf", "Grace period", ["horizontal" => true]);
@@ -28,15 +29,13 @@ class Responses_SettingParser extends SettingParser {
     }
 
     static function render_instructions_property(SettingValues $sv, $i) {
-        $isuf = $i ? "_$i" : "";
-        $sv->echo_message_horizontal("msg.resp_instrux$isuf", "Instructions");
+        $sv->echo_message_horizontal("resp_instrux_$i", "Instructions");
     }
 
     static function render(SettingValues $sv) {
         // Authors' response
-        echo '<div class="settings-g">';
-        $sv->echo_checkbox("resp_active", '<strong>Collect authors’ responses to the reviews<span class="if-response-active">:</span></strong>', ["group_open" => true]);
-        Ht::stash_script('$(function () { $("#cbresp_active").on("change", function () { var ch = $$("cbresp_active").checked; $(".if-response-active").toggleClass("hidden", !ch); }).trigger("change"); })');
+        echo '<div class="form-g">';
+        $sv->echo_checkbox("resp_active", '<strong>Collect authors’ responses to the reviews<span class="if-response-active">:</span></strong>', ["group_open" => true, "class" => "uich js-settings-resp-active"]);
         echo '<div id="auresparea" class="if-response-active',
             $sv->curv("resp_active") ? "" : " hidden",
             '"><hr class="g">', Ht::hidden("has_resp_rounds", 1);
@@ -44,10 +43,11 @@ class Responses_SettingParser extends SettingParser {
         // Response rounds
         if ($sv->use_req()) {
             $rrounds = array(1);
-            for ($i = 1; isset($sv->req["resp_roundname_$i"]); ++$i)
-                $rrounds[$i] = $sv->req["resp_roundname_$i"];
-        } else
+            for ($i = 1; $sv->has_reqv("resp_roundname_$i"); ++$i)
+                $rrounds[$i] = $sv->reqv("resp_roundname_$i");
+        } else {
             $rrounds = self::resp_round_names($sv->conf);
+        }
         $rrounds["n"] = "";
         foreach ($rrounds as $i => $rname) {
             $isuf = $i ? "_$i" : "";
@@ -58,21 +58,24 @@ class Responses_SettingParser extends SettingParser {
             }
             $sv->set_oldv("resp_roundname$isuf", $rname);
 
-            echo '<div id="response', $isuf, '" class="settings-g';
+            echo '<div id="response', $isuf, '" class="form-g';
             if ($i === "n")
                 echo ' hidden';
             echo '">';
             foreach ($sv->group_members("responses/properties") as $gj)
-                if (isset($gj->render_response_property_callback)) {
+                if (isset($gj->render_response_property_function)) {
                     Conf::xt_resolve_require($gj);
-                    call_user_func($gj->render_response_property_callback, $sv, $i, $gj);
+                    call_user_func($gj->render_response_property_function, $sv, $i, $gj);
                 }
             echo "</div>\n";
         }
 
-        echo '<div class="settings-g">',
-            Ht::button("Add response round", ["class" => "ui js-settings-resp-round-new"]),
-            '</div></div></div></div>';
+        if ($sv->editable("resp_roundname")) {
+            echo '<div class="form-g">',
+                Ht::button("Add response round", ["class" => "ui js-settings-resp-round-new"]),
+                '</div>';
+        }
+        echo '</div></div></div>';
     }
 
     function parse(SettingValues $sv, Si $si) {
@@ -82,29 +85,30 @@ class Responses_SettingParser extends SettingParser {
         $roundnames = array(1);
         $roundnames_set = array();
 
-        if (isset($sv->req["resp_roundname"])) {
-            $rname = trim(get_s($sv->req, "resp_roundname"));
-            if ($rname === "" || $rname === "none" || $rname === "1")
-                /* do nothing */;
-            else if (($rerror = Conf::resp_round_name_error($rname)))
+        if ($sv->has_reqv("resp_roundname")) {
+            $rname = trim($sv->reqv("resp_roundname"));
+            if ($rname === "" || $rname === "none" || $rname === "1") {
+                /* do nothing */
+            } else if (($rerror = Conf::resp_round_name_error($rname))) {
                 $sv->error_at("resp_roundname", $rerror);
-            else {
+            } else {
                 $roundnames[0] = $rname;
                 $roundnames_set[strtolower($rname)] = 0;
             }
         }
 
-        for ($i = 1; isset($sv->req["resp_roundname_$i"]); ++$i) {
-            $rname = trim(get_s($sv->req, "resp_roundname_$i"));
-            if ($rname === "" && get($old_roundnames, $i))
+        for ($i = 1; $sv->has_reqv("resp_roundname_$i"); ++$i) {
+            $rname = trim($sv->reqv("resp_roundname_$i"));
+            if ($rname === "" && ($old_roundnames[$i] ?? null)) {
                 $rname = $old_roundnames[$i];
-            if ($rname === "")
+            }
+            if ($rname === "") {
                 continue;
-            else if (($rerror = Conf::resp_round_name_error($rname)))
+            } else if (($rerror = Conf::resp_round_name_error($rname))) {
                 $sv->error_at("resp_roundname_$i", $rerror);
-            else if (get($roundnames_set, strtolower($rname)) !== null)
+            } else if (($roundnames_set[strtolower($rname)] ?? null) !== null) {
                 $sv->error_at("resp_roundname_$i", "Response round name “" . htmlspecialchars($rname) . "” has already been used.");
-            else {
+            } else {
                 $roundnames[] = $rname;
                 $roundnames_set[strtolower($rname)] = $i;
             }
@@ -112,24 +116,32 @@ class Responses_SettingParser extends SettingParser {
 
         foreach ($roundnames_set as $i) {
             $isuf = $i ? "_$i" : "";
-            if (($v = $sv->parse_value($sv->si("resp_open$isuf"))) !== null)
+            if (($v = $sv->parse_value($sv->si("resp_open$isuf"))) !== null) {
                 $sv->save("resp_open$isuf", $v <= 0 ? null : $v);
-            if (($v = $sv->parse_value($sv->si("resp_done$isuf"))) !== null)
+            }
+            if (($v = $sv->parse_value($sv->si("resp_done$isuf"))) !== null) {
                 $sv->save("resp_done$isuf", $v <= 0 ? null : $v);
-            if (($v = $sv->parse_value($sv->si("resp_grace$isuf"))) !== null)
+            }
+            if (($v = $sv->parse_value($sv->si("resp_grace$isuf"))) !== null) {
                 $sv->save("resp_grace$isuf", $v <= 0 ? null : $v);
-            if (($v = $sv->parse_value($sv->si("resp_words$isuf"))) !== null)
+            }
+            if (($v = $sv->parse_value($sv->si("resp_words$isuf"))) !== null) {
                 $sv->save("resp_words$isuf", $v < 0 ? null : $v);
-            if (($v = $sv->parse_value($sv->si("resp_search$isuf"))) !== null)
+            }
+            if (($v = $sv->parse_value($sv->si("resp_search$isuf"))) !== null) {
                 $sv->save("resp_search$isuf", $v !== "" ? $v : null);
-            if (($v = $sv->parse_value($sv->si("msg.resp_instrux$isuf"))) !== null)
-                $sv->save("msg.resp_instrux$isuf", $v);
+            }
+            if (($v = $sv->parse_value($sv->si("resp_instrux_$i"))) !== null) {
+                $sv->save("resp_instrux_$i", $v);
+            }
+            $sv->check_date_before("resp_open$isuf", "resp_done$isuf", false);
         }
 
-        if (count($roundnames) > 1 || $roundnames[0] !== 1)
+        if (count($roundnames) > 1 || $roundnames[0] !== 1) {
             $sv->save("resp_rounds", join(" ", $roundnames));
-        else
+        } else {
             $sv->save("resp_rounds", null);
+        }
         return false;
     }
 }

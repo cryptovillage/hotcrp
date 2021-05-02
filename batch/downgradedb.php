@@ -2,9 +2,7 @@
 // Systematically downgrade a current HotCRP database
 // into a version at schema version 11 (commit b0054f80185d624597d5bbbec0f2eafc73afe69b)
 
-$ConfSitePATH = preg_replace(',/batch/[^/]+,', '', __FILE__);
-require_once("$ConfSitePATH/src/init.php");
-require_once("$ConfSitePATH/lib/getopt.php");
+require_once(preg_replace('/\/batch\/[^\/]+/', '/src/init.php', __FILE__));
 
 $arg = getopt("hn:", array("help", "name:"));
 if (isset($arg["h"]) || isset($arg["help"])) {
@@ -41,7 +39,7 @@ $result = $Conf->qe("select contactId, country, data from ContactInfo where coun
 $qp = $qv = [];
 while (($x = $result->fetch_object())) {
     $qp[] = "($x->contactId,?,?,?,?,?,?)";
-    $data = $x->data ? json_decode($x->data) : (object) [];
+    $data = $x->data ? json_decode((string) $x->data) : (object) [];
     $qv[] = isset($data->address) && isset($data->address[0]) ? $data->address[0] : "";
     $qv[] = isset($data->address) && isset($data->address[1]) ? $data->address[1] : "";
     $qv[] = isset($data->city) ? $data->city : "";
@@ -63,7 +61,7 @@ $Conf->qe("CREATE TABLE `OptionType` (
   PRIMARY KEY  (`optionId`)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8");
 $qp = $qv = [];
-foreach ($Conf->paper_opts->option_list() as $opt) {
+foreach ($Conf->options() as $opt) {
     if ($opt->type === "checkbox") {
         $qp[] = "(?,?,?,?)";
         $qv[] = $opt->id;

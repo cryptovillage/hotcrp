@@ -1,6 +1,5 @@
 <?php
-$ConfSitePATH = preg_replace(',/batch/[^/]+,', '', __FILE__);
-require_once("$ConfSitePATH/src/init.php");
+require_once(preg_replace('/\/batch\/[^\/]+/', '/src/init.php', __FILE__));
 
 $arg = getopt("hfn:", array("help", "force", "name:"));
 if (isset($arg["h"]) || isset($arg["help"])) {
@@ -8,12 +7,12 @@ if (isset($arg["h"]) || isset($arg["help"])) {
     exit(0);
 }
 
-$storageIds = $Conf->active_document_ids();
+$didmap = DocumentInfo::active_document_map($Conf);
 $force = isset($arg["f"]) || isset($arg["force"]);
 
 $result = $Conf->qe_raw("select paperStorageId, paperId, timestamp, mimetype,
         compression, sha1, documentType, filename, infoJson
-        from PaperStorage where paperStorageId not in (" . join(",", $storageIds) . ")
+        from PaperStorage where paperStorageId not in (" . join(",", array_keys($didmap)) . ")
         and paper is not null and paperStorageId>1 order by timestamp");
 $killable = array();
 while (($doc = DocumentInfo::fetch($result, $Conf)))
@@ -31,5 +30,6 @@ if (count($killable)) {
     $Conf->qe_raw("update PaperStorage set paper=NULL where paperStorageId in ("
         . join(",", array_keys($killable)) . ")");
     fwrite(STDOUT, count($killable) . " documents killed.\n");
-} else
+} else {
     fwrite(STDOUT, "Nothing to do\n");
+}

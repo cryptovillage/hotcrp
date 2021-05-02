@@ -1,81 +1,90 @@
 <?php
 // buzzer.php -- HotCRP buzzer page
-// Copyright (c) 2006-2019 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
 // First buzzer version by Nickolai B. Zeldovich
 
 require_once("src/initweb.php");
-$show_papers = true;
 
-// kiosk mode
-if ($Me->is_track_manager()) {
-    $kiosks = (array) ($Conf->setting_json("__tracker_kiosk") ? : array());
+function kiosk_manager(Contact $user, Qrequest $qreq) {
+    $kiosks = (array) ($user->conf->setting_json("__tracker_kiosk") ? : array());
     uasort($kiosks, function ($a, $b) {
         return $a->update_at - $b->update_at;
     });
     $kchange = false;
     // delete old kiosks
     while (!empty($kiosks)
-           && (count($kiosks) > 12 || current($kiosks)->update_at <= $Now - 172800)) {
+           && (count($kiosks) > 12 || current($kiosks)->update_at <= Conf::$now - 172800)) {
         array_shift($kiosks);
         $kchange = true;
         reset($kiosks);
     }
     // look for new kiosks
-    $kiosk_keys = array(null, null);
-    foreach ($kiosks as $k => $kj)
-        if ($kj->update_at >= $Now - 7200)
+    $kiosk_keys = [null, null];
+    foreach ($kiosks as $k => $kj) {
+        if ($kj->update_at >= Conf::$now - 7200)
             $kiosk_keys[$kj->show_papers ? 1 : 0] = $k;
-    for ($i = 0; $i <= 1; ++$i)
+    }
+    for ($i = 0; $i <= 1; ++$i) {
         if (!$kiosk_keys[$i]) {
             $key = hotcrp_random_password();
-            $kiosks[$key] = (object) array("update_at" => $Now, "show_papers" => !!$i);
+            $kiosks[$key] = (object) ["update_at" => Conf::$now, "show_papers" => !!$i];
             $kiosk_keys[$i] = $kchange = $key;
         }
+    }
     // save kiosks
-    if ($kchange)
-        $Conf->save_setting("__tracker_kiosk", 1, $kiosks);
+    if ($kchange) {
+        $user->conf->save_setting("__tracker_kiosk", 1, $kiosks);
+    }
+    // maybe sign out to kiosk
+    if ($qreq->signout_to_kiosk && $qreq->valid_post()) {
+        $user = LoginHelper::logout($user, false);
+        ensure_session(ENSURE_SESSION_REGENERATE_ID);
+        $key = $kiosk_keys[$qreq->buzzer_showpapers ? 1 : 0];
+        $user->conf->redirect_self($qreq, ["__PATH__" => $key]);
+    }
+    return $kiosk_keys;
+}
+if ($Me->is_track_manager()) {
+    $kiosk_keys = kiosk_manager($Me, $Qreq);
 }
 
-if ($Me->is_track_manager() && $Qreq->signout_to_kiosk && $Qreq->post_ok()) {
-    $Me = LoginHelper::logout($Me, false);
-    ensure_session(ENSURE_SESSION_REGENERATE_ID);
-    $Me->set_capability("tracker_kiosk", $kiosk_keys[$Qreq->buzzer_showpapers ? 1 : 0]);
-    $Conf->self_redirect($Qreq);
-}
-
-function kiosk_lookup($key) {
-    global $Conf, $Now;
-    $kiosks = (array) ($Conf->setting_json("__tracker_kiosk") ? : array());
-    if (isset($kiosks[$key]) && $kiosks[$key]->update_at >= $Now - 604800)
+function kiosk_lookup(Conf $conf, $key) {
+    $kiosks = (array) ($conf->setting_json("__tracker_kiosk") ? : []);
+    if (isset($kiosks[$key]) && $kiosks[$key]->update_at >= Conf::$now - 604800) {
         return $kiosks[$key];
-    return null;
+    } else {
+        return null;
+    }
 }
 
 $kiosk = null;
-if (!$Me->has_email()
-    && ($key = Navigation::path_component(0))
-    && ($kiosk = kiosk_lookup($key)))
-    $Me->set_capability("tracker_kiosk", $key);
-else if (($key = $Me->capability("tracker_kiosk")))
-    $kiosk = kiosk_lookup($key);
-
+if (($key = $Qreq->path_component(0))
+    && ($kiosk = kiosk_lookup($Conf, $key))) {
+    $Me->set_capability("@kiosk", $key);
+    CapabilityInfo::set_default_cap_param("kiosk-{$key}", true);
+} else if (($key = $Me->capability("@kiosk"))) {
+    $kiosk = kiosk_lookup($Conf, $key);
+}
 if ($kiosk) {
     $Me->tracker_kiosk_state = $kiosk->show_papers ? 2 : 1;
     $show_papers = $kiosk->show_papers;
+} else {
+    $show_papers = true;
 }
 
 // user
-if (!$Me->isPC && !$Me->tracker_kiosk_state)
+if (!$Me->isPC && !$Me->tracker_kiosk_state) {
     $Me->escape();
+}
 
 
-$Conf->header("Discussion status", "buzzer", ["action_bar" => false, "class" => "hide-tracker"]);
+$Conf->header("Discussion status", "buzzer", ["action_bar" => false, "body_class" => "hide-tracker"]);
 $Conf->stash_hotcrp_pc($Me, true);
 
 echo '<div id="tracker-table" class="demargin" style="margin-top:1em"></div>';
 echo "<audio id=\"tracker-sound\" crossorigin=\"anonymous\" preload=\"auto\"><source src=\"", Ht::$img_base, "buzzer.mp3\"></audio>";
 
-echo Ht::form(hoturl_post("buzzer"));
+echo Ht::form($Conf->hoturl_post("buzzer"));
 echo '<table style="margin-top:3em"><tr>';
 
 // mute button
@@ -92,7 +101,7 @@ echo '<td><button id="tracker-table-mute" type="button" class="foldc" style="pad
 </svg></button></td>';
 
 // show-papers
-if ($Me->has_database_account()) {
+if ($Me->has_account_here()) {
     echo '<td style="padding-left:2em">',
         Ht::checkbox("buzzer_showpapers", 1, $show_papers, ["id" => "tracker-table-showpapers"]),
         "&nbsp;", Ht::label("Show papers"), '</td>';
@@ -115,12 +124,13 @@ if ($Me->is_track_manager()) {
         $Conf->hoturl_absolute("buzzer", ["__PATH__" => $kiosk_keys[0]], Conf::HOTURL_RAW),
         $Conf->hoturl_absolute("buzzer", ["__PATH__" => $kiosk_keys[1]], Conf::HOTURL_RAW)
     ];
-} else if ($kiosk)
+} else if ($kiosk) {
     $buzzer_status["is_kiosk"] = true;
+}
 $buzzer_status["no_discussion"] = $no_discussion . '</div>';
 echo Ht::unstash();
 echo $Conf->make_script_file("scripts/buzzer.js");
-echo Ht::unstash_script('start_buzzer_page(' . json_encode_browser($buzzer_status) . ')');
+echo Ht::unstash_script('hotcrp.start_buzzer_page(' . json_encode_browser($buzzer_status) . ')');
 
 echo "</tr></table></form>\n";
 $Conf->footer();

@@ -57,10 +57,8 @@ $Opt["dbName"] = "FIXME";
 //                   defaults to something like "www-data@yourservername".
 //                   This email address should be connected to a valid mailbox
 //                   or certain spam filters will reject email from HotCRP.
-//   emailCc         Default "Cc:" address for email sent by HotCRP to
-//                   reviewers and via the mail tool. (Does not apply to most
-//                   email automatically sent to submitters.) If not set, the
-//                   default Cc is $Opt["contactEmail"].
+//   emailCc         If set, default "Cc:" address for email sent by HotCRP via
+//                   the mail tool. Does not apply to email sent automatically.
 //   emailReplyTo    If set, default "Reply-To:" address for email sent by
 //                   HotCRP.
 //   sendmailParam   Extra parameters to be passed to your mailer. The default
@@ -107,18 +105,8 @@ $Opt["emailSender"] = null;
 
 // PASSWORD SECURITY
 //
-//   safePasswords   Controls how passwords are stored in the database. If
-//                   false, passwords are stored in plaintext; if true, user-
-//                   chosen passwords are stored as cryptographic hashes with
-//                   random salts, which are less vulnerable to cracking.
-//                   Randomly-generated passwords, such as those generated
-//                   for new accounts, are stored in plaintext for usability
-//                   reasons; set safePasswords to 2 to opportunistically
-//                   upgrade these passwords to cryptographic hashes.
-//   chairHidePasswords  If true, then chairs cannot view or modify other
-//                   users' passwords. Defaults to false.
-
-$Opt["safePasswords"] = 2;
+//   chairHidePasswords  If true, then chairs cannot modify other users'
+//                   passwords. Defaults to false.
 
 
 // PAPER STORAGE
@@ -174,6 +162,8 @@ $Opt["safePasswords"] = 2;
 //                   it defaults to the conference installation.
 //   jqueryUrl       URL for jQuery. Defaults to the local minified jquery.
 //   jqueryCdn       If true, use the jQuery CDN.
+//   phpSuffix       The suffix for generated HotCRP URLs. Usually empty; for
+//                   some configurations, you may want to set it to ".php".
 
 
 // BEHAVIOR OPTIONS

@@ -1,9 +1,9 @@
 <?php
 // src/help/h_ranking.php -- HotCRP help functions
-// Copyright (c) 2006-2019 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
 
 class Ranking_HelpTopic {
-    static function render($hth) {
+    static function render(HelpRenderer $hth) {
         echo "<p>Paper ranking is a way to extract the PC’s preference order for
 submitted papers.  Each PC member ranks the submitted papers, and a voting
 algorithm, <a href=\"http://en.wikipedia.org/wiki/Schulze_method\">the Schulze
@@ -11,7 +11,7 @@ method</a> by default, combines these rankings into a global preference order.</
 
 <p>HotCRP supports ranking through ", $hth->help_link("tags", "tags"), ". The chair chooses
 a tag for ranking—“rank” is a good default—and enters it on ",
-$hth->settings_link("the settings page", "tags"), ".
+$hth->setting_link("the settings page", "tag_rank"), ".
 PC members then rank papers using their private versions of this tag,
 tagging their first preference with “~rank#1”,
 their second preference with “~rank#2”,

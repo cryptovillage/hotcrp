@@ -1,10 +1,9 @@
 <?php
-$ConfSitePATH = preg_replace(',/batch/[^/]+,', '', __FILE__);
+require_once(preg_replace('/\/batch\/[^\/]+/', '/src/siteloader.php', __FILE__));
 
-require_once("$ConfSitePATH/lib/getopt.php");
-$arg = getopt_rest($argv, "hn:qrf:",
+$arg = Getopt::rest($argv, "hn:qrf:",
     ["help", "name:", "filter=f:", "quiet", "disable", "disable-users",
-     "reviews", "match-title", "ignore-pid", "ignore-errors", "add-topics"]);
+     "reviews", "match-title", "ignore-pid", "ignore-errors", "add-topics", "no-log"]);
 if (isset($arg["h"]) || isset($arg["help"])
     || count($arg["_"]) > 1
     || (count($arg["_"]) && $arg["_"][0] !== "-" && $arg["_"][0][0] === "-")) {
@@ -12,252 +11,337 @@ if (isset($arg["h"]) || isset($arg["help"])
 
 Options include:
   --quiet                Don't print progress information.
-  --ignore-errors        Do not exit after first error.
+  --ignore-errors        Don't exit after first error.
   --disable-users        Newly created users are disabled.
   --match-title          Match papers by title if no `pid`.
   --ignore-pid           Ignore `pid` elements in JSON.
   --reviews              Save JSON reviews.
   --add-topics           Add undefined topics to conference.
+  --no-log               Don't add to the action log.
   -f, --filter FUNCTION  Pass through FUNCTION.\n");
     exit(0);
 }
 
-require_once("$ConfSitePATH/src/init.php");
+require_once(SiteLoader::find("src/init.php"));
 
-$file = count($arg["_"]) ? $arg["_"][0] : "-";
-$quiet = isset($arg["q"]) || isset($arg["quiet"]);
-$disable_users = isset($arg["disable"]) || isset($arg["disable-users"]);
-$reviews = isset($arg["r"]) || isset($arg["reviews"]);
-$match_title = isset($arg["match-title"]);
-$ignore_pid = isset($arg["ignore-pid"]);
-$ignore_errors = isset($arg["ignore-errors"]);
-$add_topics = isset($arg["add-topics"]);
-$site_contact = $Conf->site_contact();
-$site_contact->set_overrides(Contact::OVERRIDE_CONFLICT | Contact::OVERRIDE_TIME);
-$tf = new ReviewValues($Conf->review_form(), ["no_notify" => true]);
+class BatchSavePapers {
+    /** @var Conf */
+    public $conf;
+    /** @var Contact */
+    public $user;
+    /** @var ReviewValues */
+    public $tf;
 
-// allow uploading a whole zip archive
-global $ziparchive, $content_file_prefix;
-$ziparchive = $content_file_prefix = null;
+    /** @var bool */
+    public $quiet = false;
+    /** @var bool */
+    public $ignore_errors = false;
+    /** @var bool */
+    public $ignore_pid = false;
+    /** @var bool */
+    public $match_title = false;
+    /** @var bool */
+    public $disable_users = false;
+    /** @var bool */
+    public $reviews = false;
+    /** @var bool */
+    public $add_topics = false;
+    /** @var bool */
+    public $log = true;
 
-if ($file === "-") {
-    $content = stream_get_contents(STDIN);
-    $filepfx = "";
-} else if (str_ends_with(strtolower($file), ".zip")) {
-    $ziparchive = new ZipArchive;
-    $zipfile = $file;
-    $filepfx = "$file: ";
-} else {
-    $content = file_get_contents($file);
-    $filepfx = "$file: ";
-    $content_file_prefix = dirname($file) . "/";
-}
-if (!$ziparchive && $content === false) {
-    fwrite(STDERR, "{$filepfx}Read error\n");
-    exit(1);
-}
+    /** @var string */
+    public $errprefix = "";
+    /** @var list<callable> */
+    public $filters = [];
 
-if (!$ziparchive && str_starts_with($content, "\x50\x4B\x03\x04")) {
-    if (!($tmpdir = tempdir())) {
-        fwrite(STDERR, "Cannot create temporary directory\n");
-        exit(1);
-    } else if (file_put_contents("$tmpdir/data.zip", $content) !== strlen($content)) {
-        fwrite(STDERR, "$tmpdir/data.zip: Cannot write file\n");
-        exit(1);
+    /** @var ?ZipArchive */
+    public $ziparchive;
+    /** @var ?string */
+    public $document_directory;
+
+    /** @var int */
+    public $index = 0;
+    /** @var int */
+    public $nerrors = 0;
+    /** @var int */
+    public $nsuccesses = 0;
+
+    function __construct(Conf $conf) {
+        $this->conf = $conf;
+        $this->user = $conf->root_user();
+        $this->user->set_overrides(Contact::OVERRIDE_CONFLICT | Contact::OVERRIDE_TIME);
+        $this->tf = new ReviewValues($conf->review_form(), ["no_notify" => true]);
     }
-    $ziparchive = new ZipArchive;
-    $zipfile = "$tmpdir/data.zip";
-    $content_file_prefix = null;
-}
-if ($ziparchive) {
-    if ($ziparchive->open($zipfile) !== true) {
-        fwrite(STDERR, "{$filepfx}Invalid zip\n");
-        exit(1);
-    } else if ($ziparchive->numFiles == 0) {
-        fwrite(STDERR, "{$filepfx}Empty zipfile\n");
-        exit(1);
-    }
-    // find common directory prefix
-    $slashpos = strpos($ziparchive->getNameIndex(0), "/");
-    if ($slashpos === false || $slashpos === 0)
-        $dirprefix = "";
-    else {
-        $dirprefix = substr($ziparchive->getNameIndex(0), 0, $slashpos + 1);
-        for ($i = 1; $i < $ziparchive->numFiles; ++$i)
-            if (!str_starts_with($ziparchive->getNameIndex($i), $dirprefix))
-                $dirprefix = "";
-    }
-    $content_file_prefix = $dirprefix;
-    if ($content_file_prefix !== "" && !str_ends_with($content_file_prefix, "/"))
-        $content_file_prefix .= "/";
-    // find "*-data.json" file
-    $data_filename = $json_filename = [];
-    for ($i = 0; $i < $ziparchive->numFiles; ++$i) {
-        $filename = $ziparchive->getNameIndex($i);
-        if (str_starts_with($filename, $dirprefix)) {
-            $dirname = substr($filename, strlen($dirprefix));
-            if (preg_match(',\A[^/]*(?:\A|[-_])data\.json\z,', $dirname))
-                $data_filename[] = $filename;
-            if (str_ends_with($dirname, ".json"))
-                $json_filename[] = $filename;
+
+    function set_args($arg) {
+        $this->quiet = isset($arg["q"]) || isset($arg["quiet"]);
+        $this->ignore_errors = isset($arg["ignore-errors"]);
+        $this->ignore_pid = isset($arg["ignore-pid"]);
+        $this->match_title = isset($arg["match-title"]);
+        $this->disable_users = isset($arg["disable"]) || isset($arg["disable-users"]);
+        $this->add_topics = isset($arg["add-topics"]);
+        $this->reviews = isset($arg["r"]) || isset($arg["reviews"]);
+        $this->log = !isset($arg["no-log"]);
+        $fs = $arg["f"] ?? [];
+        foreach (is_array($fs) ? $fs : [$fs] as $f) {
+            if (($colon = strpos($f, ":")) !== false
+                && $colon + 1 < strlen($f)
+                && $f[$colon + 1] !== ":") {
+                require_once(substr($f, 0, $colon));
+                $f = substr($f, $colon + 1);
+            }
+            $this->filters[] = $f;
         }
     }
-    if (count($data_filename) === 0 && count($json_filename) === 1) {
-        $data_filename = $json_filename;
-    } else if (count($data_filename) !== 1) {
-        fwrite(STDERR, "{$filepfx}Should contain exactly one `*-data.json` file\n");
-        exit(1);
-    }
-    $data_filename = $data_filename[0];
-    $content = $ziparchive->getFromName($data_filename);
-    $filepfx = ($filepfx ? $file : "<stdin>") . "/" . $data_filename . ": ";
-    if ($content === false) {
-        fwrite(STDERR, "{$filepfx}Could not read\n");
-        exit(1);
-    }
-}
 
-if (!isset($arg["f"]))
-    $arg["f"] = [];
-else if (!is_array($arg["f"]))
-    $arg["f"] = [$arg["f"]];
-foreach ($arg["f"] as &$f) {
-    if (($colon = strpos($f, ":")) !== false
-        && $colon + 1 < strlen($f)
-        && $f[$colon + 1] !== ":") {
-        require_once(substr($f, 0, $colon));
-        $f = substr($f, $colon + 1);
+    /** @return string|false */
+    function set_file($file) {
+        // allow uploading a whole zip archive
+        $zipfile = null;
+        if ($file === "-") {
+            $content = stream_get_contents(STDIN);
+            $this->errprefix = "";
+        } else if (str_ends_with(strtolower($file), ".zip")) {
+            $content = false;
+            $this->ziparchive = new ZipArchive;
+            $zipfile = $file;
+            $this->errprefix = "$file: ";
+        } else {
+            $content = file_get_contents($file);
+            $this->document_directory = dirname($file) . "/";
+            $this->errprefix = "$file: ";
+        }
+
+        if (!$this->ziparchive
+            && str_starts_with($content, "\x50\x4B\x03\x04")) {
+            if (!($tmpdir = tempdir())) {
+                throw new Exception("Cannot create temporary directory");
+            } else if (file_put_contents("$tmpdir/data.zip", $content) !== strlen($content)) {
+                throw new Exception("$tmpdir/data.zip: Cannot write file");
+            }
+            $this->ziparchive = new ZipArchive;
+            $zipfile = "$tmpdir/data.zip";
+            $this->document_directory = null;
+        }
+        if ($this->ziparchive) {
+            if ($this->ziparchive->open($zipfile) !== true) {
+                throw new Exception("{$this->errprefix}Invalid zip");
+            } else if ($this->ziparchive->numFiles == 0) {
+                throw new Exception("{$this->errprefix}Empty zipfile");
+            }
+            // find common directory prefix
+            $slashpos = strrpos($this->ziparchive->getNameIndex(0), "/");
+            if ($slashpos === false || $slashpos === 0) {
+                $dirprefix = "";
+            } else {
+                $dirprefix = substr($this->ziparchive->getNameIndex(0), 0, $slashpos + 1);
+                for ($i = 1; $i < $this->ziparchive->numFiles; ++$i) {
+                    $name = $this->ziparchive->getNameIndex($i);
+                    while (!str_starts_with($name, $dirprefix)) {
+                        $slashpos = strrpos($dirprefix, "/", -1);
+                        if ($slashpos === false || $slashpos === 0) {
+                            $dirprefix = "";
+                        } else {
+                            $dirprefix = substr($dirprefix, 0, $slashpos + 1);
+                        }
+                    }
+                }
+            }
+            $this->document_directory = $dirprefix;
+            // find "*-data.json" file
+            $data_filename = $json_filename = [];
+            for ($i = 0; $i < $this->ziparchive->numFiles; ++$i) {
+                $filename = $this->ziparchive->getNameIndex($i);
+                if (str_starts_with($filename, $dirprefix)
+                    && !str_starts_with($filename, "{$dirprefix}.")) {
+                    $dirname = substr($filename, strlen($dirprefix));
+                    if (preg_match('/\A[^\/]*(?:\A|[-_])data\.json\z/', $dirname)) {
+                        $data_filename[] = $filename;
+                    }
+                    if (str_ends_with($dirname, ".json")) {
+                        $json_filename[] = $filename;
+                    }
+                }
+            }
+            if (count($data_filename) === 0 && count($json_filename) === 1) {
+                $data_filename = $json_filename;
+            } else if (count($data_filename) !== 1) {
+                throw new Exception("Should contain exactly one `*-data.json` file");
+            }
+            $content = $this->ziparchive->getFromName($data_filename[0]);
+            $this->errprefix = ($this->errprefix ? $file : "<stdin>") . "/" . $data_filename[0] . ": ";
+        }
+
+        return $content;
     }
-}
-unset($f);
 
-$jp = json_decode($content);
-if ($jp === null)
-    $jp = Json::decode($content); // our JSON decoder provides error positions
-if ($jp === null) {
-    fwrite(STDERR, "{$filepfx}invalid JSON: " . Json::last_error_msg() . "\n");
-    exit(1);
-} else if (!is_object($jp) && !is_array($jp)) {
-    fwrite(STDERR, "{$filepfx}invalid JSON, expected array of objects\n");
-    exit(1);
-}
+    function on_document_import($docj, PaperOption $o, PaperStatus $pstatus) {
+        if (isset($docj->content_file)
+            && is_string($docj->content_file)
+            && $this->ziparchive) {
+            $name = $docj->content_file;
+            $content = $this->ziparchive->getFromName($name);
+            if ($content === false) {
+                $name = $this->document_directory . $docj->content_file;
+                $content = $this->ziparchive->getFromName($name);
+            }
+            if ($content === false) {
+                $pstatus->error_at_option($o, "{$docj->content_file}: Could not read");
+                return false;
+            }
+            $docj->content = $content;
+            $docj->content_file = null;
+        }
+    }
 
-function on_document_import($docj, PaperOption $o, PaperStatus $pstatus) {
-    global $ziparchive, $content_file_prefix;
-    if (isset($docj->content_file)
-        && is_string($docj->content_file)
-        && $ziparchive) {
-        $content = $ziparchive->getFromName($docj->content_file);
-        if ($content === false)
-            $content = $ziparchive->getFromName($content_file_prefix . $docj->content_file);
-        if ($content === false) {
-            $pstatus->error_at_option($o, "{$docj->content_file}: Could not read");
+    function run_one($j) {
+        ++$this->index;
+        if ($this->ignore_pid) {
+            if (isset($j->pid)) {
+                $j->__original_pid = $j->pid;
+            }
+            unset($j->pid, $j->id);
+        }
+        if (!isset($j->pid) && !isset($j->id) && isset($j->title) && is_string($j->title)) {
+            $pids = Dbl::fetch_first_columns("select paperId from Paper where title=?", simplify_whitespace($j->title));
+            if (count($pids) == 1) {
+                $j->pid = (int) $pids[0];
+            }
+        }
+
+        if (isset($j->pid) && is_int($j->pid) && $j->pid > 0) {
+            $pidtext = "#{$j->pid}";
+        } else if (!isset($j->pid) && isset($j->id) && is_int($j->id) && $j->id > 0) {
+            $pidtext = "#{$j->id}";
+        } else if (!isset($j->pid) && !isset($j->id)) {
+            $pidtext = "new paper @{$this->index}";
+        } else {
+            fwrite(STDERR, "paper @{$this->index}: bad pid\n");
+            ++$this->nerrors;
             return false;
         }
-        $docj->content = $content;
-        unset($docj->content_file);
-    }
-}
 
-if (is_object($jp))
-    $jp = array($jp);
-$index = 0;
-$nerrors = 0;
-$nsuccesses = 0;
-foreach ($jp as &$j) {
-    ++$index;
-    if ($ignore_pid) {
-        if (isset($j->pid))
-            $j->__original_pid = $j->pid;
-        unset($j->pid, $j->id);
-    }
-    if (!isset($j->pid) && !isset($j->id) && isset($j->title) && is_string($j->title)) {
-        $pids = Dbl::fetch_first_columns("select paperId from Paper where title=?", simplify_whitespace($j->title));
-        if (count($pids) == 1)
-            $j->pid = (int) $pids[0];
-    }
-
-    if (isset($j->pid) && is_int($j->pid) && $j->pid > 0)
-        $pidtext = "#$j->pid";
-    else if (!isset($j->pid) && isset($j->id) && is_int($j->id) && $j->id > 0)
-        $pidtext = "#$j->id";
-    else if (!isset($j->pid) && !isset($j->id))
-        $pidtext = "new paper @$index";
-    else {
-        fwrite(STDERR, "paper @$index: bad pid\n");
-        ++$nerrors;
-        if (!$ignore_errors)
-            break;
-        else
-            continue;
-    }
-    $title = $titletext = "";
-    if (isset($j->title) && is_string($j->title))
-        $title = simplify_whitespace($j->title);
-    if ($title !== "")
-        $titletext = " (" . UnicodeHelper::utf8_abbreviate($title, 40) . ")";
-
-    foreach ($arg["f"] as $f) {
-        if ($j)
-            $j = call_user_func($f, $j, $Conf, $ziparchive, $content_file_prefix);
-    }
-    if (!$j) {
-        fwrite(STDERR, $pidtext . $titletext . "filtered out\n");
-        continue;
-    }
-
-    if (!$quiet)
-        fwrite(STDERR, $pidtext . $titletext . ": ");
-    $ps = new PaperStatus($Conf, null, ["no_email" => true,
-                                        "disable_users" => $disable_users,
-                                        "add_topics" => $add_topics,
-                                        "content_file_prefix" => $content_file_prefix]);
-    $ps->allow_error_at("topics", true);
-    $ps->allow_error_at("options", true);
-    $ps->on_document_import("on_document_import");
-    $pid = $ps->save_paper_json($j);
-    if ($pid && str_starts_with($pidtext, "new")) {
-        fwrite(STDERR, "-> #" . $pid . ": ");
-        $pidtext = "#$pid";
-    }
-    if (!$quiet)
-        fwrite(STDERR, $pid ? "saved\n" : "failed\n");
-    $prefix = $pidtext . ": ";
-    foreach ($ps->landmarked_messages() as $msg)
-        fwrite(STDERR, $prefix . htmlspecialchars_decode($msg) . "\n");
-    if ($pid)
-        ++$nsuccesses;
-    else {
-        ++$nerrors;
-        if (!$ignore_errors)
-            break;
-    }
-
-    // XXX more validation here
-    if ($pid && isset($j->reviews) && is_array($j->reviews) && $reviews) {
-        $prow = $Conf->fetch_paper($pid, $site_contact);
-        foreach ($j->reviews as $reviewindex => $reviewj) {
-            if ($tf->parse_json($reviewj)
-                && isset($tf->req["reviewerEmail"])
-                && validate_email($tf->req["reviewerEmail"])) {
-                $tf->req["override"] = true;
-                $tf->paperId = $pid;
-                $user_req = Text::analyze_name(["firstName" => get($tf->req, "reviewerFirst"), "lastName" => get($tf->req, "reviewerLast"), "email" => $tf->req["reviewerEmail"], "affiliation" => get($tf->req, "reviewerAffiliation")]);
-                $user_req->disabled = $disable_users;
-                $user = Contact::create($Conf, null, $user_req);
-                $tf->check_and_save($site_contact, $prow, null);
-            } else
-                $tf->msg(null, "invalid review @$reviewindex", MessageSet::ERROR);
+        $title = $titletext = "";
+        if (isset($j->title) && is_string($j->title)) {
+            $title = simplify_whitespace($j->title);
         }
-        foreach ($tf->messages() as $te)
-            fwrite(STDERR, $prefix . htmlspecialchars_decode($te) . "\n");
+        if ($title !== "") {
+            $titletext = " (" . UnicodeHelper::utf8_abbreviate($title, 40) . ")";
+        }
+
+        foreach ($this->filters as $f) {
+            if ($j)
+                $j = call_user_func($f, $j, $this->conf, $this->ziparchive, $this->document_directory);
+        }
+        if (!$j) {
+            fwrite(STDERR, "{$pidtext}{$titletext}filtered out\n");
+            return false;
+        } else if (!$this->quiet) {
+            fwrite(STDERR, "{$pidtext}{$titletext}: ");
+        }
+
+        $ps = new PaperStatus($this->conf, null, [
+            "no_notify" => true,
+            "disable_users" => $this->disable_users,
+            "add_topics" => $this->add_topics,
+            "content_file_prefix" => $this->document_directory
+        ]);
+        $ps->set_allow_error_at("topics", true);
+        $ps->set_allow_error_at("options", true);
+        $ps->on_document_import([$this, "on_document_import"]);
+
+        $pid = $ps->save_paper_json($j);
+        if ($pid && str_starts_with($pidtext, "new")) {
+            fwrite(STDERR, "-> #" . $pid . ": ");
+            $pidtext = "#$pid";
+        }
+        if (!$this->quiet) {
+            fwrite(STDERR, $pid ? ($ps->diffs ? "saved\n" : "unchanged\n") : "failed\n");
+        }
+        // XXX does not change decision
+        $prefix = $pidtext . ": ";
+        foreach ($ps->landmarked_message_texts() as $msg) {
+            fwrite(STDERR, $prefix . htmlspecialchars_decode($msg) . "\n");
+        }
+        if (!$pid) {
+            ++$this->nerrors;
+            return false;
+        }
+
+        // XXX more validation here
+        if ($pid && isset($j->reviews) && is_array($j->reviews) && $this->reviews) {
+            $prow = $this->conf->paper_by_id($pid, $this->user);
+            foreach ($j->reviews as $reviewindex => $reviewj) {
+                if (!$this->tf->parse_json($reviewj)) {
+                    $this->tf->msg_at(null, "review #" . ($reviewindex + 1) . ": invalid review", MessageSet::ERROR);
+                } else if (!isset($this->tf->req["reviewerEmail"])
+                           || !validate_email($this->tf->req["reviewerEmail"])) {
+                    $this->tf->msg_at(null, "review #" . ($reviewindex + 1) . ": invalid reviewer email " . htmlspecialchars($this->tf->req["reviewerEmail"] ?? "<missing>"), MessageSet::ERROR);
+                } else {
+                    $this->tf->req["override"] = true;
+                    $this->tf->paperId = $pid;
+                    $user_req = [
+                        "firstName" => $this->tf->req["reviewerFirst"] ?? "",
+                        "lastName" => $this->tf->req["reviewerLast"] ?? "",
+                        "email" => $this->tf->req["reviewerEmail"],
+                        "affiliation" => $this->tf->req["reviewerAffiliation"] ?? null,
+                        "disabled" => $this->disable_users
+                    ];
+                    $user = Contact::create($this->conf, null, $user_req);
+                    $this->tf->check_and_save($this->user, $prow, null);
+                }
+            }
+            foreach ($this->tf->message_texts() as $te) {
+                fwrite(STDERR, $prefix . htmlspecialchars_decode($te) . "\n");
+            }
+            $this->tf->clear_messages();
+        }
+
+        if ($ps->diffs && $this->log) {
+            $ps->log_save_activity($this->user, "save", "via CLI");
+        }
+        ++$this->nsuccesses;
+        return true;
     }
 
-    // clean up memory, hopefully
-    $ps = $j = null;
+    /** @return 0|1|2 */
+    function run($content) {
+        $jp = json_decode($content);
+        if ($jp === null) {
+            $jp = Json::decode($content); // our JSON decoder provides error positions
+        }
+        if ($jp === null) {
+            fwrite(STDERR, "{$this->errprefix}invalid JSON: " . Json::last_error_msg() . "\n");
+            ++$this->nerrors;
+        } else if (!is_object($jp) && !is_array($jp)) {
+            fwrite(STDERR, "{$this->errprefix}invalid JSON, expected array of objects\n");
+            ++$this->nerrors;
+        } else {
+            $jp = is_object($jp) ? (array) $jp : $jp;
+            foreach (is_object($jp) ? get_object_vars($jp) : $jp as &$j) {
+                $this->run_one(clone $j);
+                if ($this->nerrors && !$this->ignore_errors) {
+                    break;
+                }
+                gc_collect_cycles();
+            }
+        }
+        if ($this->nerrors) {
+            return $this->ignore_errors && $this->nsuccesses ? 2 : 1;
+        } else {
+            return 0;
+        }
+    }
 }
 
-if ($nerrors)
-    exit($ignore_errors && $nsuccesses ? 2 : 1);
-else
-    exit(0);
+$bf = new BatchSavePapers($Conf);
+$bf->set_args($arg);
+try {
+    if (($content = $bf->set_file(count($arg["_"]) ? $arg["_"][0] : "-")) === false) {
+        throw new Exception("Read error");
+    }
+    exit($bf->run($content));
+} catch (Exception $exception) {
+    fwrite(STDERR, $bf->errprefix . $exception->getMessage() . "\n");
+    exit(1);
+}

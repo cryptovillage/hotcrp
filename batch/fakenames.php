@@ -1,7 +1,5 @@
 <?php
-$ConfSitePATH = preg_replace(',/batch/[^/]+,', '', __FILE__);
-require_once("$ConfSitePATH/src/init.php");
-require_once("$ConfSitePATH/lib/getopt.php");
+require_once(preg_replace('/\/batch\/[^\/]+/', '/src/init.php', __FILE__));
 
 $arg = getopt("hn:", array("help", "name:"));
 if (isset($arg["h"]) || isset($arg["help"])) {
@@ -13,20 +11,21 @@ class Fakes {
     private $data = [];
 
     function load($file = null) {
-        global $ConfSitePATH;
-        if ($file === null)
-            $file = "$ConfSitePATH/extra/fakenames.csv";
-        if (($s = file_get_contents($file)) === false)
+        if ($file === null) {
+            $file = SiteLoader::find("extra/fakenames.csv");
+        }
+        if (($s = file_get_contents($file)) === false) {
             return false;
+        }
         $csv = new CsvParser($s);
-        while (($x = $csv->next())) {
+        while (($x = $csv->next_list())) {
             list($name, $type, $count) = $x;
             if ((string) $type === "")
                 continue;
             if (!isset($this->data[$type]))
                 $this->data[$type] = [0];
             $max = $this->data[$type][count($this->data[$type]) - 1];
-            $max += (int) ($count * 10 + 0.5);
+            $max += (int) ((float) $count * 10 + 0.5);
             array_push($this->data[$type], $name, $max);
         }
         return true;
@@ -121,13 +120,9 @@ foreach ($users as $c) {
 
     $qv[] = $a = $fakes->affiliation();
     $qv[] = $fakes->country();
+    $qv[] = " nologin";
 
     $email_map[$c->email] = [$f, $l, $e, $a];
-
-    if ($c->password === "" || $c->password === null)
-        $qv[] = $c->password;
-    else
-        $qv[] = hotcrp_random_password(12);
 
     // XXX collaborators
 }
@@ -138,18 +133,20 @@ $mresult->free_all();
 // process papers
 $result = $Conf->qe("select * from Paper");
 $papers = [];
-while (($p = PaperInfo::fetch($result, null, $Conf)))
+while (($p = PaperInfo::fetch($result, null, $Conf))) {
     $papers[] = $p;
+}
 Dbl::free($result);
 
 $q = $qv = [];
 foreach ($papers as $p) {
     $ax = [];
     foreach ($p->author_list() as $a) {
-        if ($a->email && isset($email_map[strtolower($a->email)]))
+        if ($a->email && isset($email_map[strtolower($a->email)])) {
             $aa = $email_map[strtolower($a->email)];
-        else
+        } else {
             $aa = [$fakes->first(), $fakes->last(), new_fake_email(), $fakes->affiliation()];
+        }
         $ax[] = join("\t", $aa) . "\n";
     }
     $q[] = "update Paper set authorInformation=? where paperId={$p->paperId}";
@@ -167,9 +164,9 @@ while (($x = $result->fetch_object())) {
     $nl = "";
     while (preg_match('/\A(.*?)([^\s\(\)\<\>@\/]+@[^\s\(\)\]\>\/]+\.[A-Za-z]+)(.*)\z/', $l, $m)) {
         $nl .= $m[1];
-        if (isset($email_map[strtolower($m[2])]))
+        if (isset($email_map[strtolower($m[2])])) {
             $nl .= $email_map[strtolower($m[2])][2];
-        else {
+        } else {
             $ne = new_fake_email();
             $email_map[strtolower($m[2])] = [$fakes->first(), $fakes->last(), $ne, $fakes->affiliation()];
             $nl .= $ne;

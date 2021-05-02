@@ -1,6 +1,6 @@
 <?php
 // listactions/la_getdocument.php -- HotCRP helper classes for list actions
-// Copyright (c) 2006-2019 Eddie Kohler; see LICENSE.
+// Copyright (c) 2006-2020 Eddie Kohler; see LICENSE.
 
 class GetDocument_ListAction extends ListAction {
     private $dt;
@@ -8,51 +8,52 @@ class GetDocument_ListAction extends ListAction {
         $this->dt = $fj->dtype;
     }
     static function make_list_action(PaperOption $opt) {
-        $fj = (object) [
+        return new GetDocument_ListAction($opt->conf, self::list_action_json($opt));
+    }
+    static function list_action_json(PaperOption $opt) {
+        return (object) [
             "name" => "get/" . $opt->dtype_name(),
+            "get" => true,
             "dtype" => $opt->id,
-            "selector" => "Documents/" . ($opt->id <= 0 ? pluralize($opt->title) : $opt->title),
-            "position" => $opt->position + ($opt->final ? 0 : 100),
-            "display_if_list_has" => $opt->field_key(),
-            "callback" => "+GetDocument_ListAction"
+            "title" => "Documents/" . $opt->plural_title(),
+            "position" => $opt->display_position(),
+            "display_if" => "listhas:" . $opt->field_key(),
+            "function" => "+GetDocument_ListAction"
         ];
-        return $fj;
     }
-    static function expand($name, Conf $conf, $fj) {
-        if (($o = $conf->paper_opts->find(substr($name, 4)))
-            && $o->is_document())
-            return [self::make_list_action($o)];
-        else
-            return null;
+    static function expand2(GroupedExtensions $gex) {
+        $user = $gex->viewer();
+        foreach ($user->conf->options()->display_fields() as $o) {
+            if ($o->is_document() && $user->can_view_some_option($o))
+                $gex->add(self::list_action_json($o));
+        }
     }
-    static function error_document(PaperOption $opt, PaperInfo $row, $error_html = "") {
-        if (!$error_html)
-            $error_html = $row->conf->_("Submission #%d has no %s.", $row->paperId, $opt->message_title);
-        $x = new DocumentInfo(["documentType" => $opt->id, "paperId" => $row->paperId, "error" => true, "error_html" => $error_html], $row->conf);
-        if (($mimetypes = $opt->mimetypes()) && count($mimetypes) == 1)
-            $x->mimetype = $mimetypes[0]->mimetype;
-        return $x;
-    }
-    function run(Contact $user, $qreq, $ssel) {
-        $downloads = $errors = [];
+    function run(Contact $user, Qrequest $qreq, SearchSelection $ssel) {
         $old_overrides = $user->add_overrides(Contact::OVERRIDE_CONFLICT);
-        $opt = $user->conf->paper_opts->get($this->dt);
-        foreach ($user->paper_set($ssel) as $row) {
-            if (($whyNot = $user->perm_view_paper_option($row, $opt)))
-                $errors[] = self::error_document($opt, $row, whyNotText($whyNot));
-            else if (($doc = $row->document($opt->id)))
-                $downloads[] = $doc;
-            else
-                $errors[] = self::error_document($opt, $row);
+        $opt = $user->conf->checked_option_by_id($this->dt);
+        $dn = $user->conf->download_prefix . pluralx($opt->id <= 0 ? 2 : 1, $opt->dtype_name()) . ".zip";
+        $docset = new DocumentInfoSet($dn);
+        foreach ($ssel->paper_set($user) as $row) {
+            if (($whyNot = $user->perm_view_option($row, $opt))) {
+                $docset->add_error_html($whyNot->unparse_html());
+            } else if (($doc = $row->document($opt->id))) {
+                $docset->add_as($doc, $doc->export_filename());
+            } else {
+                $docset->add_error_html($row->conf->_("Submission #%d has no %s field.", $row->paperId, $opt->title_html()));
+            }
         }
         $user->set_overrides($old_overrides);
-        if (!empty($downloads)) {
-            session_write_close(); // it can take a while to generate the download
-            $downloads = array_merge($downloads, $errors);
-            if ($user->conf->download_documents($downloads, true))
+        if ($docset->is_empty()) {
+            Conf::msg_error(array_merge(["Nothing to download."], $docset->error_texts()));
+        } else {
+            session_write_close();
+            if ($docset->download(DocumentRequest::add_connection_options(["attachment" => true, "single" => true]))) {
+                DocumentInfo::log_download_activity($docset->as_list(), $user);
                 exit;
-        } else if (!empty($errors))
-            Conf::msg_error("Nothing to download.<br />" . join("<br />", array_map(function ($ed) { return $ed->error_html; }, $errors)));
+            } else {
+                Conf::msg_error($docset->error_texts());
+            }
+        }
         // XXX how to return errors?
     }
 }

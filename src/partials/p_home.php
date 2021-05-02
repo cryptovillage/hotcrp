@@ -103,7 +103,7 @@ class Home_Partial {
         $gx->render_group("home/sidebar/info");
         if (($t = ob_get_clean())) {
             echo '<div class="homegrp"><h2 class="home">',
-                $user->conf->_c("home", "Conference information"),
+                $user->conf->_c("home", "Village information"),
                 '</h2><ul>', $t, '</ul></div>';
         }
     }
@@ -120,14 +120,14 @@ class Home_Partial {
     static function render_info_site(Contact $user) {
         if (($site = $user->conf->opt("conferenceSite"))
             && $site !== $user->conf->opt("paperSite")) {
-            echo '<li>', Ht::link("Conference site", $site), '</li>';
+            echo '<li>', Ht::link("Village site", $site), '</li>';
         }
     }
     static function render_info_accepted(Contact $user) {
         assert($user->conf->time_all_author_view_decision());
         if ($user->conf->time_all_author_view_decision()) {
             list($n, $nyes) = $user->conf->count_submitted_accepted();
-            echo '<li>', $user->conf->_("%d papers accepted out of %d submitted.", $nyes, $n), '</li>';
+            echo '<li>', $user->conf->_("%d presentations accepted out of %d submitted.", $nyes, $n), '</li>';
         }
     }
 
@@ -141,7 +141,7 @@ class Home_Partial {
         echo '<div class="homegrp">Welcome to the ', htmlspecialchars($user->conf->full_name()), " submissions site.";
         if (($site = $user->conf->opt("conferenceSite"))
             && $site !== $user->conf->opt("paperSite"))
-            echo " For general conference information, see ", Ht::link(htmlspecialchars($site), htmlspecialchars($site)), ".";
+            echo " For general village information, see ", Ht::link(htmlspecialchars($site), htmlspecialchars($site)), ".";
         echo '</div>';
     }
 
@@ -165,7 +165,7 @@ class Home_Partial {
             $this->render_h2_home('<a class="qq" href="' . $conf->hoturl("search") . '" id="homesearch-label">Search</a>'),
             Ht::form($conf->hoturl("search"), ["method" => "get", "class" => "form-basic-search"]),
             Ht::entry("q", (string) $qreq->q, [
-                "id" => "homeq", "size" => 32, "title" => "Enter paper numbers or search terms",
+                "id" => "homeq", "size" => 32, "title" => "Enter presentation numbers or search terms",
                 "class" => "papersearch need-suggest flex-grow-1",
                 "placeholder" => "(All)", "spellcheck" => false,
                 "aria-labelledby" => "homesearch-label"
@@ -304,10 +304,11 @@ class Home_Partial {
                 echo " <em class=\"deadline\">The review deadline is $d.</em><br>\n";
             }
         }
+
         if ($user->isPC && $user->can_review_any()) {
-            echo '  <span class="hint">As a PC member, you may review <a href="', $conf->hoturl("search", "q=&amp;t=s"), "\">any submitted paper</a>.</span><br>\n";
+            echo '  <span class="hint">As a PC member, you may review <a href="', $conf->hoturl("search", "q=&amp;t=s"), "\">any submitted presentation</a>.</span><br>\n";
         } else if ($user->privChair) {
-            echo '  <span class="hint">As an administrator, you may review <a href="', $conf->hoturl("search", "q=&amp;t=s"), "\">any submitted paper</a>.</span><br>\n";
+            echo '  <span class="hint">As an administrator, you may review <a href="', $conf->hoturl("search", "q=&amp;t=s"), "\">any submitted presentation</a>.</span><br>\n";
         }
 
         if ($this->_my_rinfo) {
@@ -471,12 +472,12 @@ class Home_Partial {
                 }
             } else if (!$conf->time_edit_paper(null)) {
                 $deadlines[] = 'The <a href="' . $conf->hoturl("deadlines") . '">update deadline</a> has passed, but you can still submit.';
-                $time = $conf->unparse_setting_time_span("sub_sub", " to submit papers");
+                $time = $conf->unparse_setting_time_span("sub_sub", " to submit presentations");
                 if ($time != "N/A") {
                     $deadlines[] = "You have until $time.";
                 }
             } else {
-                $time = $conf->unparse_setting_time_span("sub_update", " to submit papers");
+                $time = $conf->unparse_setting_time_span("sub_update", " to submit presentations");
                 if ($time != "N/A") {
                     $deadlines[] = "You have until $time.";
                 }
@@ -495,7 +496,7 @@ class Home_Partial {
             if ($conf->time_after_setting("final_soft") && $plist->has("need_final")) {
                 $deadlines[] = "<strong class=\"overdue\">Final versions are overdue.</strong> They were requested by $time.";
             } else if ($time != "N/A") {
-                $deadlines[] = "Submit final versions of your accepted papers by $time.";
+                $deadlines[] = "Submit final versions of your accepted presentations by $time.";
             }
         }
         if (!empty($deadlines)) {
